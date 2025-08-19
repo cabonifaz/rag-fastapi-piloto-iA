@@ -125,3 +125,8 @@ To add a new LLM Provider: implement LLMPort in app/domain/ports/llm_port.py and
 To add a new Embeddings Provider: implement EmbeddingsPort in app/domain/ports/embeddings_port.py and create a new adapter in app/infrastructure/embeddings/.
 
 To use a different Vector Database: implement VectorStorePort and create a new repository.
+
+The llm models are gonna be from AWS
+The embeddings model is gonna be Amazon Titan Text Embeddings V2
+The LLM model is gonna be meta.llama3-8b-instruct-v1:0
+The vectorial database is gonna be Weaviate Cloud Service (WCS)

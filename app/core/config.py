@@ -1,33 +1,54 @@
-# app/core/config.py
+from pydantic_settings import BaseSettings
+from typing import Optional
 
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-
-class Settings:
-    # Vector DB
-    VECTORDB_URL: str = os.getenv("VECTORDB_URL", "")
-    VECTORDB_API_KEY: str = os.getenv("VECTORDB_API_KEY", "")
-
-    # Embeddings
-    EMBEDDINGS_PROVIDER: str = os.getenv("EMBEDDINGS_PROVIDER", "")
-    EMBEDDINGS_API_KEY: str = os.getenv("EMBEDDINGS_API_KEY", "")
-
-    # LLM
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "")
-    LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
-    LLM_REGION: str = os.getenv("LLM_REGION", "")
-    LLM_MODEL_ID: str = os.getenv("LLM_MODEL_ID", "")
-
-    # Memoria
-    MEMORY_BACKEND: str = os.getenv("MEMORY_BACKEND", "inmemory")
-
-    # Otros
-    APP_NAME: str = os.getenv("APP_NAME", "rag-fastapi")
-    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "dev")
-    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
-
+class Settings(BaseSettings):
+    # API Configuration
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+    api_debug: bool = False
+    api_reload: bool = False
+    
+    # AWS Configuration
+    aws_region: str
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    
+    # Embeddings Configuration
+    embeddings_provider: str
+    embeddings_model_id: str
+    embeddings_region: str
+    embeddings_dimensions: int
+    
+    # LLM Configuration
+    llm_provider: str
+    llm_model_id: str
+    llm_region: str
+    llm_max_tokens: int
+    llm_temperature: float
+    llm_top_p: float
+    
+    # Weaviate Configuration
+    weaviate_url: Optional[str] = None
+    weaviate_api_key: Optional[str] = None
+    weaviate_class_name: str
+    
+    # RAG Configuration
+    rag_max_context_length: int
+    rag_top_k_results: int
+    rag_similarity_threshold: float
+    
+    # Logging
+    log_level: str
+    log_format: str
+    
+    # Rate Limiting
+    rate_limit_requests_per_minute: int
+    
+    # Environment
+    environment: str
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
 
 settings = Settings()
