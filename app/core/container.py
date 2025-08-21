@@ -87,6 +87,19 @@ class DIContainer:
             vectorstore=vectorstore
         )
 
+    def get_full_rag_chat_service(self) -> tuple[ChatService, LLMPort]:
+        """Get chat service with vectorstore AND LLM provider for complete RAG with answer generation."""
+        embeddings_provider = self.get_embeddings_provider()
+        vectorstore = self.get_vectorstore()
+        llm_provider = self.get_llm_provider()
+        
+        chat_service = ChatService(
+            embeddings_provider=embeddings_provider,
+            vectorstore=vectorstore
+        )
+        
+        return chat_service, llm_provider
+
 
 # Global container instance
 container = DIContainer()

@@ -129,8 +129,24 @@ class WeaviateRepository(VectorStorePort):
         """Search for similar vectors using the default class name from settings."""
         from app.core.config import settings
         
+        return await self.search_in_collection(
+            collection_name=settings.weaviate_class_name,
+            query_vector=query_vector,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold
+        )
+
+    async def search_in_collection(
+        self,
+        collection_name: str,
+        query_vector: List[float], 
+        top_k: int = 5,
+        similarity_threshold: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """Search for similar vectors in a specific collection."""
+        
         results = await self.search_by_vector(
-            class_name=settings.weaviate_class_name,
+            class_name=collection_name,
             vector=query_vector,
             top_k=top_k,
             return_properties=["text", "source"],

@@ -38,48 +38,141 @@ class ChatService:
             "status": "success"
         }
 
-    async def process_rag_query(self, user_id: str, message: str) -> Dict[str, Any]:
+    async def process_rag_query(self, user_id: str, message: str, collection: str = None, top_k: int = None, similarity_threshold: float = None, llm_provider=None) -> Dict[str, Any]:
         """
-        Complete RAG flow: embedding generation + vector search + context assembly.
+        Complete RAG flow: embedding generation + vector search + context assembly + LLM answer generation.
         
         Args:
             user_id: User identifier for potential session management
             message: User's question/message
+            llm_provider: Optional LLM provider for answer generation
             
         Returns:
             Dict with answer, context documents, and metadata
         """
+        from app.core.config import settings
+        
         if not self.vectorstore:
             raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
         
-        # Step 1: Generate embedding for the user's message
-        query_embedding = await self.embeddings_provider.embed(message)
+        # Step 1: Use the search_documents method for consistent vector search
+        # Use provided parameters or fall back to environment defaults
+        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
+        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
         
-        # Step 2: Search for relevant documents in the vector database
-        search_results = await self.vectorstore.search(
-            query_vector=query_embedding,
-            top_k=5,
-            similarity_threshold=0.7
+        search_result = await self.search_documents(
+            query=message,
+            collection=collection,
+            top_k=search_top_k,
+            similarity_threshold=search_threshold
         )
         
-        # Step 3: Extract context from search results
+        # Step 2: Extract documents from search result
         context_documents = []
-        for result in search_results:
+        for doc in search_result["documents"]:
             context_documents.append({
-                "content": result.get("content", ""),
-                "source": result.get("metadata", {}).get("source", ""),
-                "distance": result.get("metadata", {}).get("distance", 0.0)
+                "content": doc["content"],
+                "source": doc["source"],
+                "distance": doc["distance"],
+                "relevance_score": doc["relevance_score"]
             })
         
-        # Step 4: Prepare context text for potential LLM usage
+        # Step 3: Prepare context text for LLM
         context_text = "\n\n".join([doc["content"] for doc in context_documents if doc["content"]])
         
+        # Step 4: Generate LLM answer if provider is available
+        answer = None
+        llm_model_used = None
+        
+        if llm_provider and context_text:
+            # Create RAG prompt
+            rag_prompt = f"""You are a helpful assistant. Answer the user's question based on the provided context. If the context doesn't contain relevant information, say so clearly.
+
+Context:
+{context_text}
+
+Question: {message}
+
+Answer:"""
+            
+            try:
+                # Generate answer using LLM
+                answer = await llm_provider.generate(rag_prompt)
+                llm_model_used = settings.llm_model_id
+            except Exception as e:
+                answer = f"Error generating answer: {str(e)}"
+        else:
+            answer = "No LLM provider available or no context found for answer generation."
+        
+        # Step 5: Return complete RAG response
         return {
             "user_id": user_id,
             "message": message,
+            "answer": answer,
             "context_documents": context_documents,
             "context_text": context_text,
             "total_documents_found": len(context_documents),
+            "embedding_dimensions": search_result["embedding_dimensions"],
+            "collection_searched": settings.weaviate_class_name,
+            "llm_model_used": llm_model_used,
+            "search_parameters": search_result["search_parameters"],
+            "status": "success"
+        }
+
+    async def search_documents(self, query: str, collection: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
+        """
+        Basic vector database search implementation.
+        
+        Args:
+            query: Search query text
+            collection: Collection/class name to search in (defaults to config)
+            top_k: Number of results to return (defaults to config)
+            similarity_threshold: Minimum similarity score (defaults to config)
+            
+        Returns:
+            Dict with search results and metadata
+        """
+        from app.core.config import settings
+        
+        if not self.vectorstore:
+            raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for search functionality.")
+        
+        # Use provided values or fall back to config defaults
+        search_collection = collection if collection is not None else settings.weaviate_class_name
+        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
+        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
+        
+        # Step 1: Convert query to embedding
+        query_embedding = await self.embeddings_provider.embed(query)
+        
+        # Step 2: Search vector database in specified collection
+        search_results = await self.vectorstore.search_in_collection(
+            collection_name=search_collection,
+            query_vector=query_embedding,
+            top_k=search_top_k,
+            similarity_threshold=search_threshold
+        )
+        
+        # Step 3: Format results
+        documents = []
+        for result in search_results:
+            documents.append({
+                "content": result.get("content", ""),
+                "source": result.get("metadata", {}).get("source", ""),
+                "distance": result.get("metadata", {}).get("distance", 0.0),
+                "relevance_score": 1.0 - result.get("metadata", {}).get("distance", 0.0)  # Convert distance to relevance
+            })
+        
+        return {
+            "query": query,
+            "documents": documents,
+            "total_found": len(documents),
+            "search_parameters": {
+                "top_k": search_top_k,
+                "similarity_threshold": search_threshold,
+                "embedding_model": settings.embeddings_model_id,
+                "collection": search_collection
+            },
             "embedding_dimensions": len(query_embedding),
             "status": "success"
         }
