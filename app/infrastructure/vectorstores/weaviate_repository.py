@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
 import asyncio
 import weaviate
-
+from weaviate.auth import AuthApiKey
 
 from app.domain.ports.vectorstore_port import VectorStorePort
 
@@ -53,13 +53,17 @@ class WeaviateRepository(VectorStorePort):
         - extra_headers: headers opcionales.
         - skip_init_checks: salta los health checks iniciales si tu red es lenta.
         """
-        auth_config = weaviate.AuthApiKey(api_key=api_key)
+        auth_config = AuthApiKey(api_key=api_key)
         
-        self._client = weaviate.Client(
-            url=url,
-            auth_client_secret=auth_config,
-            additional_headers=extra_headers or {},
-            timeout_config=init_timeout_s
+        # Use proper HTTPS URL format
+        if not url.startswith('https://'):
+            url = f"https://{url}"
+            
+        self._client = weaviate.connect_to_weaviate_cloud(
+            cluster_url=url,
+            auth_credentials=auth_config,
+            headers=extra_headers or {},
+            skip_init_checks=skip_init_checks
         )
 
     async def search_by_vector(
@@ -91,30 +95,24 @@ class WeaviateRepository(VectorStorePort):
         """
 
         def _query_sync() -> List[VectorSearchResult]:
-            query_builder = self._client.query.get(class_name)
+            collection = self._client.collections.get(class_name)
             
-            if return_properties:
-                query_builder = query_builder.with_fields(list(return_properties))
-            
-            query_builder = query_builder.with_near_vector({
-                "vector": list(vector)
-            }).with_limit(top_k)
-            
-            if include_distance:
-                query_builder = query_builder.with_additional(["distance"])
-            
-            result = query_builder.do()
+            response = collection.query.near_vector(
+                near_vector=list(vector),
+                limit=top_k,
+                return_metadata=["distance"] if include_distance else [],
+                return_properties=list(return_properties) if return_properties else None
+            )
             
             results: List[VectorSearchResult] = []
-            if "data" in result and "Get" in result["data"] and class_name in result["data"]["Get"]:
-                for obj in result["data"]["Get"][class_name]:
-                    item: VectorSearchResult = {
-                        "id": obj.get("_additional", {}).get("id", ""),
-                        "properties": {k: v for k, v in obj.items() if not k.startswith("_")},
-                    }
-                    if include_distance and "_additional" in obj and "distance" in obj["_additional"]:
-                        item["distance"] = obj["_additional"]["distance"]
-                    results.append(item)
+            for obj in response.objects:
+                item: VectorSearchResult = {
+                    "id": str(obj.uuid),
+                    "properties": dict(obj.properties) if obj.properties else {},
+                }
+                if include_distance and obj.metadata and obj.metadata.distance is not None:
+                    item["distance"] = obj.metadata.distance
+                results.append(item)
             
             return results
 

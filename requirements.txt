@@ -1,17 +1,17 @@
 # FastAPI and ASGI server
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
 
 # Pydantic for data validation
-pydantic==2.5.0
-pydantic-settings==2.1.0
+pydantic==2.11.7
+pydantic-settings==2.10.1
 
 # AWS SDK for Bedrock integration
-boto3==1.34.0
-botocore==1.34.0
+boto3==1.40.14
+botocore==1.40.14
 
 # Weaviate client for vector database
-weaviate-client==3.25.3
+weaviate-client==4.16.9
 
 # HTTP client for async requests
 httpx==0.25.2

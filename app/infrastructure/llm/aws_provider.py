@@ -37,12 +37,30 @@ class AWSLLMProvider(LLMPort):
     async def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
         """
         Genera texto usando un modelo de AWS Bedrock.
+        Soporta tanto modelos Claude como Llama3.
         """
-        body = json.dumps({
-            "prompt": prompt,
-            "max_tokens_to_sample": max_tokens,
-            "temperature": temperature,
-        })
+        from app.core.config import settings
+        
+        # Use settings for default values
+        max_tokens = max_tokens if max_tokens != 512 else settings.llm_max_tokens
+        temperature = temperature if temperature != 0.7 else settings.llm_temperature
+        
+        # Different request format for different models
+        if "llama3" in self.model_id or "meta.llama" in self.model_id:
+            # Llama3 format
+            body = json.dumps({
+                "prompt": prompt,
+                "max_gen_len": max_tokens,
+                "temperature": temperature,
+                "top_p": getattr(settings, 'llm_top_p', 0.9),
+            })
+        else:
+            # Claude format (legacy)
+            body = json.dumps({
+                "prompt": prompt,
+                "max_tokens_to_sample": max_tokens,
+                "temperature": temperature,
+            })
 
         response = self.client.invoke_model(
             modelId=self.model_id,
@@ -52,4 +70,11 @@ class AWSLLMProvider(LLMPort):
         )
 
         response_body = json.loads(response["body"].read())
-        return response_body.get("completion", "").strip()
+        
+        # Different response format for different models
+        if "llama3" in self.model_id or "meta.llama" in self.model_id:
+            # Llama3 response format
+            return response_body.get("generation", "").strip()
+        else:
+            # Claude response format (legacy)
+            return response_body.get("completion", "").strip()

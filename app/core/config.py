@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     weaviate_url: Optional[str] = None
     weaviate_api_key: Optional[str] = None
     weaviate_class_name: str
+    weaviate_grpc: Optional[str] = None
     
     rag_max_context_length: int
     rag_top_k_results: int

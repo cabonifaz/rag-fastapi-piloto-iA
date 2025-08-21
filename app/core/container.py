@@ -44,7 +44,8 @@ class DIContainer:
         if self._vectorstore is None:
             self._vectorstore = WeaviateRepository(
                 url=settings.vectordb_url,
-                api_key=settings.vectordb_api_key
+                api_key=settings.vectordb_api_key,
+                skip_init_checks=True
             )
         return self._vectorstore
 

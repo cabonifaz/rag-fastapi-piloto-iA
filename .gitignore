@@ -1,4 +1,5 @@
-.env*
+.env
 venv/
-project_plan.md
-test_embeddings.md
+.venv/
+__pycache__/
+*.py[cod]
