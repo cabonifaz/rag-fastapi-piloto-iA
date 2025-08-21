@@ -9,13 +9,19 @@ from app.core.container import container
 router = APIRouter()
 
 
-# Unified Request Schema for all endpoints
+# Request Schema for endpoints that need company-specific search
 class UnifiedRequest(BaseModel):
     user_id: str
     message: str
+    company_id: str                    # Required, for company-specific search
     collection: str = None              # Optional, defaults to env config
     top_k: int = 5                     # Optional, for search endpoints
     similarity_threshold: float = 0.7   # Optional, for search endpoints
+
+# Request Schema for embedding-only endpoints
+class EmbeddingTestRequest(BaseModel):
+    user_id: str
+    message: str
 
 
 # Response Models
@@ -27,7 +33,7 @@ class ChatResponse(BaseModel):
 class EmbeddingTestResponse(BaseModel):
     user_id: str
     message: str
-    model_id: str
+    embedding_model: str
     embedding_dimensions: int
     embedding: List[float]
     status: str
@@ -35,7 +41,16 @@ class EmbeddingTestResponse(BaseModel):
 
 class ContextDocument(BaseModel):
     content: str
-    source: str
+    # Database parameters (matching CargaConocimiento_iA schema)
+    company_id: str
+    doc_id: str
+    chunk_id: str
+    page_start: int
+    page_end: int
+    char_start: int
+    char_end: int
+    token_count: int
+    # Search metadata
     distance: float
     relevance_score: float
 
@@ -56,7 +71,16 @@ class RAGResponse(BaseModel):
 
 class SearchDocument(BaseModel):
     content: str
-    source: str
+    # Database parameters (matching CargaConocimiento_iA schema)
+    company_id: str
+    doc_id: str
+    chunk_id: str
+    page_start: int
+    page_end: int
+    char_start: int
+    char_end: int
+    token_count: int
+    # Search metadata
     distance: float
     relevance_score: float
 
@@ -103,6 +127,7 @@ async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(g
     result = await chat_service.process_rag_query(
         user_id=request.user_id, 
         message=request.message,
+        company_id=request.company_id,
         collection=request.collection,
         top_k=request.top_k,
         similarity_threshold=request.similarity_threshold,
@@ -113,7 +138,7 @@ async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(g
 
 
 @router.post("/chat-test", response_model=EmbeddingTestResponse)
-async def chat_test_endpoint(request: UnifiedRequest, chat_service: ChatService = Depends(get_chat_service)):
+async def chat_test_endpoint(request: EmbeddingTestRequest, chat_service: ChatService = Depends(get_chat_service)):
     """
     Dedicated endpoint for testing embeddings model only.
     Returns detailed embedding information for testing purposes.
@@ -151,6 +176,7 @@ async def search_endpoint(request: UnifiedRequest, chat_service: ChatService = D
     # Perform vector search using ChatService
     result = await chat_service.search_documents(
         query=request.message,  # Use 'message' field consistently
+        company_id=request.company_id,
         collection=request.collection,
         top_k=request.top_k,
         similarity_threshold=request.similarity_threshold

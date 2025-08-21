@@ -32,7 +32,7 @@ class ChatService:
         
         return {
             "message": text,
-            "model_id": model_id,
+            "embedding_model": model_id,
             "embedding_dimensions": len(embedding),
             "embedding": embedding,
             "status": "success"
@@ -119,13 +119,14 @@ Answer:"""
             "status": "success"
         }
 
-    async def search_documents(self, query: str, collection: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
+    async def search_documents(self, query: str, company_id: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
         """
         Basic vector database search implementation.
         
         Args:
             query: Search query text
-            collection: Collection/class name to search in (defaults to config)
+            company_id: Company identifier for filtering results
+            collection: Collection/class name to search in (defaults to config or company_id)
             top_k: Number of results to return (defaults to config)
             similarity_threshold: Minimum similarity score (defaults to config)
             
@@ -138,29 +139,47 @@ Answer:"""
             raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for search functionality.")
         
         # Use provided values or fall back to config defaults
-        search_collection = collection if collection is not None else settings.weaviate_class_name
+        # If company_id is provided and no collection specified, use company_id as collection name
+        if collection is not None:
+            search_collection = collection
+        elif company_id is not None:
+            search_collection = company_id  # Use company_id as collection name
+        else:
+            search_collection = settings.weaviate_class_name
+            
         search_top_k = top_k if top_k is not None else settings.rag_top_k_results
         search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
         
         # Step 1: Convert query to embedding
         query_embedding = await self.embeddings_provider.embed(query)
         
-        # Step 2: Search vector database in specified collection
+        # Step 2: Search vector database in specified collection with company filtering (no error handling)
         search_results = await self.vectorstore.search_in_collection(
             collection_name=search_collection,
             query_vector=query_embedding,
             top_k=search_top_k,
-            similarity_threshold=search_threshold
+            similarity_threshold=search_threshold,
+            company_id=company_id
         )
         
         # Step 3: Format results
         documents = []
         for result in search_results:
+            metadata = result.get("metadata", {})
             documents.append({
                 "content": result.get("content", ""),
-                "source": result.get("metadata", {}).get("source", ""),
-                "distance": result.get("metadata", {}).get("distance", 0.0),
-                "relevance_score": 1.0 - result.get("metadata", {}).get("distance", 0.0)  # Convert distance to relevance
+                # All database parameters (matching CargaConocimiento_iA schema)
+                "company_id": metadata.get("company_id", ""),
+                "doc_id": metadata.get("doc_id", ""),
+                "chunk_id": metadata.get("chunk_id", ""),
+                "page_start": metadata.get("page_start"),
+                "page_end": metadata.get("page_end"),
+                "char_start": metadata.get("char_start"),
+                "char_end": metadata.get("char_end"),
+                "token_count": metadata.get("token_count"),
+                # Search metadata
+                "distance": metadata.get("distance", 0.0),
+                "relevance_score": metadata.get("relevance_score", 1.0 - metadata.get("distance", 0.0))
             })
         
         return {
@@ -171,7 +190,8 @@ Answer:"""
                 "top_k": search_top_k,
                 "similarity_threshold": search_threshold,
                 "embedding_model": settings.embeddings_model_id,
-                "collection": search_collection
+                "collection": search_collection,
+                "company_id": company_id
             },
             "embedding_dimensions": len(query_embedding),
             "status": "success"

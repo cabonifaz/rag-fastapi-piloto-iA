@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
 import asyncio
 import weaviate
-from weaviate.auth import AuthApiKey
 
 from app.domain.ports.vectorstore_port import VectorStorePort
 
@@ -53,18 +52,30 @@ class WeaviateRepository(VectorStorePort):
         - extra_headers: headers opcionales.
         - skip_init_checks: salta los health checks iniciales si tu red es lenta.
         """
-        auth_config = AuthApiKey(api_key=api_key)
-        
         # Use proper HTTPS URL format
         if not url.startswith('https://'):
             url = f"https://{url}"
             
-        self._client = weaviate.connect_to_weaviate_cloud(
-            cluster_url=url,
-            auth_credentials=auth_config,
-            headers=extra_headers or {},
-            skip_init_checks=skip_init_checks
-        )
+        # Check what weaviate version is available and use appropriate connection
+        try:
+            # Try v4 connection (weaviate-client >= 4.0)
+            if hasattr(weaviate, 'connect_to_weaviate_cloud'):
+                self._client = weaviate.connect_to_weaviate_cloud(
+                    cluster_url=url,
+                    auth_credentials=weaviate.auth.AuthApiKey(api_key),
+                    headers=extra_headers or {},
+                    skip_init_checks=skip_init_checks
+                )
+            else:
+                raise AttributeError("v4 method not found")
+        except (AttributeError, ModuleNotFoundError):
+            # Fallback to v3 connection (weaviate-client < 4.0)
+            self._client = weaviate.Client(
+                url=url,
+                auth_client_secret=weaviate.AuthApiKey(api_key=api_key),
+                additional_headers=extra_headers or {},
+                timeout_config=(5, 15)
+            )
 
     async def search_by_vector(
         self,
@@ -95,28 +106,68 @@ class WeaviateRepository(VectorStorePort):
         """
 
         def _query_sync() -> List[VectorSearchResult]:
-            collection = self._client.collections.get(class_name)
-            
-            response = collection.query.near_vector(
-                near_vector=list(vector),
-                limit=top_k,
-                return_metadata=["distance"] if include_distance else [],
-                return_properties=list(return_properties) if return_properties else None
-            )
-            
-            results: List[VectorSearchResult] = []
-            for obj in response.objects:
-                item: VectorSearchResult = {
-                    "id": str(obj.uuid),
-                    "properties": dict(obj.properties) if obj.properties else {},
+            print(f"DEBUG: Attempting v4 client query on collection: {class_name}")
+            try:
+                # v4 client method
+                collection = self._client.collections.get(class_name)
+                
+                # First try a simple get to see if collection has any data
+                simple_response = collection.query.fetch_objects(limit=1)
+                print(f"DEBUG: Collection exists with {len(simple_response.objects)} objects found in simple query")
+                
+                # Build query with optional filters
+                query_kwargs = {
+                    "near_vector": list(vector),
+                    "limit": top_k,
+                    "return_metadata": ["distance"] if include_distance else [],
                 }
-                if include_distance and obj.metadata and obj.metadata.distance is not None:
-                    item["distance"] = obj.metadata.distance
-                results.append(item)
-            
-            return results
+                
+                # Only specify properties if they're provided
+                if return_properties:
+                    query_kwargs["return_properties"] = list(return_properties)
+                
+                # Add filters if provided
+                if filters:
+                    query_kwargs["where"] = filters
+                
+                print(f"DEBUG: Vector search with args: {query_kwargs.keys()}")
+                response = collection.query.near_vector(**query_kwargs)
+                print(f"DEBUG: Vector search returned {len(response.objects)} objects")
+                
+                results: List[VectorSearchResult] = []
+                for obj in response.objects:
+                    item: VectorSearchResult = {
+                        "id": str(obj.uuid),
+                        "properties": dict(obj.properties) if obj.properties else {},
+                    }
+                    if include_distance and obj.metadata and obj.metadata.distance is not None:
+                        item["distance"] = obj.metadata.distance
+                    results.append(item)
+                
+                return results
+                
+            except Exception as e:
+                print(f"DEBUG: v4 query failed with error: {e}")
+                return []
 
         return await asyncio.to_thread(_query_sync)
+
+    async def collection_exists(self, collection_name: str) -> bool:
+        """Check if a collection exists in Weaviate."""
+        def _check_collection() -> bool:
+            try:
+                # Try v4 client method
+                if hasattr(self._client, 'collections'):
+                    return self._client.collections.exists(collection_name)
+                # Try v3 client method
+                else:
+                    schema = self._client.schema.get()
+                    class_names = [cls["class"] for cls in schema.get("classes", [])]
+                    return collection_name in class_names
+            except Exception:
+                return False
+        
+        return await asyncio.to_thread(_check_collection)
 
     async def search(
         self, 
@@ -139,32 +190,63 @@ class WeaviateRepository(VectorStorePort):
         collection_name: str,
         query_vector: List[float], 
         top_k: int = 5,
-        similarity_threshold: Optional[float] = None
+        similarity_threshold: Optional[float] = None,
+        company_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Search for similar vectors in a specific collection."""
+        """Search for similar vectors in a specific collection with optional company filtering."""
         
+        # Remove all error handling to see what fails
+        # Temporarily disable company_id filtering for debugging
+        filters = None
+        # if company_id:
+        #     filters = {
+        #         "path": ["company_id"],
+        #         "operator": "Equal",
+        #         "valueText": company_id
+        #     }
+        
+        # Return all actual properties from the database
         results = await self.search_by_vector(
             class_name=collection_name,
             vector=query_vector,
             top_k=top_k,
-            return_properties=["text", "source"],
+            return_properties=["text", "company_id", "doc_id", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
+            filters=filters,
             include_distance=True
         )
         
+        print(f"DEBUG: Before filtering - {len(results)} results")
+        for i, r in enumerate(results[:2]):  # Show first 2 results
+            print(f"DEBUG: Result {i}: distance={r.get('distance')}, props_keys={list(r.get('properties', {}).keys())}")
+        
         if similarity_threshold is not None:
             results = [r for r in results if r.get("distance", 1.0) <= similarity_threshold]
+            print(f"DEBUG: After similarity filter ({similarity_threshold}) - {len(results)} results")
         
-        return [
-            {
+        formatted_results = []
+        for r in results:
+            formatted_result = {
                 "id": r["id"],
                 "content": r["properties"].get("text", ""),
                 "metadata": {
-                    "source": r["properties"].get("source", ""),
-                    "distance": r.get("distance")
+                    # All stored database parameters (based on actual CargaConocimiento_iA schema)
+                    "company_id": r["properties"].get("company_id", ""),
+                    "doc_id": r["properties"].get("doc_id", ""),
+                    "chunk_id": r["properties"].get("chunk_id", ""),
+                    "page_start": r["properties"].get("page_start"),
+                    "page_end": r["properties"].get("page_end"),
+                    "char_start": r["properties"].get("char_start"),
+                    "char_end": r["properties"].get("char_end"),
+                    "token_count": r["properties"].get("token_count"),
+                    # Search metadata
+                    "distance": r.get("distance"),
+                    "relevance_score": 1.0 - r.get("distance", 0.0) if r.get("distance") is not None else None
                 }
             }
-            for r in results
-        ]
+            formatted_results.append(formatted_result)
+        
+        print(f"DEBUG: Final formatted results: {len(formatted_results)}")
+        return formatted_results
 
     async def health_check(self) -> bool:
         """Check if the vector store is healthy."""
@@ -174,7 +256,16 @@ class WeaviateRepository(VectorStorePort):
         """Ping simple del cluster."""
         def _is_ready() -> bool:
             try:
-                return self._client.is_ready()
+                # Try v4 client method
+                if hasattr(self._client, 'is_ready'):
+                    return self._client.is_ready()
+                # Try v3 client method
+                elif hasattr(self._client, 'is_live'):
+                    return self._client.is_live()
+                else:
+                    # Fallback test query
+                    self._client.schema.get()
+                    return True
             except Exception:
                 return False
 
