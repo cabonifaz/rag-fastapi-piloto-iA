@@ -1,5 +1,3 @@
-# app/domain/ports/embeddings_port.py
-
 from abc import ABC, abstractmethod
 from typing import List
 

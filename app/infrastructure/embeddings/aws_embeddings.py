@@ -1,5 +1,3 @@
-# app/infrastructure/embeddings/aws_embeddings.py
-
 import boto3
 import json
 from typing import List, Optional

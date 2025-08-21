@@ -1,41 +1,18 @@
-# app/infrastructure/vectorstores/weaviate_repository.py
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
 import asyncio
-
 import weaviate
-from weaviate.classes.init import Auth, AdditionalConfig, Timeout
-from weaviate.classes.query import MetadataQuery
-from weaviate.classes.filters import Filter as WeaviateFilter  # opcional, para filtros avanzados
 
 
-# ===== Puertos (importa el real si ya existe en tu proyecto) ==================
-try:
-    from app.domain.ports.vector_store_port import VectorStorePort, VectorSearchResult
-except Exception:
-    class VectorSearchResult(TypedDict, total=False):
-        id: str
-        properties: Dict[str, Any]
-        distance: Optional[float]
+from app.domain.ports.vectorstore_port import VectorStorePort
 
-    class VectorStorePort:  # Protocolo mínimo de referencia
-        async def search_by_vector(  # type: ignore[override]
-            self,
-            class_name: str,
-            vector: Sequence[float],
-            top_k: int = 5,
-            return_properties: Optional[Sequence[str]] = None,
-            filters: Optional[WeaviateFilter] = None,
-            target_vector: Optional[str] = None,
-            tenant: Optional[str] = None,
-            include_distance: bool = True,
-        ) -> List[VectorSearchResult]:
-            ...
+class VectorSearchResult(TypedDict, total=False):
+    id: str
+    properties: Dict[str, Any]
+    distance: Optional[float]
 
-
-# ===== Repositorio Weaviate ===================================================
 class WeaviateRepository(VectorStorePort):
     """
     Adaptador de salida para Weaviate (solo lectura/búsqueda).
@@ -72,28 +49,26 @@ class WeaviateRepository(VectorStorePort):
         Parámetros:
         - url: Endpoint del cluster (Weaviate Cloud/managed).
         - api_key: API key de Weaviate (Admin/Client según tu cluster).
-        - init_timeout_s: timeout para checks iniciales (gRPC puede requerir ajuste).
-        - extra_headers: headers opcionales (p. ej. claves de terceros si el cluster las requiere).
+        - init_timeout_s: timeout para checks iniciales.
+        - extra_headers: headers opcionales.
         - skip_init_checks: salta los health checks iniciales si tu red es lenta.
         """
-        additional_config = AdditionalConfig(timeout=Timeout(init=init_timeout_s))
-
-        self._client = weaviate.connect_to_weaviate_cloud(
-            cluster_url=url,
-            auth_credentials=Auth.api_key(api_key),
-            additional_config=additional_config if not skip_init_checks else None,
-            skip_init_checks=skip_init_checks,
-            headers=extra_headers,
+        auth_config = weaviate.AuthApiKey(api_key=api_key)
+        
+        self._client = weaviate.Client(
+            url=url,
+            auth_client_secret=auth_config,
+            additional_headers=extra_headers or {},
+            timeout_config=init_timeout_s
         )
 
-    # ---------- API pública (puerto) ----------
     async def search_by_vector(
         self,
         class_name: str,
         vector: Sequence[float],
         top_k: int = 5,
         return_properties: Optional[Sequence[str]] = None,
-        filters: Optional[WeaviateFilter] = None,
+        filters: Optional[Dict[str, Any]] = None,
         target_vector: Optional[str] = None,
         tenant: Optional[str] = None,
         include_distance: bool = True,
@@ -106,7 +81,7 @@ class WeaviateRepository(VectorStorePort):
             vector: embedding de consulta (mismo espacio que tus datos).
             top_k: máximo de objetos a recuperar.
             return_properties: lista de propiedades a devolver (p. ej. ["title","text","url"]).
-            filters: filtro opcional (weaviate.classes.filters.Filter.*).
+            filters: filtro opcional.
             target_vector: si usas 'named vectors', especifica cuál buscar.
             tenant: identificador del tenant si la colección es multi-tenant.
             include_distance: si True, pide distancia en metadatos.
@@ -116,37 +91,78 @@ class WeaviateRepository(VectorStorePort):
         """
 
         def _query_sync() -> List[VectorSearchResult]:
-            collection = self._client.collections.get(class_name, tenant=tenant)
-
-            # Metadata opcional (distancia)
-            metadata = MetadataQuery(distance=True) if include_distance else None
-
-            resp = collection.query.near_vector(
-                near_vector=vector,
-                limit=top_k,
-                return_properties=list(return_properties) if return_properties else [],
-                return_metadata=metadata,
-                filters=filters,
-                target_vector=target_vector,  # requerido si usas named vectors
-            )
-
+            query_builder = self._client.query.get(class_name)
+            
+            if return_properties:
+                query_builder = query_builder.with_fields(list(return_properties))
+            
+            query_builder = query_builder.with_near_vector({
+                "vector": list(vector)
+            }).with_limit(top_k)
+            
+            if include_distance:
+                query_builder = query_builder.with_additional(["distance"])
+            
+            result = query_builder.do()
+            
             results: List[VectorSearchResult] = []
-            for obj in resp.objects or []:
-                results.append(
-                    {
-                        "id": str(obj.uuid),
-                        "properties": obj.properties or {},
-                        "distance": getattr(obj.metadata, "distance", None) if include_distance else None,
+            if "data" in result and "Get" in result["data"] and class_name in result["data"]["Get"]:
+                for obj in result["data"]["Get"][class_name]:
+                    item: VectorSearchResult = {
+                        "id": obj.get("_additional", {}).get("id", ""),
+                        "properties": {k: v for k, v in obj.items() if not k.startswith("_")},
                     }
-                )
+                    if include_distance and "_additional" in obj and "distance" in obj["_additional"]:
+                        item["distance"] = obj["_additional"]["distance"]
+                    results.append(item)
+            
             return results
 
         return await asyncio.to_thread(_query_sync)
 
+    async def search(
+        self, 
+        query_vector: List[float], 
+        top_k: int = 5,
+        similarity_threshold: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """Search for similar vectors using the default class name from settings."""
+        from app.core.config import settings
+        
+        results = await self.search_by_vector(
+            class_name=settings.weaviate_class_name,
+            vector=query_vector,
+            top_k=top_k,
+            return_properties=["text", "source"],
+            include_distance=True
+        )
+        
+        if similarity_threshold is not None:
+            results = [r for r in results if r.get("distance", 1.0) <= similarity_threshold]
+        
+        return [
+            {
+                "id": r["id"],
+                "content": r["properties"].get("text", ""),
+                "metadata": {
+                    "source": r["properties"].get("source", ""),
+                    "distance": r.get("distance")
+                }
+            }
+            for r in results
+        ]
+
+    async def health_check(self) -> bool:
+        """Check if the vector store is healthy."""
+        return await self.health()
+
     async def health(self) -> bool:
         """Ping simple del cluster."""
         def _is_ready() -> bool:
-            return bool(self._client.is_ready())
+            try:
+                return self._client.is_ready()
+            except Exception:
+                return False
 
         return await asyncio.to_thread(_is_ready)
 
@@ -155,14 +171,13 @@ class WeaviateRepository(VectorStorePort):
         if getattr(self, "_client", None) is not None:
             self._client.close()
 
-    # Soporte de context manager
     def __enter__(self) -> "WeaviateRepository":
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    def __del__(self) -> None:  # fallback por si olvidan cerrar
+    def __del__(self) -> None:
         try:
             self.close()
         except Exception:

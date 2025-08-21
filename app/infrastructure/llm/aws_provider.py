@@ -1,5 +1,3 @@
-# app/infrastructure/llm/aws_provider.py
-
 import boto3
 import json
 from typing import Optional
@@ -54,5 +52,4 @@ class AWSLLMProvider(LLMPort):
         )
 
         response_body = json.loads(response["body"].read())
-        # ⚠️ Claude en Bedrock usa "completion", otros modelos pueden usar otra clave
         return response_body.get("completion", "").strip()

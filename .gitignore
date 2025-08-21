@@ -1,3 +1,4 @@
 .env*
+venv/
 project_plan.md
 test_embeddings.md

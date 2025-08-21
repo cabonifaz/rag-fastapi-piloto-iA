@@ -1,5 +1,3 @@
-# app/domain/ports/llm_port.py
-
 from abc import ABC, abstractmethod
 
 

@@ -1,81 +1,82 @@
-# app/api/chat.py
-
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from typing import List, Dict, Any
 from app.application.chat_service import ChatService
 from app.core.config import settings
-
-# ---- Importamos interfaces y adaptadores ----
-from app.domain.ports.llm_port import LLMPort
-from app.domain.ports.embeddings_port import EmbeddingsPort
-
-# LLM providers
-from app.infrastructure.llm.aws_provider import AWSLLMProvider
-# (puedes agregar OpenAIProvider, AnthropicProvider, etc.)
-
-# Embeddings providers
-from app.infrastructure.embeddings.openai_embeddings import OpenAIEmbeddingsProvider
-from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
-
-# Vectorstore (ejemplo con Weaviate, pero puede ser Chroma u otro)
-from app.infrastructure.vectorstores.weaviate_repository import WeaviateRepository
+from app.core.container import container
 
 
 router = APIRouter()
 
 
-# ---------- FACTORY PARA LLM ----------
-def get_llm_provider() -> LLMPort:
-    if settings.LLM_PROVIDER == "aws":
-        return AWSLLMProvider(
-            region=settings.LLM_REGION,
-            model_id=settings.LLM_MODEL_ID,
-            access_key=settings.LLM_API_KEY or None,
-            secret_key=None  # si se usan roles de IAM no es necesario
-        )
-    # elif settings.LLM_PROVIDER == "openai":
-    #     return OpenAILLMProvider(api_key=settings.LLM_API_KEY, model=settings.LLM_MODEL_ID)
-    else:
-        raise ValueError(f"Unsupported LLM provider: {settings.LLM_PROVIDER}")
+class ChatRequest(BaseModel):
+    user_id: str
+    message: str
 
 
-# ---------- FACTORY PARA EMBEDDINGS ----------
-def get_embeddings_provider() -> EmbeddingsPort:
-    if settings.EMBEDDINGS_PROVIDER == "openai":
-        return OpenAIEmbeddingsProvider(
-            api_key=settings.EMBEDDINGS_API_KEY,
-            model=settings.EMBEDDINGS_MODEL
-        )
-    elif settings.EMBEDDINGS_PROVIDER == "aws":
-        return AWSBedrockEmbeddingsProvider(
-            region=settings.EMBEDDINGS_REGION,
-            model_id=settings.EMBEDDINGS_MODEL_ID,
-            access_key=settings.AWS_ACCESS_KEY_ID,
-            secret_key=settings.AWS_SECRET_ACCESS_KEY
-        )
-    else:
-        raise ValueError(f"Unsupported Embeddings provider: {settings.EMBEDDINGS_PROVIDER}")
+class ChatResponse(BaseModel):
+    answer: str
+    embedding: List[float]
 
 
-# ---------- FACTORY PARA CHAT SERVICE ----------
+class EmbeddingTestResponse(BaseModel):
+    message: str
+    model_id: str
+    embedding_dimensions: int
+    embedding: List[float]
+    status: str
+
+
+class ContextDocument(BaseModel):
+    content: str
+    source: str
+    distance: float
+
+
+class RAGResponse(BaseModel):
+    user_id: str
+    message: str
+    context_documents: List[ContextDocument]
+    context_text: str
+    total_documents_found: int
+    embedding_dimensions: int
+    status: str
+
+
 def get_chat_service() -> ChatService:
-    llm_provider = get_llm_provider()
-    embeddings_provider = get_embeddings_provider()
-    vectorstore = WeaviateRepository(
-        url=settings.VECTORDB_URL,
-        api_key=settings.VECTORDB_API_KEY
-    )
+    """Dependency injection for ChatService using the DI container."""
+    return container.get_chat_service()
 
-    return ChatService(
-        llm_provider=llm_provider,
-        embeddings_provider=embeddings_provider,
-        vectorstore=vectorstore
-    )
+def get_rag_chat_service() -> ChatService:
+    """Dependency injection for ChatService with Weaviate vectorstore for full RAG."""
+    return container.get_chat_service_with_vectorstore()
 
-
-# ---------- ENDPOINT ----------
-@router.post("/chat")
-async def chat_endpoint(user_id: str, message: str, chat_service: ChatService = Depends(get_chat_service)):
+@router.post("/chat", response_model=RAGResponse)
+async def chat_endpoint(request: ChatRequest, chat_service: ChatService = Depends(get_rag_chat_service)):
     """
-    Chat endpoint with RAG.
+    Full RAG chat endpoint with Weaviate vector search.
+    
+    Flow:
+    1. Generate embedding for user message
+    2. Search relevant documents in Weaviate
+    3. Return context documents and assembled context
+    
+    Follows hexagonal architecture by using ChatService.
     """
-    return await chat_service.chat(user_id=user_id, message=message)
+    # Process RAG query with full pipeline
+    result = await chat_service.process_rag_query(request.user_id, request.message)
+    
+    return RAGResponse(**result)
+
+
+@router.post("/chat-test", response_model=EmbeddingTestResponse)
+async def chat_test_endpoint(request: ChatRequest, chat_service: ChatService = Depends(get_chat_service)):
+    """
+    Dedicated endpoint for testing embeddings model only.
+    Returns detailed embedding information for testing purposes.
+    Follows hexagonal architecture principles.
+    """
+    # Use ChatService to test embeddings with detailed response
+    result = await chat_service.test_embedding(request.message, settings.embeddings_model_id)
+    
+    return EmbeddingTestResponse(**result)
