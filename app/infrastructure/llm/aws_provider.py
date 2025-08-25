@@ -2,6 +2,7 @@ import boto3
 import json
 from typing import Optional
 from app.domain.ports.llm_port import LLMPort
+from app.infrastructure.llm.model_formats import ModelFormatFactory
 
 
 class AWSLLMProvider(LLMPort):
@@ -33,6 +34,7 @@ class AWSLLMProvider(LLMPort):
         session = boto3.Session(**session_params)
         self.client = session.client("bedrock-runtime")
         self.model_id = model_id
+        self.format_strategy = ModelFormatFactory.get_format_strategy(model_id)
 
     async def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
         """
@@ -41,26 +43,13 @@ class AWSLLMProvider(LLMPort):
         """
         from app.core.config import settings
         
-        # Parameters are always provided by chat service
-        print(f"DEBUG AWS: Received temp={temperature}, max_tokens={max_tokens}")
-        
-        # Different request format for different models
-        if "llama3" in self.model_id or "meta.llama" in self.model_id:
-            # Llama3 format - AWS Bedrock only supports these parameters
-            body = json.dumps({
-                "prompt": prompt,
-                "max_gen_len": max_tokens,
-                "temperature": temperature,
-                "top_p": getattr(settings, 'llm_top_p', 0.9)
-            })
-            print(f"DEBUG AWS: Sending to Bedrock: temp={temperature}")
-        else:
-            # Claude format (legacy)
-            body = json.dumps({
-                "prompt": prompt,
-                "max_tokens_to_sample": max_tokens,
-                "temperature": temperature,
-            })
+        # Use strategy pattern for model-specific formatting
+        body = self.format_strategy.format_request(
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=getattr(settings, 'llm_top_p', 0.9)
+        )
 
         response = self.client.invoke_model(
             modelId=self.model_id,
@@ -70,11 +59,4 @@ class AWSLLMProvider(LLMPort):
         )
 
         response_body = json.loads(response["body"].read())
-        
-        # Different response format for different models
-        if "llama3" in self.model_id or "meta.llama" in self.model_id:
-            # Llama3 response format
-            return response_body.get("generation", "").strip()
-        else:
-            # Claude response format (legacy)
-            return response_body.get("completion", "").strip()
+        return self.format_strategy.extract_response(response_body)
