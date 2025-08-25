@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.application.chat_service import ChatService
 from app.core.config import settings
 from app.core.container import container
@@ -17,6 +17,8 @@ class UnifiedRequest(BaseModel):
     collection: str = None              # Optional, defaults to env config
     top_k: int = 5                     # Optional, for search endpoints
     similarity_threshold: float = 0.7   # Optional, for search endpoints
+    temperature: Optional[float] = None  # Optional, defaults to env config
+    max_tokens: Optional[int] = None     # Optional, defaults to env config
 
 # Request Schema for embedding-only endpoints
 class EmbeddingTestRequest(BaseModel):
@@ -26,8 +28,11 @@ class EmbeddingTestRequest(BaseModel):
 
 # Response Models
 class ChatResponse(BaseModel):
+    user_id: str
+    message: str
     answer: str
-    embedding: List[float]
+    llm_model_used: Optional[str] = None
+    status: str
 
 
 class EmbeddingTestResponse(BaseModel):
@@ -64,7 +69,7 @@ class RAGResponse(BaseModel):
     total_documents_found: int
     embedding_dimensions: int
     collection_searched: str
-    llm_model_used: str = None
+    llm_model_used: str
     search_parameters: Dict[str, Any]
     status: str
 
@@ -107,19 +112,19 @@ def get_full_rag_dependencies():
     """Dependency injection for complete RAG with LLM answer generation."""
     return container.get_full_rag_chat_service()
 
-@router.post("/chat", response_model=RAGResponse)
+@router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(get_full_rag_dependencies)):
     """
-    Complete RAG chat endpoint with answer generation.
+    Clean chat endpoint with RAG-powered answer generation.
     
     Full RAG Flow:
     1. Generate embedding for user message
     2. Search relevant documents in Weaviate (using same flow as /search)
     3. Assemble context from retrieved documents
     4. Generate answer using LLM (Llama3) with context
-    5. Return complete response with answer and supporting documents
+    5. Return clean chat response with just the answer
     
-    Follows hexagonal architecture by using ChatService + LLM provider.
+    Returns only essential chat information, hiding RAG implementation details.
     """
     chat_service, llm_provider = dependencies
     
@@ -131,10 +136,18 @@ async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(g
         collection=request.collection,
         top_k=request.top_k,
         similarity_threshold=request.similarity_threshold,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
         llm_provider=llm_provider
     )
     
-    return RAGResponse(**result)
+    return ChatResponse(
+        user_id=result["user_id"],
+        message=result["message"], 
+        answer=result["answer"],
+        llm_model_used=result["llm_model_used"],
+        status=result["status"]
+    )
 
 
 @router.post("/chat-test", response_model=EmbeddingTestResponse)

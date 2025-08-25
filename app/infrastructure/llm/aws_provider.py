@@ -41,19 +41,19 @@ class AWSLLMProvider(LLMPort):
         """
         from app.core.config import settings
         
-        # Use settings for default values
-        max_tokens = max_tokens if max_tokens != 512 else settings.llm_max_tokens
-        temperature = temperature if temperature != 0.7 else settings.llm_temperature
+        # Parameters are always provided by chat service
+        print(f"DEBUG AWS: Received temp={temperature}, max_tokens={max_tokens}")
         
         # Different request format for different models
         if "llama3" in self.model_id or "meta.llama" in self.model_id:
-            # Llama3 format
+            # Llama3 format - AWS Bedrock only supports these parameters
             body = json.dumps({
                 "prompt": prompt,
                 "max_gen_len": max_tokens,
                 "temperature": temperature,
-                "top_p": getattr(settings, 'llm_top_p', 0.9),
+                "top_p": getattr(settings, 'llm_top_p', 0.9)
             })
+            print(f"DEBUG AWS: Sending to Bedrock: temp={temperature}")
         else:
             # Claude format (legacy)
             body = json.dumps({

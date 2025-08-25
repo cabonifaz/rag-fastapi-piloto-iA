@@ -106,14 +106,12 @@ class WeaviateRepository(VectorStorePort):
         """
 
         def _query_sync() -> List[VectorSearchResult]:
-            print(f"DEBUG: Attempting v4 client query on collection: {class_name}")
             try:
                 # v4 client method
                 collection = self._client.collections.get(class_name)
                 
                 # First try a simple get to see if collection has any data
                 simple_response = collection.query.fetch_objects(limit=1)
-                print(f"DEBUG: Collection exists with {len(simple_response.objects)} objects found in simple query")
                 
                 # Build query with optional filters
                 query_kwargs = {
@@ -130,9 +128,7 @@ class WeaviateRepository(VectorStorePort):
                 if filters:
                     query_kwargs["where"] = filters
                 
-                print(f"DEBUG: Vector search with args: {query_kwargs.keys()}")
                 response = collection.query.near_vector(**query_kwargs)
-                print(f"DEBUG: Vector search returned {len(response.objects)} objects")
                 
                 results: List[VectorSearchResult] = []
                 for obj in response.objects:
@@ -147,7 +143,6 @@ class WeaviateRepository(VectorStorePort):
                 return results
                 
             except Exception as e:
-                print(f"DEBUG: v4 query failed with error: {e}")
                 return []
 
         return await asyncio.to_thread(_query_sync)
@@ -195,8 +190,7 @@ class WeaviateRepository(VectorStorePort):
     ) -> List[Dict[str, Any]]:
         """Search for similar vectors in a specific collection with optional company filtering."""
         
-        # Remove all error handling to see what fails
-        # Temporarily disable company_id filtering for debugging
+        # Company filtering disabled for now
         filters = None
         # if company_id:
         #     filters = {
@@ -215,13 +209,9 @@ class WeaviateRepository(VectorStorePort):
             include_distance=True
         )
         
-        print(f"DEBUG: Before filtering - {len(results)} results")
-        for i, r in enumerate(results[:2]):  # Show first 2 results
-            print(f"DEBUG: Result {i}: distance={r.get('distance')}, props_keys={list(r.get('properties', {}).keys())}")
         
         if similarity_threshold is not None:
             results = [r for r in results if r.get("distance", 1.0) <= similarity_threshold]
-            print(f"DEBUG: After similarity filter ({similarity_threshold}) - {len(results)} results")
         
         formatted_results = []
         for r in results:
@@ -245,7 +235,6 @@ class WeaviateRepository(VectorStorePort):
             }
             formatted_results.append(formatted_result)
         
-        print(f"DEBUG: Final formatted results: {len(formatted_results)}")
         return formatted_results
 
     async def health_check(self) -> bool:

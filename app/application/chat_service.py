@@ -38,7 +38,7 @@ class ChatService:
             "status": "success"
         }
 
-    async def process_rag_query(self, user_id: str, message: str, collection: str = None, top_k: int = None, similarity_threshold: float = None, llm_provider=None) -> Dict[str, Any]:
+    async def process_rag_query(self, user_id: str, message: str, company_id: str, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, llm_provider=None) -> Dict[str, Any]:
         """
         Complete RAG flow: embedding generation + vector search + context assembly + LLM answer generation.
         
@@ -62,17 +62,42 @@ class ChatService:
         
         search_result = await self.search_documents(
             query=message,
+            company_id=company_id,
             collection=collection,
             top_k=search_top_k,
             similarity_threshold=search_threshold
         )
+        
+        # Check if no documents found at database level
+        if search_result["total_found"] == 0:
+            # No documents found - return predefined message without LLM call
+            return {
+                "user_id": user_id,
+                "message": message,
+                "answer": "There is no information available about this subject in the database.",
+                "context_documents": [],
+                "context_text": "",
+                "total_documents_found": 0,
+                "embedding_dimensions": search_result["embedding_dimensions"],
+                "collection_searched": settings.weaviate_class_name,
+                "llm_model_used": None,
+                "search_parameters": search_result["search_parameters"],
+                "status": "success"
+            }
         
         # Step 2: Extract documents from search result
         context_documents = []
         for doc in search_result["documents"]:
             context_documents.append({
                 "content": doc["content"],
-                "source": doc["source"],
+                "company_id": doc["company_id"],
+                "doc_id": doc["doc_id"],
+                "chunk_id": doc["chunk_id"],
+                "page_start": doc["page_start"],
+                "page_end": doc["page_end"],
+                "char_start": doc["char_start"],
+                "char_end": doc["char_end"],
+                "token_count": doc["token_count"],
                 "distance": doc["distance"],
                 "relevance_score": doc["relevance_score"]
             })
@@ -80,29 +105,25 @@ class ChatService:
         # Step 3: Prepare context text for LLM
         context_text = "\n\n".join([doc["content"] for doc in context_documents if doc["content"]])
         
-        # Step 4: Generate LLM answer if provider is available
-        answer = None
-        llm_model_used = None
+        # Step 4: Generate LLM answer (LLM is required for /chat endpoint)
+        if not llm_provider:
+            raise ValueError("LLM provider is required for /chat endpoint but was not provided")
         
-        if llm_provider and context_text:
-            # Create RAG prompt
-            rag_prompt = f"""You are a helpful assistant. Answer the user's question based on the provided context. If the context doesn't contain relevant information, say so clearly.
+        # Normal RAG flow with context
+        rag_prompt = f"""Answer concisely and directly. Do NOT repeat, do NOT explain, do NOT add extra text. Answer ONLY what is asked.
 
-Context:
 {context_text}
 
-Question: {message}
-
-Answer:"""
-            
-            try:
-                # Generate answer using LLM
-                answer = await llm_provider.generate(rag_prompt)
-                llm_model_used = settings.llm_model_id
-            except Exception as e:
-                answer = f"Error generating answer: {str(e)}"
-        else:
-            answer = "No LLM provider available or no context found for answer generation."
+Q: {message}
+A:"""
+        
+        # Use provided parameters or fall back to environment defaults
+        llm_temperature = temperature if temperature is not None else settings.llm_temperature
+        llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+        
+        print(f"DEBUG: Request temp={temperature}, env temp={settings.llm_temperature}, final temp={llm_temperature}")
+        answer = await llm_provider.generate(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature)
+        llm_model_used = settings.llm_model_id
         
         # Step 5: Return complete RAG response
         return {
