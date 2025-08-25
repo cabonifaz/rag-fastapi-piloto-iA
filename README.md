@@ -130,3 +130,42 @@ The llm models are gonna be from AWS
 The embeddings model is gonna be Amazon Titan Text Embeddings V2
 The LLM model is gonna be meta.llama3-8b-instruct-v1:0
 The vectorial database is gonna be Weaviate Cloud Service (WCS)
+
+prompt: Answer concisely and directly. Do NOT repeat, do NOT explain, do NOT add extra text. Answer ONLY what is asked.
+
+● For AWS Bedrock, here are better alternatives to Llama3-8B for more consistent RAG responses:
+
+  Recommended Models:
+
+  1. Claude 3 Haiku (Best for RAG)
+
+  - Model ID: anthropic.claude-3-haiku-20240307-v1:0
+  - Pros: Very consistent, follows instructions well, cost-effective
+  - Best for: Production RAG systems
+
+  2. Claude 3.5 Sonnet (Most capable)
+
+  - Model ID: anthropic.claude-3-5-sonnet-20241022-v2:0
+  - Pros: Excellent instruction following, very reliable
+  - Cons: More expensive
+
+  3. Claude 3 Sonnet (Good balance)
+
+  - Model ID: anthropic.claude-3-sonnet-20240229-v1:0
+  - Pros: Reliable, good performance, reasonable cost
+
+  Why Claude > Llama for RAG:
+
+  - ✅ Better instruction following - Respects length limits
+  - ✅ More consistent - Same query = similar response
+  - ✅ Better temperature control - Actually works as expected
+  - ✅ No repetitive loops - Stops when told to stop
+
+  To switch:
+
+  Update your .env:
+  LLM_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+
+  And update the AWS provider request format for Claude (different from Llama).
+
+  Recommendation: Start with Claude 3 Haiku - it's designed exactly for this kind of consistent, instruction-following use case.
