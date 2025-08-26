@@ -31,7 +31,7 @@ class LlamaFormat(ModelFormatStrategy):
             "max_gen_len": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
-            "stop": ["(1)", "La respuesta correcta es:", "\n\nQ:", "\n", "La respuesta final", "(respuesta directa)", "(no repetir texto)", "(no repetir respuesta)"]
+            "stop": ["(1)", "La respuesta correcta es:", "\n\nQ:", "La respuesta final", "(respuesta directa)", "(no repetir texto)", "(no repetir respuesta)"]
         })
     
     def extract_response(self, response_body: Dict[str, Any]) -> str:

@@ -21,7 +21,7 @@ class ChatService:
         Build the RAG prompt with context and user message.
         Centralized prompt template for both regular and streaming endpoints.
         """
-        return f"""Answer directly. Use ONLY the context provided to answer. Do NOT explain, justify, or comment on the correctness. Do NOT repeat text. If you already answer the question, STOP.
+        return f"""Answer directly adn include the reference from the context. Use ONLY the context provided to answer. Do NOT explain, justify, or comment on the correctness. Do NOT repeat text.
 
 {context_text}
 
