@@ -1,4 +1,4 @@
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, AsyncGenerator
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 
@@ -136,6 +136,102 @@ A:"""
             "collection_searched": settings.weaviate_class_name,
             "llm_model_used": llm_model_used,
             "search_parameters": search_result["search_parameters"],
+            "status": "success"
+        }
+
+    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, llm_provider=None) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
+        """
+        from app.core.config import settings
+        
+        # Step 1: Use the search_documents method for consistent vector search
+        # Use provided parameters or fall back to environment defaults
+        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
+        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
+        
+        search_result = await self.search_documents(
+            query=message,
+            company_id=company_id,
+            collection=collection,
+            top_k=search_top_k,
+            similarity_threshold=search_threshold
+        )
+        
+        # Check if no documents found at database level
+        if search_result["total_found"] == 0:
+            # No documents found - return predefined message without LLM call
+            yield {
+                "type": "metadata",
+                "user_id": user_id,
+                "message": message,
+                "llm_model_used": None,
+            }
+            yield {
+                "type": "chunk",
+                "content": "There is no information available about this subject in the database."
+            }
+            yield {
+                "type": "complete",
+                "status": "success"
+            }
+            return
+        
+        # Step 2: Extract documents from search result
+        context_documents = []
+        for doc in search_result["documents"]:
+            context_documents.append({
+                "content": doc["content"],
+                "company_id": doc["company_id"],
+                "doc_id": doc["doc_id"],
+                "chunk_id": doc["chunk_id"],
+                "page_start": doc["page_start"],
+                "page_end": doc["page_end"],
+                "char_start": doc["char_start"],
+                "char_end": doc["char_end"],
+                "token_count": doc["token_count"],
+                "distance": doc["distance"],
+                "relevance_score": doc["relevance_score"]
+            })
+        
+        # Step 3: Prepare context text for LLM
+        context_text = "\n\n".join([doc["content"] for doc in context_documents if doc["content"]])
+        
+        # Step 4: Generate LLM answer (LLM is required for /chat endpoint)
+        if not llm_provider:
+            raise ValueError("LLM provider is required for /chat-streaming endpoint but was not provided")
+        
+        # Normal RAG flow with context
+        rag_prompt = f"""Answer directly. Do NOT repeat text. If you already answer the question, STOP.
+
+{context_text}
+
+Q: {message}
+A:"""
+        
+        # Step 4: Generate streaming response using LLM
+        # Use provided parameters or fall back to environment defaults
+        llm_temperature = temperature if temperature is not None else settings.llm_temperature
+        llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+        
+        # Yield metadata first (matching /chat response format - no context exposed)
+        yield {
+            "type": "metadata",
+            "user_id": user_id,
+            "message": message,
+            "llm_model_used": settings.llm_model_id,
+        }
+        
+        # Stream the LLM response
+        async for chunk in llm_provider.generate_stream(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
+            yield {
+                "type": "chunk",
+                "content": chunk
+            }
+        
+        # Final completion signal
+        yield {
+            "type": "complete",
             "status": "success"
         }
 

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+import json
 from app.application.chat_service import ChatService
 from app.core.config import settings
 from app.core.container import container
@@ -200,3 +202,51 @@ async def search_endpoint(request: UnifiedRequest, chat_service: ChatService = D
     result["message"] = request.message
     
     return SearchResponse(**result)
+
+
+@router.post("/chat-streaming")
+async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(get_full_rag_dependencies)):
+    """
+    Streaming chat endpoint with RAG-powered answer generation.
+    
+    Same functionality as /chat but with streaming response.
+    Returns Server-Sent Events (SSE) format for real-time streaming.
+    
+    Response format:
+    - metadata: Initial context information
+    - chunk: Individual text chunks as they're generated
+    - complete: Final completion signal
+    """
+    chat_service, llm_provider = dependencies
+    
+    async def generate_stream():
+        answer = ""
+        async for chunk_data in chat_service.process_rag_query_stream(
+            user_id=request.user_id,
+            message=request.message,
+            company_id=request.company_id,
+            collection=request.collection,
+            top_k=request.top_k,
+            similarity_threshold=request.similarity_threshold,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            llm_provider=llm_provider
+        ):
+            if chunk_data["type"] == "chunk":
+                # Concatenate content
+                answer += chunk_data["content"]
+                # Send concatenated answer
+                yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
+            else:
+                # Send metadata and complete as-is
+                yield f"data: {json.dumps(chunk_data)}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )

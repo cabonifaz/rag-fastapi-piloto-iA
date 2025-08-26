@@ -15,6 +15,11 @@ class ModelFormatStrategy(ABC):
     def extract_response(self, response_body: Dict[str, Any]) -> str:
         """Extract the generated text from the response."""
         pass
+    
+    @abstractmethod
+    def extract_stream_chunk(self, chunk_data: Dict[str, Any]) -> str:
+        """Extract text from streaming response chunk."""
+        pass
 
 
 class LlamaFormat(ModelFormatStrategy):
@@ -26,11 +31,14 @@ class LlamaFormat(ModelFormatStrategy):
             "max_gen_len": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
-            "stop": ["(1)"]
+            "stop": ["(1)", "La respuesta correcta es:", "\n\nQ:"]
         })
     
     def extract_response(self, response_body: Dict[str, Any]) -> str:
         return response_body.get("generation", "").strip()
+    
+    def extract_stream_chunk(self, chunk_data: Dict[str, Any]) -> str:
+        return chunk_data.get("generation", "")
 
 
 class ClaudeFormat(ModelFormatStrategy):
@@ -47,6 +55,9 @@ class ClaudeFormat(ModelFormatStrategy):
     
     def extract_response(self, response_body: Dict[str, Any]) -> str:
         return response_body.get("completion", "").strip()
+    
+    def extract_stream_chunk(self, chunk_data: Dict[str, Any]) -> str:
+        return chunk_data.get("completion", "")
 
 
 class ModelFormatFactory:
