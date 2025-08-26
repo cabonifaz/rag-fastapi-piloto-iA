@@ -3,9 +3,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
 import asyncio
+import logging
 import weaviate
+from weaviate.exceptions import WeaviateBaseError
 
 from app.domain.ports.vectorstore_port import VectorStorePort
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 class VectorSearchResult(TypedDict, total=False):
     id: str
@@ -142,8 +147,35 @@ class WeaviateRepository(VectorStorePort):
                 
                 return results
                 
+            except WeaviateBaseError as e:
+                logger.error(f"Weaviate error in search_by_vector: {e}")
+                error_msg = str(e).lower()
+                if "unauthorized" in error_msg or "authentication" in error_msg:
+                    raise ConnectionError("Weaviate authentication failed")
+                elif "not found" in error_msg or "does not exist" in error_msg:
+                    raise ValueError(f"Collection '{class_name}' not found in Weaviate")
+                elif "timeout" in error_msg or "timed out" in error_msg:
+                    raise TimeoutError("Weaviate query timeout")
+                elif "connection" in error_msg or "network" in error_msg:
+                    raise ConnectionError("Cannot connect to Weaviate service")
+                else:
+                    raise ConnectionError(f"Weaviate service error: {str(e)}")
+                    
+            except ConnectionError:
+                raise  # Re-raise connection errors
+                
+            except TimeoutError:
+                raise  # Re-raise timeout errors
+                
+            except ValueError as e:
+                logger.error(f"Value error in search_by_vector: {e}")
+                if "collection" not in str(e).lower():
+                    raise ValueError(f"Invalid search parameters: {str(e)}")
+                raise  # Re-raise collection not found errors
+                
             except Exception as e:
-                return []
+                logger.error(f"Unexpected error in search_by_vector: {e}")
+                raise ConnectionError(f"Vector search service error: {str(e)}")
 
         return await asyncio.to_thread(_query_sync)
 
@@ -159,8 +191,19 @@ class WeaviateRepository(VectorStorePort):
                     schema = self._client.schema.get()
                     class_names = [cls["class"] for cls in schema.get("classes", [])]
                     return collection_name in class_names
-            except Exception:
-                return False
+            except WeaviateBaseError as e:
+                logger.error(f"Weaviate error checking collection existence: {e}")
+                error_msg = str(e).lower()
+                if "unauthorized" in error_msg or "authentication" in error_msg:
+                    raise ConnectionError("Weaviate authentication failed")
+                elif "connection" in error_msg or "network" in error_msg:
+                    raise ConnectionError("Cannot connect to Weaviate service")
+                else:
+                    return False  # Collection doesn't exist or other non-critical error
+                    
+            except Exception as e:
+                logger.error(f"Unexpected error checking collection existence: {e}")
+                raise ConnectionError(f"Unable to check collection existence: {str(e)}")
         
         return await asyncio.to_thread(_check_collection)
 

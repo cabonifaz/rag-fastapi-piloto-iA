@@ -1,6 +1,10 @@
 from typing import Tuple, List, Dict, Any, AsyncGenerator
+import logging
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -62,23 +66,50 @@ A:"""
         Returns:
             Dict with answer, context documents, and metadata
         """
-        from app.core.config import settings
+        try:
+            from app.core.config import settings
+            
+            # Validate inputs
+            if not message or not message.strip():
+                raise ValueError("Message cannot be empty")
+            if not user_id:
+                raise ValueError("User ID is required")
+            if not company_id:
+                raise ValueError("Company ID is required")
+            
+            if not self.vectorstore:
+                raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
+                
+        except ValueError as e:
+            logger.error(f"Validation error in process_rag_query: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Initialization error in process_rag_query: {e}")
+            raise ConnectionError(f"RAG service initialization failed: {str(e)}")
         
-        if not self.vectorstore:
-            raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
-        
-        # Step 1: Use the search_documents method for consistent vector search
-        # Use provided parameters or fall back to environment defaults
-        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
-        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
-        
-        search_result = await self.search_documents(
-            query=message,
-            company_id=company_id,
-            collection=collection,
-            top_k=search_top_k,
-            similarity_threshold=search_threshold
-        )
+        try:
+            # Step 1: Use the search_documents method for consistent vector search
+            # Use provided parameters or fall back to environment defaults
+            search_top_k = top_k if top_k is not None else settings.rag_top_k_results
+            search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
+            
+            search_result = await self.search_documents(
+                query=message,
+                company_id=company_id,
+                collection=collection,
+                top_k=search_top_k,
+                similarity_threshold=search_threshold
+            )
+            
+        except ConnectionError as e:
+            logger.error(f"Connection error during document search: {e}")
+            raise
+        except ValueError as e:
+            logger.error(f"Search parameter error: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during document search: {e}")
+            raise ConnectionError(f"Document search failed: {str(e)}")
         
         # Check if no documents found at database level
         if search_result["total_found"] == 0:
@@ -132,15 +163,26 @@ A:"""
         if not llm_provider:
             raise ValueError("LLM provider is required for /chat endpoint but was not provided")
         
-        # Normal RAG flow with context
-        rag_prompt = self._build_rag_prompt(message, context_text)
-        
-        # Use provided parameters or fall back to environment defaults
-        llm_temperature = temperature if temperature is not None else settings.llm_temperature
-        llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
-        
-        answer = await llm_provider.generate(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature)
-        llm_model_used = settings.llm_model_id
+        try:
+            # Normal RAG flow with context
+            rag_prompt = self._build_rag_prompt(message, context_text)
+            
+            # Use provided parameters or fall back to environment defaults
+            llm_temperature = temperature if temperature is not None else settings.llm_temperature
+            llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+            
+            answer = await llm_provider.generate(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature)
+            llm_model_used = settings.llm_model_id
+            
+        except ConnectionError as e:
+            logger.error(f"Connection error during LLM generation: {e}")
+            raise ConnectionError(f"LLM service unavailable: {str(e)}")
+        except ValueError as e:
+            logger.error(f"LLM parameter error: {e}")
+            raise ValueError(f"Invalid LLM parameters: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during LLM generation: {e}")
+            raise ConnectionError(f"LLM generation failed: {str(e)}")
         
         # Step 5: Return complete RAG response
         return {
@@ -161,10 +203,26 @@ A:"""
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
-        from app.core.config import settings
-        
-        if not self.vectorstore:
-            raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
+        try:
+            from app.core.config import settings
+            
+            # Validate inputs
+            if not message or not message.strip():
+                raise ValueError("Message cannot be empty")
+            if not user_id:
+                raise ValueError("User ID is required")
+            if not company_id:
+                raise ValueError("Company ID is required")
+            
+            if not self.vectorstore:
+                raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
+                
+        except ValueError as e:
+            logger.error(f"Validation error in process_rag_query_stream: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Initialization error in process_rag_query_stream: {e}")
+            raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
         
         # Step 1: Use the search_documents method for consistent vector search
         # Use provided parameters or fall back to environment defaults

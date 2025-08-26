@@ -1,11 +1,16 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing import List, Dict, Any, Optional
 import json
+import logging
+from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.application.chat_service import ChatService
 from app.core.config import settings
 from app.core.container import container
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -128,28 +133,67 @@ async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(g
     
     Returns only essential chat information, hiding RAG implementation details.
     """
-    chat_service, llm_provider = dependencies
-    
-    # Process complete RAG query with LLM answer generation
-    result = await chat_service.process_rag_query(
-        user_id=request.user_id, 
-        message=request.message,
-        company_id=request.company_id,
-        collection=request.collection,
-        top_k=request.top_k,
-        similarity_threshold=request.similarity_threshold,
-        temperature=request.temperature,
-        max_tokens=request.max_tokens,
-        llm_provider=llm_provider
-    )
-    
-    return ChatResponse(
-        user_id=result["user_id"],
-        message=result["message"], 
-        answer=result["answer"],
-        llm_model_used=result["llm_model_used"],
-        status=result["status"]
-    )
+    try:
+        chat_service, llm_provider = dependencies
+        
+        # Process complete RAG query with LLM answer generation
+        result = await chat_service.process_rag_query(
+            user_id=request.user_id, 
+            message=request.message,
+            company_id=request.company_id,
+            collection=request.collection,
+            top_k=request.top_k,
+            similarity_threshold=request.similarity_threshold,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            llm_provider=llm_provider
+        )
+        
+        return ChatResponse(
+            user_id=result["user_id"],
+            message=result["message"], 
+            answer=result["answer"],
+            llm_model_used=result["llm_model_used"],
+            status=result["status"]
+        )
+        
+    except ValidationError as e:
+        logger.error(f"Validation error in chat endpoint: {e}")
+        raise HTTPException(status_code=422, detail=f"Invalid request data: {str(e)}")
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        logger.error(f"AWS Client error in chat endpoint: {error_code} - {e}")
+        if error_code == 'ValidationException':
+            raise HTTPException(status_code=400, detail="Invalid request parameters for LLM")
+        elif error_code == 'ThrottlingException':
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later")
+        else:
+            raise HTTPException(status_code=500, detail="LLM service error")
+            
+    except NoCredentialsError as e:
+        logger.error(f"AWS credentials error in chat endpoint: {e}")
+        raise HTTPException(status_code=500, detail="AWS credentials not configured")
+        
+    except EndpointConnectionError as e:
+        logger.error(f"AWS connection error in chat endpoint: {e}")
+        raise HTTPException(status_code=503, detail="Unable to connect to AWS services")
+        
+    except ConnectionError as e:
+        logger.error(f"Connection error in chat endpoint: {e}")
+        raise HTTPException(status_code=503, detail="Service connection error")
+        
+    except TimeoutError as e:
+        logger.error(f"Timeout error in chat endpoint: {e}")
+        raise HTTPException(status_code=504, detail="Request timeout")
+        
+    except ValueError as e:
+        logger.error(f"Value error in chat endpoint: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in chat endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/chat-test", response_model=EmbeddingTestResponse)
@@ -217,37 +261,73 @@ async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple =
     - chunk: Individual text chunks as they're generated
     - complete: Final completion signal
     """
-    chat_service, llm_provider = dependencies
-    
-    async def generate_stream():
-        answer = ""
-        async for chunk_data in chat_service.process_rag_query_stream(
-            user_id=request.user_id,
-            message=request.message,
-            company_id=request.company_id,
-            collection=request.collection,
-            top_k=request.top_k,
-            similarity_threshold=request.similarity_threshold,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            llm_provider=llm_provider
-        ):
-            if chunk_data["type"] == "chunk":
-                # Concatenate content
-                answer += chunk_data["content"]
-                # Send concatenated answer
-                yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
-            else:
-                # Send metadata and complete as-is
-                yield f"data: {json.dumps(chunk_data)}\n\n"
-    
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        }
-    )
+    try:
+        chat_service, llm_provider = dependencies
+        
+        async def generate_stream():
+            try:
+                answer = ""
+                async for chunk_data in chat_service.process_rag_query_stream(
+                    user_id=request.user_id,
+                    message=request.message,
+                    company_id=request.company_id,
+                    collection=request.collection,
+                    top_k=request.top_k,
+                    similarity_threshold=request.similarity_threshold,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                    llm_provider=llm_provider
+                ):
+                    if chunk_data["type"] == "chunk":
+                        # Concatenate content
+                        answer += chunk_data["content"]
+                        # Send concatenated answer
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
+                    else:
+                        # Send metadata and complete as-is
+                        yield f"data: {json.dumps(chunk_data)}\n\n"
+                        
+            except ClientError as e:
+                error_code = e.response['Error']['Code']
+                logger.error(f"AWS Client error in streaming: {error_code} - {e}")
+                error_msg = "LLM service error"
+                if error_code == 'ValidationException':
+                    error_msg = "Invalid request parameters for LLM"
+                elif error_code == 'ThrottlingException':
+                    error_msg = "Rate limit exceeded. Please try again later"
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+                
+            except (NoCredentialsError, EndpointConnectionError, ConnectionError) as e:
+                logger.error(f"Connection error in streaming: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Service connection error'})}\n\n"
+                
+            except TimeoutError as e:
+                logger.error(f"Timeout error in streaming: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Request timeout'})}\n\n"
+                
+            except Exception as e:
+                logger.error(f"Unexpected error in streaming: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Internal server error'})}\n\n"
+        
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+            }
+        )
+        
+    except ValidationError as e:
+        logger.error(f"Validation error in streaming endpoint: {e}")
+        raise HTTPException(status_code=422, detail=f"Invalid request data: {str(e)}")
+        
+    except ValueError as e:
+        logger.error(f"Value error in streaming endpoint: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in streaming endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
