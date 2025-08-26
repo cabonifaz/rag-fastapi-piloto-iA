@@ -21,7 +21,7 @@ class ChatService:
         Build the RAG prompt with context and user message.
         Centralized prompt template for both regular and streaming endpoints.
         """
-        return f"""Answer directly adn include the reference from the context. Use ONLY the context provided to answer. Do NOT explain, justify, or comment on the correctness. Do NOT repeat text.
+        return f"""Answer directly and include the source references. Use ONLY the context provided to answer. Do NOT explain, justify, or comment on the correctness. Do NOT repeat text. Always cite your sources using the document ID and page numbers provided in the context.
 
 {context_text}
 
@@ -114,8 +114,19 @@ A:"""
                 "relevance_score": doc["relevance_score"]
             })
         
-        # Step 3: Prepare context text for LLM
-        context_text = "\n\n".join([doc["content"] for doc in context_documents if doc["content"]])
+        # Step 3: Prepare context text for LLM with source metadata
+        context_with_sources = []
+        for doc in context_documents:
+            if doc["content"]:
+                # Format page reference more accurately
+                if doc['page_start'] == doc['page_end']:
+                    page_ref = f"Page {doc['page_start']}"
+                else:
+                    page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
+                source_info = f"[Source: Document {doc['doc_id']}, {page_ref}]"
+                context_with_sources.append(f"{doc['content']}\n{source_info}")
+        
+        context_text = "\n\n".join(context_with_sources)
         
         # Step 4: Generate LLM answer (LLM is required for /chat endpoint)
         if not llm_provider:
@@ -204,8 +215,19 @@ A:"""
                 "relevance_score": doc["relevance_score"]
             })
         
-        # Step 3: Prepare context text for LLM
-        context_text = "\n\n".join([doc["content"] for doc in context_documents if doc["content"]])
+        # Step 3: Prepare context text for LLM with source metadata
+        context_with_sources = []
+        for doc in context_documents:
+            if doc["content"]:
+                # Format page reference more accurately
+                if doc['page_start'] == doc['page_end']:
+                    page_ref = f"Page {doc['page_start']}"
+                else:
+                    page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
+                source_info = f"[Source: Document {doc['doc_id']}, {page_ref}]"
+                context_with_sources.append(f"{doc['content']}\n{source_info}")
+        
+        context_text = "\n\n".join(context_with_sources)
         
         # Step 4: Generate LLM answer (LLM is required for /chat endpoint)
         if not llm_provider:
