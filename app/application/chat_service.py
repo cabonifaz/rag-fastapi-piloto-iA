@@ -110,7 +110,7 @@ class ChatService:
             raise ValueError("LLM provider is required for /chat endpoint but was not provided")
         
         # Normal RAG flow with context
-        rag_prompt = f"""Answer directly. Do NOT repeat text. If you already answer the question, STOP.
+        rag_prompt = f"""Answer directly. Use ONLY the context provided to answer. Do NOT repeat text. If you already answer the question, STOP.
 
 {context_text}
 
