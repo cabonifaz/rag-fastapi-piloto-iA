@@ -25,7 +25,8 @@ class LlamaFormat(ModelFormatStrategy):
             "prompt": prompt,
             "max_gen_len": max_tokens,
             "temperature": temperature,
-            "top_p": top_p
+            "top_p": top_p,
+            "stop": ["(1)"]
         })
     
     def extract_response(self, response_body: Dict[str, Any]) -> str:

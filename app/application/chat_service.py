@@ -110,7 +110,7 @@ class ChatService:
             raise ValueError("LLM provider is required for /chat endpoint but was not provided")
         
         # Normal RAG flow with context
-        rag_prompt = f"""Answer concisely and directly. Do NOT repeat, do NOT explain, do NOT add extra text. Answer ONLY what is asked.
+        rag_prompt = f"""Answer directly. Do NOT repeat text. If you already answer the question, STOP.
 
 {context_text}
 
@@ -121,7 +121,6 @@ A:"""
         llm_temperature = temperature if temperature is not None else settings.llm_temperature
         llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
         
-        print(f"DEBUG: Request temp={temperature}, env temp={settings.llm_temperature}, final temp={llm_temperature}")
         answer = await llm_provider.generate(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature)
         llm_model_used = settings.llm_model_id
         
