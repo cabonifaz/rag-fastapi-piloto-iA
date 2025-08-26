@@ -31,14 +31,25 @@ class LlamaFormat(ModelFormatStrategy):
             "max_gen_len": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
-            "stop": ["(1)", "La respuesta correcta es:", "\n\nQ:", "La respuesta final"]
+            "stop": ["(1)", "La respuesta correcta es:", "\n\nQ:", "La respuesta final", "(respuesta directa)", "(no repetir texto)", "(no repetir respuesta)"]
         })
     
     def extract_response(self, response_body: Dict[str, Any]) -> str:
         return response_body.get("generation", "").strip()
     
     def extract_stream_chunk(self, chunk_data: Dict[str, Any]) -> str:
-        return chunk_data.get("generation", "")
+        # For Llama streaming, the response format is different
+        # Check multiple possible fields in the chunk
+        if "generation" in chunk_data:
+            return chunk_data["generation"]
+        elif "outputs" in chunk_data:
+            # Sometimes streaming responses use "outputs" array
+            outputs = chunk_data["outputs"]
+            if outputs and len(outputs) > 0:
+                return outputs[0].get("text", "")
+        elif "text" in chunk_data:
+            return chunk_data["text"]
+        return ""
 
 
 class ClaudeFormat(ModelFormatStrategy):
@@ -57,7 +68,14 @@ class ClaudeFormat(ModelFormatStrategy):
         return response_body.get("completion", "").strip()
     
     def extract_stream_chunk(self, chunk_data: Dict[str, Any]) -> str:
-        return chunk_data.get("completion", "")
+        # For Claude streaming, check multiple possible response formats
+        if "completion" in chunk_data:
+            return chunk_data["completion"]
+        elif "delta" in chunk_data:
+            return chunk_data["delta"].get("text", "")
+        elif "text" in chunk_data:
+            return chunk_data["text"]
+        return ""
 
 
 class ModelFormatFactory:

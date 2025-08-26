@@ -15,6 +15,18 @@ class ChatService:
     def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort):
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
+    
+    def _build_rag_prompt(self, message: str, context_text: str) -> str:
+        """
+        Build the RAG prompt with context and user message.
+        Centralized prompt template for both regular and streaming endpoints.
+        """
+        return f"""Answer directly. Use ONLY the context provided to answer. Do NOT repeat text. If you already answer the question, STOP.
+
+{context_text}
+
+Q: {message}
+A:"""
 
     async def generate_embedding(self, text: str) -> List[float]:
         """
@@ -110,12 +122,7 @@ class ChatService:
             raise ValueError("LLM provider is required for /chat endpoint but was not provided")
         
         # Normal RAG flow with context
-        rag_prompt = f"""Answer directly. Use ONLY the context provided to answer. Do NOT repeat text. If you already answer the question, STOP.
-
-{context_text}
-
-Q: {message}
-A:"""
+        rag_prompt = self._build_rag_prompt(message, context_text)
         
         # Use provided parameters or fall back to environment defaults
         llm_temperature = temperature if temperature is not None else settings.llm_temperature
@@ -144,6 +151,9 @@ A:"""
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
         from app.core.config import settings
+        
+        if not self.vectorstore:
+            raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
         
         # Step 1: Use the search_documents method for consistent vector search
         # Use provided parameters or fall back to environment defaults
@@ -202,12 +212,7 @@ A:"""
             raise ValueError("LLM provider is required for /chat-streaming endpoint but was not provided")
         
         # Normal RAG flow with context
-        rag_prompt = f"""Answer directly. Do NOT repeat text. If you already answer the question, STOP.
-
-{context_text}
-
-Q: {message}
-A:"""
+        rag_prompt = self._build_rag_prompt(message, context_text)
         
         # Step 4: Generate streaming response using LLM
         # Use provided parameters or fall back to environment defaults
