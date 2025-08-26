@@ -220,6 +220,7 @@ async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple =
     chat_service, llm_provider = dependencies
     
     async def generate_stream():
+        answer = ""
         async for chunk_data in chat_service.process_rag_query_stream(
             user_id=request.user_id,
             message=request.message,
@@ -231,8 +232,14 @@ async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple =
             max_tokens=request.max_tokens,
             llm_provider=llm_provider
         ):
-            # Send each chunk immediately as it arrives
-            yield f"data: {json.dumps(chunk_data)}\n\n"
+            if chunk_data["type"] == "chunk":
+                # Concatenate content
+                answer += chunk_data["content"]
+                # Send concatenated answer
+                yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
+            else:
+                # Send metadata and complete as-is
+                yield f"data: {json.dumps(chunk_data)}\n\n"
     
     return StreamingResponse(
         generate_stream(),
