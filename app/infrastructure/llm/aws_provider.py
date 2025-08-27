@@ -5,6 +5,7 @@ from typing import Optional, AsyncGenerator
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.domain.ports.llm_port import LLMPort
 from app.infrastructure.llm.model_formats import ModelFormatFactory
+from app.utils.token_counter import TokenCounter, TokenUsage
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -45,9 +46,13 @@ class AWSLLMProvider(LLMPort):
         """
         Genera texto usando un modelo de AWS Bedrock.
         Soporta tanto modelos Claude como Llama3.
+        Includes token counting and cost calculation.
         """
         try:
             from app.core.config import settings
+            
+            # Count input tokens
+            input_tokens = TokenCounter.estimate_tokens(prompt, self.model_id)
             
             # Use strategy pattern for model-specific formatting
             body = self.format_strategy.format_request(
@@ -65,7 +70,28 @@ class AWSLLMProvider(LLMPort):
             )
 
             response_body = json.loads(response["body"].read())
-            return self.format_strategy.extract_response(response_body)
+            generated_text = self.format_strategy.extract_response(response_body)
+            
+            # Count output tokens
+            output_tokens = TokenCounter.estimate_tokens(generated_text, self.model_id)
+            
+            # Extract token usage from response (if available)
+            token_usage = TokenCounter.extract_token_usage_from_response(response_body, self.model_id)
+            
+            # If no usage data from AWS, use our estimation
+            if token_usage.input_tokens == 0 and token_usage.output_tokens == 0:
+                token_usage = TokenUsage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=input_tokens + output_tokens,
+                    model_id=self.model_id
+                )
+            
+            # Calculate and log costs
+            cost_calc = TokenCounter.calculate_cost(token_usage)
+            TokenCounter.log_usage_and_cost(token_usage, cost_calc, f"LLM GENERATE - {self.model_id}")
+            
+            return generated_text
             
         except ClientError as e:
             error_code = e.response['Error']['Code']
@@ -104,9 +130,14 @@ class AWSLLMProvider(LLMPort):
     async def generate_stream(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> AsyncGenerator[str, None]:
         """
         Genera texto usando streaming con AWS Bedrock invoke_model_with_response_stream.
+        Includes token counting and cost calculation for streaming.
         """
         try:
             from app.core.config import settings
+            
+            # Count input tokens
+            input_tokens = TokenCounter.estimate_tokens(prompt, self.model_id)
+            generated_text = ""  # Accumulate for output token counting
             
             # Use strategy pattern for model-specific formatting
             body = self.format_strategy.format_request(
@@ -131,6 +162,7 @@ class AWSLLMProvider(LLMPort):
                         chunk_data = json.loads(chunk.get("bytes").decode())
                         text_chunk = self.format_strategy.extract_stream_chunk(chunk_data)
                         if text_chunk:
+                            generated_text += text_chunk  # Accumulate for token counting
                             yield text_chunk
                 except json.JSONDecodeError as e:
                     logger.error(f"JSON decode error in streaming chunk: {e}")
@@ -141,6 +173,19 @@ class AWSLLMProvider(LLMPort):
                 except Exception as e:
                     logger.error(f"Error processing streaming chunk: {e}")
                     continue  # Skip problematic chunks
+            
+            # After streaming is complete, calculate and log token usage
+            output_tokens = TokenCounter.estimate_tokens(generated_text, self.model_id)
+            token_usage = TokenUsage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                model_id=self.model_id
+            )
+            
+            # Calculate and log costs
+            cost_calc = TokenCounter.calculate_cost(token_usage)
+            TokenCounter.log_usage_and_cost(token_usage, cost_calc, f"LLM STREAM - {self.model_id}")
                     
         except ClientError as e:
             error_code = e.response['Error']['Code']
