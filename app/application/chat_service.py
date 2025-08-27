@@ -75,7 +75,9 @@ A:"""
             if not user_id:
                 raise ValueError("User ID is required")
             if not company_id:
-                raise ValueError("Company ID is required")
+                # Use WEAVIATE_CLASS_NAME as fallback if no company_id provided
+                company_id = settings.weaviate_class_name
+                logger.info(f"No company_id provided, using default: {company_id}")
             
             if not self.vectorstore:
                 raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
@@ -212,7 +214,9 @@ A:"""
             if not user_id:
                 raise ValueError("User ID is required")
             if not company_id:
-                raise ValueError("Company ID is required")
+                # Use WEAVIATE_CLASS_NAME as fallback if no company_id provided
+                company_id = settings.weaviate_class_name
+                logger.info(f"No company_id provided, using default: {company_id}")
             
             if not self.vectorstore:
                 raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
