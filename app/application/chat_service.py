@@ -23,9 +23,27 @@ class ChatService:
     def _build_rag_prompt(self, message: str, context_text: str) -> str:
         """
         Build the RAG prompt with context and user message.
-        Centralized prompt template for both regular and streaming endpoints.
+        Uses different prompt styles optimized for different model types.
         """
-        return f"""Answer directly and include the source references. Use ONLY the context provided to answer. Do NOT explain, justify, or comment on the correctness. Do NOT repeat text. Always cite your sources using the document ID and page numbers provided in the context.
+        from app.core.config import settings
+        
+        # Check if using Claude model
+        model_id_lower = settings.llm_model_id.lower()
+        is_claude = "claude" in model_id_lower or "anthropic" in model_id_lower
+        
+        if is_claude:
+            # Claude-optimized prompt: concise, natural, conversational
+            return f"""Based on the following context, please answer the user's question. Include relevant source references with document ID and page numbers. Do not search on internet.
+
+Context:
+{context_text}
+
+Question: {message}
+
+Please provide a clear, accurate response based solely on the provided context."""
+        else:
+            # Llama-optimized prompt: explicit instructions, structured format
+            return f"""Answer directly and include the source references. Use ONLY the context provided to answer. Do NOT explain, justify, or comment on the correctness. Do NOT repeat text. Always cite your sources using the document ID and page numbers provided in the context.
 
 {context_text}
 
