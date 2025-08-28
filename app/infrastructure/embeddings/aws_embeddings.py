@@ -49,6 +49,7 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
             if not text or not text.strip():
                 raise ValueError("Input text cannot be empty")
             
+            # Costs calculation
             # Count input tokens
             input_tokens = TokenCounter.estimate_tokens(text, self.model_id)
                 
@@ -65,6 +66,7 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
 
             response_body = json.loads(response["body"].read())
             
+            # Costs calculation
             # Extract token usage from response (if available)
             token_usage = TokenCounter.extract_token_usage_from_response(response_body, self.model_id)
             
@@ -80,6 +82,7 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
             # Calculate and log costs
             cost_calc = TokenCounter.calculate_cost(token_usage)
             TokenCounter.log_usage_and_cost(token_usage, cost_calc, f"EMBEDDING - {self.model_id}")
+            # Costs calculation
             
             # Titan embeddings devuelve "embedding"
             embedding = response_body.get("embedding", [])

@@ -51,6 +51,7 @@ class AWSLLMProvider(LLMPort):
         try:
             from app.core.config import settings
             
+            # Costs calculation
             # Count input tokens
             input_tokens = TokenCounter.estimate_tokens(prompt, self.model_id)
             
@@ -59,7 +60,7 @@ class AWSLLMProvider(LLMPort):
                 prompt=prompt,
                 max_tokens=max_tokens,
                 temperature=temperature,
-                top_p=getattr(settings, 'llm_top_p', 0.9)
+                top_p=getattr(settings, 'llm_top_p', 0.4)
             )
 
             response = self.client.invoke_model(
@@ -72,6 +73,7 @@ class AWSLLMProvider(LLMPort):
             response_body = json.loads(response["body"].read())
             generated_text = self.format_strategy.extract_response(response_body)
             
+            # Costs calculation
             # Count output tokens
             output_tokens = TokenCounter.estimate_tokens(generated_text, self.model_id)
             
@@ -90,7 +92,8 @@ class AWSLLMProvider(LLMPort):
             # Calculate and log costs
             cost_calc = TokenCounter.calculate_cost(token_usage)
             TokenCounter.log_usage_and_cost(token_usage, cost_calc, f"LLM GENERATE - {self.model_id}")
-            
+            # Costs calculation
+
             return generated_text
             
         except ClientError as e:
@@ -135,6 +138,7 @@ class AWSLLMProvider(LLMPort):
         try:
             from app.core.config import settings
             
+            # Costs calculation
             # Count input tokens
             input_tokens = TokenCounter.estimate_tokens(prompt, self.model_id)
             generated_text = ""  # Accumulate for output token counting
@@ -174,6 +178,7 @@ class AWSLLMProvider(LLMPort):
                     logger.error(f"Error processing streaming chunk: {e}")
                     continue  # Skip problematic chunks
             
+            # Costs calculation
             # After streaming is complete, calculate and log token usage
             output_tokens = TokenCounter.estimate_tokens(generated_text, self.model_id)
             token_usage = TokenUsage(
@@ -186,7 +191,7 @@ class AWSLLMProvider(LLMPort):
             # Calculate and log costs
             cost_calc = TokenCounter.calculate_cost(token_usage)
             TokenCounter.log_usage_and_cost(token_usage, cost_calc, f"LLM STREAM - {self.model_id}")
-                    
+            # Costs calculation        
         except ClientError as e:
             error_code = e.response['Error']['Code']
             logger.error(f"AWS ClientError in generate_stream: {error_code} - {e}")

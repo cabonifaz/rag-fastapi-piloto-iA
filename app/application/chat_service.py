@@ -33,7 +33,7 @@ class ChatService:
         
         if is_claude:
             # Claude-optimized prompt: concise, natural, conversational
-            return f"""Based on the following context, please answer the user's question. Include relevant source references with document ID and page numbers. Do not search on internet.
+            return f"""Based on the following context, please answer the user's question. Include relevant source references with document ID and page numbers. Do not search on internet. Answer in the same language as the question.
 
 Context:
 {context_text}
@@ -130,6 +130,10 @@ A:"""
         except Exception as e:
             logger.error(f"Unexpected error during document search: {e}")
             raise ConnectionError(f"Document search failed: {str(e)}")
+        
+        # Log total found documents
+        print(f"DEBUG: total_found = {search_result['total_found']}")
+        logger.info(f"Vector search returned {search_result['total_found']} documents")
         
         # Check if no documents found at database level
         if search_result["total_found"] == 0:
@@ -258,6 +262,10 @@ A:"""
             top_k=search_top_k,
             similarity_threshold=search_threshold
         )
+        
+        # Log total found documents
+        print(f"DEBUG: total_found = {search_result['total_found']}")
+        logger.info(f"Vector search returned {search_result['total_found']} documents")
         
         # Check if no documents found at database level
         if search_result["total_found"] == 0:

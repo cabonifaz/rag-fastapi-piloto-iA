@@ -254,7 +254,15 @@ class WeaviateRepository(VectorStorePort):
         
         
         if similarity_threshold is not None:
-            results = [r for r in results if r.get("distance", 1.0) <= similarity_threshold]
+            print(f"DEBUG: Before filtering - {len(results)} results")
+            for i, r in enumerate(results):
+                distance = r.get('distance', 1.0)
+                similarity = 1.0 - distance if distance is not None else 0.0
+                print(f"DEBUG: Result {i}: distance = {distance}, similarity = {similarity:.3f}")
+            # Convert similarity_threshold to distance_threshold and filter
+            distance_threshold = 1.0 - similarity_threshold
+            results = [r for r in results if r.get("distance", 1.0) <= distance_threshold]
+            print(f"DEBUG: After filtering with similarity_threshold {similarity_threshold} (distance_threshold {distance_threshold:.3f}) - {len(results)} results")
         
         formatted_results = []
         for r in results:
