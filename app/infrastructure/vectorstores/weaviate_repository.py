@@ -6,6 +6,7 @@ import asyncio
 import logging
 import weaviate
 from weaviate.exceptions import WeaviateBaseError
+from weaviate.classes.query import Filter
 
 from app.domain.ports.vectorstore_port import VectorStorePort
 
@@ -129,11 +130,17 @@ class WeaviateRepository(VectorStorePort):
                 if return_properties:
                     query_kwargs["return_properties"] = list(return_properties)
                 
-                # Add filters if provided
+                # Build the query with filters if provided
                 if filters:
-                    query_kwargs["where"] = filters
-                
-                response = collection.query.near_vector(**query_kwargs)
+                    response = collection.query.near_vector(
+                        near_vector=list(vector),
+                        limit=top_k,
+                        return_metadata=["distance"] if include_distance else [],
+                        return_properties=list(return_properties) if return_properties else None,
+                        filters=filters
+                    )
+                else:
+                    response = collection.query.near_vector(**query_kwargs)
                 
                 results: List[VectorSearchResult] = []
                 for obj in response.objects:
@@ -211,7 +218,8 @@ class WeaviateRepository(VectorStorePort):
         self, 
         query_vector: List[float], 
         top_k: int = 5,
-        similarity_threshold: Optional[float] = None
+        similarity_threshold: Optional[float] = None,
+        area: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar vectors using the default class name from settings."""
         from app.core.config import settings
@@ -220,7 +228,8 @@ class WeaviateRepository(VectorStorePort):
             collection_name=settings.weaviate_class_name,
             query_vector=query_vector,
             top_k=top_k,
-            similarity_threshold=similarity_threshold
+            similarity_threshold=similarity_threshold,
+            area=area
         )
 
     async def search_in_collection(
@@ -229,18 +238,28 @@ class WeaviateRepository(VectorStorePort):
         query_vector: List[float], 
         top_k: int = 5,
         similarity_threshold: Optional[float] = None,
-        company_id: Optional[str] = None
+        company_id: Optional[str] = None,
+        area: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar vectors in a specific collection with optional company filtering."""
         
-        # Company filtering disabled for now
+        # Build filters for company_id and area using v4 Filter class
         filters = None
-        # if company_id:
-        #     filters = {
-        #         "path": ["company_id"],
-        #         "operator": "Equal",
-        #         "valueText": company_id
-        #     }
+        filter_conditions = []
+        
+        if company_id:
+            filter_conditions.append(Filter.by_property("company_id").equal(company_id))
+        
+        if area:
+            filter_conditions.append(Filter.by_property("area").equal(area))
+        
+        # Combine multiple conditions with & operator
+        if len(filter_conditions) == 1:
+            filters = filter_conditions[0]
+        elif len(filter_conditions) > 1:
+            filters = filter_conditions[0]
+            for condition in filter_conditions[1:]:
+                filters = filters & condition
         
         # Return all actual properties from the database
         results = await self.search_by_vector(
@@ -272,6 +291,7 @@ class WeaviateRepository(VectorStorePort):
                 "metadata": {
                     # All stored database parameters (based on actual CargaConocimiento_iA schema)
                     "company_id": r["properties"].get("company_id", ""),
+                    "area": r["properties"].get("area", ""),
                     "doc_id": r["properties"].get("doc_id", ""),
                     "chunk_id": r["properties"].get("chunk_id", ""),
                     "page_start": r["properties"].get("page_start"),

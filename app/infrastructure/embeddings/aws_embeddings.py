@@ -20,21 +20,18 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
         self,
         region: str,
         model_id: str,
-        access_key: Optional[str] = None,
-        secret_key: Optional[str] = None,
+        profile_name: Optional[str] = None,
     ):
         """
         Inicializa el cliente de AWS Bedrock.
 
         :param region: región de AWS (ej. "us-east-1")
         :param model_id: ID del modelo de embeddings (ej. "amazon.titan-embed-text-v1")
-        :param access_key: AWS_ACCESS_KEY_ID (opcional si usas IAM Role)
-        :param secret_key: AWS_SECRET_ACCESS_KEY (opcional si usas IAM Role)
+        :param profile_name: AWS profile name (opcional si usas IAM Role)
         """
         session_params = {"region_name": region}
-        if access_key and secret_key:
-            session_params["aws_access_key_id"] = access_key
-            session_params["aws_secret_access_key"] = secret_key
+        if profile_name:
+            session_params["profile_name"] = profile_name
 
         session = boto3.Session(**session_params)
         self.client = session.client("bedrock-runtime")

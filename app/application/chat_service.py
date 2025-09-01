@@ -141,7 +141,7 @@ A:"""
             return {
                 "user_id": user_id,
                 "message": message,
-                "answer": "There is no information available about this subject in the database.",
+                "answer": "Parece que tu pregunta no es lo suficientemente específica 🤔. ¿Me das un poco más de contexto para ayudarte mejor?",
                 "context_documents": [],
                 "context_text": "",
                 "total_documents_found": 0,
@@ -278,7 +278,7 @@ A:"""
             }
             yield {
                 "type": "chunk",
-                "content": "There is no information available about this subject in the database."
+                "content": "Parece que tu pregunta no es lo suficientemente específica 🤔. ¿Me das un poco más de contexto para ayudarte mejor?"
             }
             yield {
                 "type": "complete",
