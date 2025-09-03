@@ -20,12 +20,13 @@ router = APIRouter()
 class UnifiedRequest(BaseModel):
     user_id: str
     message: str
-    company_id: str                    # Required, for company-specific search
-    collection: str = None              # Optional, defaults to env config
-    top_k: int = 5                     # Optional, for search endpoints
-    similarity_threshold: float = 0.7   # Optional, for search endpoints
-    temperature: Optional[float] = None  # Optional, defaults to env config
-    max_tokens: Optional[int] = None     # Optional, defaults to env config
+    company_id: str                         # Required, for company-specific search
+    area: Optional[str] = None              # Optional, for area-specific filtering
+    collection: str = None                   # Optional, defaults to env config
+    top_k: Optional[int] = None             # Optional, defaults to env config
+    similarity_threshold: Optional[float] = None  # Optional, defaults to env config
+    temperature: Optional[float] = None      # Optional, defaults to env config
+    max_tokens: Optional[int] = None         # Optional, defaults to env config
 
 # Request Schema for embedding-only endpoints
 class EmbeddingTestRequest(BaseModel):
@@ -141,6 +142,7 @@ async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(g
             user_id=request.user_id, 
             message=request.message,
             company_id=request.company_id,
+            area=request.area,
             collection=request.collection,
             top_k=request.top_k,
             similarity_threshold=request.similarity_threshold,
@@ -228,14 +230,17 @@ async def search_endpoint(request: UnifiedRequest, chat_service: ChatService = D
     Args:
         user_id: User identifier
         message: Search query text
-        collection: Collection to search in (optional)
-        top_k: Number of results to return (default: 5)
-        similarity_threshold: Minimum similarity score (default: 0.7)
+        company_id: Company identifier for filtering results
+        area: Area identifier for additional filtering (optional)
+        collection: Collection to search in (optional, defaults to env config)
+        top_k: Number of results to return (optional, defaults to env config)
+        similarity_threshold: Minimum similarity score (optional, defaults to env config)
     """
     # Perform vector search using ChatService
     result = await chat_service.search_documents(
         query=request.message,  # Use 'message' field consistently
         company_id=request.company_id,
+        area=request.area,
         collection=request.collection,
         top_k=request.top_k,
         similarity_threshold=request.similarity_threshold
@@ -271,6 +276,7 @@ async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple =
                     user_id=request.user_id,
                     message=request.message,
                     company_id=request.company_id,
+                    area=request.area,
                     collection=request.collection,
                     top_k=request.top_k,
                     similarity_threshold=request.similarity_threshold,

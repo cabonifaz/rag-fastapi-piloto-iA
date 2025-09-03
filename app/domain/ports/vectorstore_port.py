@@ -6,7 +6,7 @@ class VectorStorePort(ABC):
     async def search(
         self, 
         query_vector: List[float], 
-        top_k: int = 5,
+        top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar vectors and return documents with metadata."""

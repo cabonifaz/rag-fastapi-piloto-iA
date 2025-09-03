@@ -87,7 +87,7 @@ class WeaviateRepository(VectorStorePort):
         self,
         class_name: str,
         vector: Sequence[float],
-        top_k: int = 5,
+        top_k: Optional[int] = None,
         return_properties: Optional[Sequence[str]] = None,
         filters: Optional[Dict[str, Any]] = None,
         target_vector: Optional[str] = None,
@@ -111,6 +111,10 @@ class WeaviateRepository(VectorStorePort):
             Lista de dicts con: id (uuid), properties (dict) y distance (float|None).
         """
 
+        # Use environment default if not provided
+        from app.core.config import settings
+        actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
+
         def _query_sync() -> List[VectorSearchResult]:
             try:
                 # v4 client method
@@ -122,7 +126,7 @@ class WeaviateRepository(VectorStorePort):
                 # Build query with optional filters
                 query_kwargs = {
                     "near_vector": list(vector),
-                    "limit": top_k,
+                    "limit": actual_top_k,
                     "return_metadata": ["distance"] if include_distance else [],
                 }
                 
@@ -134,7 +138,7 @@ class WeaviateRepository(VectorStorePort):
                 if filters:
                     response = collection.query.near_vector(
                         near_vector=list(vector),
-                        limit=top_k,
+                        limit=actual_top_k,
                         return_metadata=["distance"] if include_distance else [],
                         return_properties=list(return_properties) if return_properties else None,
                         filters=filters
@@ -217,7 +221,7 @@ class WeaviateRepository(VectorStorePort):
     async def search(
         self, 
         query_vector: List[float], 
-        top_k: int = 5,
+        top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
         area: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -236,52 +240,79 @@ class WeaviateRepository(VectorStorePort):
         self,
         collection_name: str,
         query_vector: List[float], 
-        top_k: int = 5,
+        top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
         company_id: Optional[str] = None,
         area: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar vectors in a specific collection with optional company filtering."""
         
-        # Build filters for company_id and area using v4 Filter class
-        filters = None
-        filter_conditions = []
+        try:
+            from app.core.config import settings
+            
+            # Use environment defaults if not provided
+            actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
+            actual_similarity_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
+            
+            # Validate inputs
+            if not collection_name:
+                raise ValueError("Collection name cannot be empty")
+            if not query_vector:
+                raise ValueError("Query vector cannot be empty")
+            if actual_top_k <= 0:
+                raise ValueError("top_k must be greater than 0")
+            if similarity_threshold is not None and not (0.0 <= similarity_threshold <= 1.0):
+                raise ValueError("Similarity threshold must be between 0.0 and 1.0")
+            
+            # Build filters for company_id and area using v4 Filter class
+            filters = None
+            filter_conditions = []
+            
+            if company_id:
+                filter_conditions.append(Filter.by_property("company_id").equal(company_id))
+            
+            if area:
+                filter_conditions.append(Filter.by_property("area").equal(area))
+            
+            # Combine multiple conditions with & operator
+            if len(filter_conditions) == 1:
+                filters = filter_conditions[0]
+            elif len(filter_conditions) > 1:
+                filters = filter_conditions[0]
+                for condition in filter_conditions[1:]:
+                    filters = filters & condition
+            
+            # Return all actual properties from the database
+            results = await self.search_by_vector(
+                class_name=collection_name,
+                vector=query_vector,
+                top_k=actual_top_k,
+                return_properties=["text", "company_id", "doc_id", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
+                filters=filters,
+                include_distance=True
+            )
+            
+        except ValueError:
+            raise  # Re-raise validation errors
+        except ConnectionError:
+            raise  # Re-raise connection errors from search_by_vector
+        except TimeoutError:
+            raise  # Re-raise timeout errors from search_by_vector
+        except Exception as e:
+            logger.error(f"Unexpected error in search_in_collection: {e}")
+            raise ConnectionError(f"Vector search service error: {str(e)}")
         
-        if company_id:
-            filter_conditions.append(Filter.by_property("company_id").equal(company_id))
         
-        if area:
-            filter_conditions.append(Filter.by_property("area").equal(area))
-        
-        # Combine multiple conditions with & operator
-        if len(filter_conditions) == 1:
-            filters = filter_conditions[0]
-        elif len(filter_conditions) > 1:
-            filters = filter_conditions[0]
-            for condition in filter_conditions[1:]:
-                filters = filters & condition
-        
-        # Return all actual properties from the database
-        results = await self.search_by_vector(
-            class_name=collection_name,
-            vector=query_vector,
-            top_k=top_k,
-            return_properties=["text", "company_id", "doc_id", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
-            filters=filters,
-            include_distance=True
-        )
-        
-        
-        if similarity_threshold is not None:
+        if actual_similarity_threshold is not None:
             print(f"DEBUG: Before filtering - {len(results)} results")
             for i, r in enumerate(results):
                 distance = r.get('distance', 1.0)
                 similarity = 1.0 - distance if distance is not None else 0.0
                 print(f"DEBUG: Result {i}: distance = {distance}, similarity = {similarity:.3f}")
             # Convert similarity_threshold to distance_threshold and filter
-            distance_threshold = 1.0 - similarity_threshold
+            distance_threshold = 1.0 - actual_similarity_threshold
             results = [r for r in results if r.get("distance", 1.0) <= distance_threshold]
-            print(f"DEBUG: After filtering with similarity_threshold {similarity_threshold} (distance_threshold {distance_threshold:.3f}) - {len(results)} results")
+            print(f"DEBUG: After filtering with similarity_threshold {actual_similarity_threshold} (distance_threshold {distance_threshold:.3f}) - {len(results)} results")
         
         formatted_results = []
         for r in results:

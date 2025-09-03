@@ -72,7 +72,7 @@ A:"""
             "status": "success"
         }
 
-    async def process_rag_query(self, user_id: str, message: str, company_id: str, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, llm_provider=None) -> Dict[str, Any]:
+    async def process_rag_query(self, user_id: str, message: str, company_id: str, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, llm_provider=None) -> Dict[str, Any]:
         """
         Complete RAG flow: embedding generation + vector search + context assembly + LLM answer generation.
         
@@ -116,6 +116,7 @@ A:"""
             search_result = await self.search_documents(
                 query=message,
                 company_id=company_id,
+                area=area,
                 collection=collection,
                 top_k=search_top_k,
                 similarity_threshold=search_threshold
@@ -223,7 +224,7 @@ A:"""
             "status": "success"
         }
 
-    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, llm_provider=None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, llm_provider=None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -258,6 +259,7 @@ A:"""
         search_result = await self.search_documents(
             query=message,
             company_id=company_id,
+            area=area,
             collection=collection,
             top_k=search_top_k,
             similarity_threshold=search_threshold
@@ -350,13 +352,14 @@ A:"""
             "status": "success"
         }
 
-    async def search_documents(self, query: str, company_id: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
+    async def search_documents(self, query: str, company_id: str = None, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
         """
         Basic vector database search implementation.
         
         Args:
             query: Search query text
             company_id: Company identifier for filtering results
+            area: Area identifier for additional filtering
             collection: Collection/class name to search in (defaults to config or company_id)
             top_k: Number of results to return (defaults to config)
             similarity_threshold: Minimum similarity score (defaults to config)
@@ -381,17 +384,41 @@ A:"""
         search_top_k = top_k if top_k is not None else settings.rag_top_k_results
         search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
         
-        # Step 1: Convert query to embedding
-        query_embedding = await self.embeddings_provider.embed(query)
+        try:
+            # Step 1: Convert query to embedding
+            query_embedding = await self.embeddings_provider.embed(query)
+        except ConnectionError as e:
+            logger.error(f"Connection error during embedding generation: {e}")
+            raise ConnectionError(f"Embedding service unavailable: {str(e)}")
+        except ValueError as e:
+            logger.error(f"Invalid input for embedding: {e}")
+            raise ValueError(f"Invalid query for embedding: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during embedding generation: {e}")
+            raise ConnectionError(f"Embedding generation failed: {str(e)}")
         
-        # Step 2: Search vector database in specified collection with company filtering (no error handling)
-        search_results = await self.vectorstore.search_in_collection(
-            collection_name=search_collection,
-            query_vector=query_embedding,
-            top_k=search_top_k,
-            similarity_threshold=search_threshold,
-            company_id=company_id
-        )
+        try:
+            # Step 2: Search vector database in specified collection with company and area filtering
+            search_results = await self.vectorstore.search_in_collection(
+                collection_name=search_collection,
+                query_vector=query_embedding,
+                top_k=search_top_k,
+                similarity_threshold=search_threshold,
+                company_id=company_id,
+                area=area
+            )
+        except ConnectionError as e:
+            logger.error(f"Connection error during vector search: {e}")
+            raise ConnectionError(f"Vector database unavailable: {str(e)}")
+        except ValueError as e:
+            logger.error(f"Invalid search parameters: {e}")
+            raise ValueError(f"Invalid search parameters: {str(e)}")
+        except TimeoutError as e:
+            logger.error(f"Timeout error during vector search: {e}")
+            raise TimeoutError(f"Vector search timeout: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during vector search: {e}")
+            raise ConnectionError(f"Vector search failed: {str(e)}")
         
         # Step 3: Format results
         documents = []
@@ -422,46 +449,86 @@ A:"""
                 "similarity_threshold": search_threshold,
                 "embedding_model": settings.embeddings_model_id,
                 "collection": search_collection,
-                "company_id": company_id
+                "company_id": company_id,
+                "area": area
             },
             "embedding_dimensions": len(query_embedding),
             "status": "success"
         }
 
     async def handle_message(self, session_id: str, user_message: str) -> Tuple[str, List[Dict[str, Any]]]:
-        self.memory_repository.save_message(session_id, role="user", content=user_message)
+        try:
+            if not session_id:
+                raise ValueError("Session ID cannot be empty")
+            if not user_message or not user_message.strip():
+                raise ValueError("User message cannot be empty")
+            
+            self.memory_repository.save_message(session_id, role="user", content=user_message)
 
-        query_vector = await self.embeddings_provider.embed(user_message)
+            try:
+                query_vector = await self.embeddings_provider.embed(user_message)
+            except ConnectionError as e:
+                logger.error(f"Connection error during embedding generation: {e}")
+                raise ConnectionError(f"Embedding service unavailable: {str(e)}")
+            except Exception as e:
+                logger.error(f"Unexpected error during embedding generation: {e}")
+                raise ConnectionError(f"Embedding generation failed: {str(e)}")
 
-        results = await self.vector_repository.search_by_vector(
-            class_name="Documents",
-            vector=query_vector,
-            top_k=5,
-            return_properties=["text", "source"],
-        )
+            try:
+                results = await self.vector_repository.search_by_vector(
+                    class_name="Documents",
+                    vector=query_vector,
+                    top_k=5,
+                    return_properties=["text", "source"],
+                )
+            except ConnectionError as e:
+                logger.error(f"Connection error during vector search: {e}")
+                raise ConnectionError(f"Vector database unavailable: {str(e)}")
+            except Exception as e:
+                logger.error(f"Unexpected error during vector search: {e}")
+                raise ConnectionError(f"Vector search failed: {str(e)}")
 
-        context_chunks = [r["properties"].get("text", "") for r in results]
+            context_chunks = [r["properties"].get("text", "") for r in results]
 
-        history = self.memory_repository.get_history(session_id)
-        formatted_history = "\n".join([f"{m['role']}: {m['content']}" for m in history])
-        context_text = "\n".join(context_chunks)
+            try:
+                history = self.memory_repository.get_history(session_id)
+                formatted_history = "\n".join([f"{m['role']}: {m['content']}" for m in history])
+                context_text = "\n".join(context_chunks)
 
-        prompt = f"""
-        You are an assistant. Use the following context to answer the question.
-        
-        Context:
-        {context_text}
+                prompt = f"""
+                You are an assistant. Use the following context to answer the question.
+                
+                Context:
+                {context_text}
 
-        Conversation so far:
-        {formatted_history}
+                Conversation so far:
+                {formatted_history}
 
-        User: {user_message}
-        Assistant:
-        """
+                User: {user_message}
+                Assistant:
+                """
 
-        answer = await self.llm_provider.generate(prompt)
+                answer = await self.llm_provider.generate(prompt)
+            except ConnectionError as e:
+                logger.error(f"Connection error during LLM generation: {e}")
+                raise ConnectionError(f"LLM service unavailable: {str(e)}")
+            except Exception as e:
+                logger.error(f"Unexpected error during LLM generation: {e}")
+                raise ConnectionError(f"LLM generation failed: {str(e)}")
 
-        self.memory_repository.save_message(session_id, role="assistant", content=answer)
-
-        history = self.memory_repository.get_history(session_id)
-        return answer, history
+            try:
+                self.memory_repository.save_message(session_id, role="assistant", content=answer)
+                history = self.memory_repository.get_history(session_id)
+                return answer, history
+            except Exception as e:
+                logger.error(f"Error saving conversation history: {e}")
+                # Return answer even if history save fails
+                return answer, []
+                
+        except ValueError:
+            raise  # Re-raise validation errors
+        except ConnectionError:
+            raise  # Re-raise connection errors
+        except Exception as e:
+            logger.error(f"Unexpected error in handle_message: {e}")
+            raise ConnectionError(f"Message handling failed: {str(e)}")
