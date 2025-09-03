@@ -169,3 +169,11 @@ prompt: Answer concisely and directly. Do NOT repeat, do NOT explain, do NOT add
   And update the AWS provider request format for Claude (different from Llama).
 
   Recommendation: Start with Claude 3 Haiku - it's designed exactly for this kind of consistent, instruction-following use case.
+
+DB Connection:
+  curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+echo "deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" | \
+  sudo tee /etc/apt/sources.list.d/msprod.list
+
+sudo apt-get update
+sudo apt-get install -y msodbcsql17 unixodbc-dev

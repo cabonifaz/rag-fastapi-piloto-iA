@@ -21,13 +21,13 @@ aiohttp==3.9.1
 python-dotenv==1.0.0
 
 # JSON handling and utilities
-orjson==3.9.10
+# orjson==3.9.10          # Removed - not being used
 
 # Token counting for cost calculation
 tiktoken==0.8.0
 
 # Logging and monitoring
-structlog==23.2.0
+# structlog==23.2.0       # Removed - not being used
 
 # Type hints and development
 typing-extensions>=4.12.2
@@ -46,13 +46,14 @@ mypy==1.7.1
 
 # Database ORM and Migration
 sqlalchemy==2.0.23
-alembic==1.13.1
+# alembic==1.13.1         # Removed - migrations not being used
 
 # Database Drivers (Optional - install as needed)
 # SQL Databases
 # psycopg2-binary==2.9.9  # PostgreSQL
 # pymysql==1.1.0          # MySQL
 # sqlite3                 # SQLite (built-in)
+pyodbc==5.0.1             # SQL Server
 
 # NoSQL Databases
 # pymongo==4.6.0          # MongoDB

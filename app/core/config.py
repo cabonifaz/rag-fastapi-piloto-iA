@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     rag_top_k_results: int
     rag_similarity_threshold: float
     
+    # SQL Server Database Configuration
+    db_server: str
+    db_database: str
+    db_username: str
+    db_password: str
+    db_driver: str = "ODBC Driver 17 for SQL Server"
+    db_port: int = 1433
+    db_trusted_connection: bool = False
+    
     log_level: str
     log_format: str
     
@@ -96,6 +105,30 @@ class Settings(BaseSettings):
             raise ValueError("RAG similarity threshold must be between 0.0 and 1.0")
         return v
     
+    @validator('db_server')
+    def validate_db_server(cls, v):
+        if not v:
+            raise ValueError("Database server is required")
+        return v
+    
+    @validator('db_database')
+    def validate_db_database(cls, v):
+        if not v:
+            raise ValueError("Database name is required")
+        return v
+    
+    @validator('db_username')
+    def validate_db_username(cls, v):
+        if not v:
+            raise ValueError("Database username is required")
+        return v
+    
+    @validator('db_password')
+    def validate_db_password(cls, v):
+        if not v:
+            raise ValueError("Database password is required")
+        return v
+    
     @property
     def vectordb_url(self) -> Optional[str]:
         return self.weaviate_url
@@ -103,6 +136,14 @@ class Settings(BaseSettings):
     @property
     def vectordb_api_key(self) -> Optional[str]:
         return self.weaviate_api_key
+    
+    @property
+    def database_url(self) -> str:
+        """Generate SQL Server connection string"""
+        if self.db_trusted_connection:
+            return f"mssql+pyodbc://@{self.db_server}:{self.db_port}/{self.db_database}?driver={self.db_driver.replace(' ', '+')}&trusted_connection=yes"
+        else:
+            return f"mssql+pyodbc://{self.db_username}:{self.db_password}@{self.db_server}:{self.db_port}/{self.db_database}?driver={self.db_driver.replace(' ', '+')}"
     
     class Config:
         env_file = ".env"

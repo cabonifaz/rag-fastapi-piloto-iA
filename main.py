@@ -2,20 +2,45 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from contextlib import asynccontextmanager
 import uvicorn
 import os
 import logging
 from app.core.config import settings
-from app.api import chat
+from app.core.database import init_database, close_database
+from app.api import chat, auth
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events"""
+    # Startup
+    try:
+        await init_database()
+        logger.info("Application startup completed successfully")
+    except Exception as e:
+        logger.error(f"Application startup failed: {e}")
+        raise
+    
+    yield
+    
+    # Shutdown
+    try:
+        await close_database()
+        logger.info("Application shutdown completed successfully")
+    except Exception as e:
+        logger.error(f"Error during application shutdown: {e}")
+
 
 app = FastAPI(
     title="Qamaq RAG API",
     description="Retrieval-Augmented Generation API with AWS Bedrock and Weaviate",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -26,7 +51,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(chat.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1/rag", tags=["rag"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):

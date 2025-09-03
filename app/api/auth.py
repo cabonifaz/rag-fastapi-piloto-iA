@@ -1,0 +1,161 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from app.core.database import get_db
+from app.services.auth_service import AuthService
+from app.models.user_models import LoginRequest, LoginResponse, UserInfo
+from app.models.response_models import create_success_response, create_error_response
+from pydantic import ValidationError
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
+    """Dependency injection for AuthService"""
+    return AuthService(db)
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login_endpoint(
+    login_request: LoginRequest,
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    User login endpoint
+    
+    Authenticates user credentials against SQL Server database.
+    Returns user information and session details on successful login.
+    
+    Args:
+        login_request: LoginRequest containing usuario and clave_acceso
+        
+    Returns:
+        LoginResponse with user details and success status
+        
+    Raises:
+        HTTPException: 401 for invalid credentials, 422 for validation errors, 500 for server errors
+    """
+    try:
+        # Validate and authenticate user
+        login_response = await auth_service.authenticate_user(login_request)
+        
+        if not login_response:
+            error_response = create_error_response("Credenciales inválidas")
+            raise HTTPException(
+                status_code=401,
+                detail={"result": error_response.dict()}
+            )
+        
+        logger.info(f"User login successful: {login_request.usuario}")
+        return login_response
+        
+    except ValidationError as e:
+        logger.error(f"Validation error in login endpoint: {e}")
+        error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
+        raise HTTPException(
+            status_code=422,
+            detail={"result": error_response.dict()}
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in login endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.dict()}
+        )
+
+
+@router.post("/logout")
+async def logout_endpoint(
+    user_id: int,
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    User logout endpoint
+    
+    Updates user connection status to disconnected.
+    
+    Args:
+        user_id: ID of the user to logout
+        
+    Returns:
+        Success message
+        
+    Raises:
+        HTTPException: 404 if user not found, 500 for server errors
+    """
+    try:
+        success = await auth_service.logout_user(user_id)
+        
+        if not success:
+            error_response = create_error_response("Usuario no encontrado")
+            raise HTTPException(
+                status_code=404,
+                detail={"result": error_response.dict()}
+            )
+        
+        success_response = create_success_response("Sesión cerrada exitosamente")
+        return {"result": success_response.dict()}
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in logout endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.dict()}
+        )
+
+
+@router.get("/user/{user_id}", response_model=UserInfo)
+async def get_user_info_endpoint(
+    user_id: int,
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Get user information endpoint
+    
+    Retrieves user details by user ID.
+    
+    Args:
+        user_id: ID of the user to retrieve
+        
+    Returns:
+        UserInfo with user details
+        
+    Raises:
+        HTTPException: 404 if user not found, 500 for server errors
+    """
+    try:
+        user_info = await auth_service.get_user_info(user_id)
+        
+        if not user_info:
+            error_response = create_error_response("Usuario no encontrado")
+            raise HTTPException(
+                status_code=404,
+                detail={"result": error_response.dict()}
+            )
+        
+        return user_info
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get user info endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.dict()}
+        )
