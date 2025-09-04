@@ -58,7 +58,6 @@ class JWTAuth:
                 'ID_USUARIO': user_id
             }
             
-            logger.info(f"JWT validated - User ID: {user_id}")
             return extracted_data
             
         except jwt.ExpiredSignatureError:
@@ -111,38 +110,19 @@ async def get_current_user(
 ) -> Dict[str, Any]:
     """Get current user from JWT token (cookie preferred, header as fallback)"""
     
-    print("*** get_current_user CALLED ***")
-    print(f"Request URL: {request.url}")
-    print(f"Request headers: {dict(request.headers)}")
-    print(f"All cookies: {request.cookies}")
-    print(f"JWT Cookie present: {jwt_cookie is not None}")
-    print(f"JWT Cookie value: {jwt_cookie[:50] if jwt_cookie else None}...")
-    print(f"Auth header present: {auth_header is not None}")
-    logger.info("*** get_current_user CALLED ***")
-    logger.info(f"JWT Cookie present: {jwt_cookie is not None}")
-    logger.info(f"Auth header present: {auth_header is not None}")
-    
     token = None
     
     # Try cookie first
     if jwt_cookie:
         token = jwt_cookie
-        print(f"*** USING JWT FROM COOKIE - LENGTH: {len(jwt_cookie)} ***")
-        logger.info("Using JWT from cookie")
-        logger.info(f"Cookie token length: {len(jwt_cookie)}")
     # Fallback to Authorization header
     elif auth_header:
         token = auth_header.credentials
-        print(f"*** USING JWT FROM HEADER - LENGTH: {len(auth_header.credentials)} ***")
-        logger.info("Using JWT from Authorization header")
-        logger.info(f"Header token length: {len(auth_header.credentials)}")
     else:
-        print("*** NO JWT TOKEN FOUND - RETURNING 401 ***")
         logger.warning("No JWT token found in cookie or header")
         raise HTTPException(
             status_code=401,
             detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
         )
-    
-    logger.info("About to verify JWT token...")
+
     return JWTAuth.verify_jwt_token(token)

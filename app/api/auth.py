@@ -46,7 +46,6 @@ async def login_endpoint(
         login_response = await auth_service.authenticate_user(login_request)
         
         if not login_response:
-            print(f"*** LOGIN FAILED - AUTH SERVICE RETURNED NONE FOR: {login_request.usuario} ***")
             error_response = create_error_response("Credenciales inválidas")
             raise HTTPException(
                 status_code=401,
@@ -54,11 +53,6 @@ async def login_endpoint(
             )
         
         # Set HttpOnly cookie with JWT token (8 hours expiration)
-        print(f"*** SETTING JWT COOKIE FOR USER: {login_request.usuario} ***")
-        print(f"*** COOKIE DOMAIN: Default (current domain) ***")
-        print(f"*** COOKIE PATH: / ***")
-        print(f"*** COOKIE SECURE: False ***")
-        print(f"*** COOKIE SAMESITE: lax ***")
         
         response.set_cookie(
             key="jwt_token",
@@ -72,10 +66,6 @@ async def login_endpoint(
         
         # Remove token from response body for security
         login_response.token = None
-        
-        print(f"*** USER LOGIN SUCCESSFUL: {login_request.usuario} ***")
-        print(f"*** LOGIN RESPONSE BEING SENT: {login_response.model_dump()} ***")
-        logger.info(f"User login successful: {login_request.usuario}")
         return login_response
         
     except ValidationError as e:
@@ -91,7 +81,6 @@ async def login_endpoint(
         raise
         
     except Exception as e:
-        print(f"*** UNEXPECTED ERROR IN LOGIN ENDPOINT: {e} ***")
         logger.error(f"Unexpected error in login endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
@@ -134,7 +123,6 @@ async def logout_endpoint(
             )
         
         # Clear the HttpOnly cookie
-        print(f"*** CLEARING JWT COOKIE FOR USER ID: {logout_request.user_id} ***")
         response.set_cookie(
             key="jwt_token",
             value="",
@@ -143,7 +131,6 @@ async def logout_endpoint(
             secure=False,   # Set to True in production with HTTPS
             samesite="lax"  # Less strict for development
         )
-        print("*** JWT COOKIE CLEARED ***")
         
         success_response = create_success_response("Sesión cerrada exitosamente")
         return {"result": success_response.model_dump()}
@@ -218,7 +205,6 @@ async def validate_jwt_endpoint(
     This is used by GuardRoute to protect frontend routes.
     """
     try:
-        print(f"*** JWT VALIDATION ENDPOINT - USER ID: {current_user.get('ID_USUARIO')} ***")
         
         success_response = create_success_response("JWT válido")
         return {

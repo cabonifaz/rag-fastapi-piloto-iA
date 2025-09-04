@@ -41,11 +41,7 @@ async def init_database():
     try:
         # Test database connection
         with engine.connect() as connection:
-            logger.info("Database connection successful")
-        
-        # Create tables (if needed)
-        # Base.metadata.create_all(bind=engine)
-        # logger.info("Database tables initialized")
+            pass
         
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
@@ -56,6 +52,6 @@ async def close_database():
     """Close database connections"""
     try:
         engine.dispose()
-        logger.info("Database connections closed")
     except Exception as e:
         logger.error(f"Error closing database: {e}")
+        raise

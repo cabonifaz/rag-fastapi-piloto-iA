@@ -133,7 +133,6 @@ A:"""
             raise ConnectionError(f"Document search failed: {str(e)}")
         
         # Log total found documents
-        print(f"DEBUG: total_found = {search_result['total_found']}")
         logger.info(f"Vector search returned {search_result['total_found']} documents")
         
         # Check if no documents found at database level
@@ -266,7 +265,6 @@ A:"""
         )
         
         # Log total found documents
-        print(f"DEBUG: total_found = {search_result['total_found']}")
         logger.info(f"Vector search returned {search_result['total_found']} documents")
         
         # Check if no documents found at database level

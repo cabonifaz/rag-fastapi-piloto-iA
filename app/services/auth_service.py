@@ -48,8 +48,6 @@ class AuthService:
             
             # Create JWT token
             token = jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
-            print(f"*** JWT TOKEN CREATED: {token[:50]}... ***")
-            print(f"*** JWT PAYLOAD: {payload} ***")
             
             return token
             
@@ -66,7 +64,6 @@ class AuthService:
                 @Password = :password
             """)
             
-            logger.info(f"Executing SP_VERIFY_USER_PASS for user: {usuario}")
             result = self.db.execute(query, {
                 'username': usuario,
                 'password': password
@@ -81,8 +78,7 @@ class AuthService:
             
             status_dict = dict(status_data._mapping) if hasattr(status_data, '_mapping') else dict(zip(result.keys(), status_data))
             auth_status = status_dict.get('Status', 0)
-            
-            logger.info(f"SP_VERIFY_USER_PASS returned status: {auth_status} for user: {usuario}")
+
             return auth_status == 1
             
         except Exception as e:
@@ -91,14 +87,11 @@ class AuthService:
     
     async def get_user_data(self, usuario: str) -> Optional[dict]:
         """Get user data using SP_USUARIO_LOGIN"""
-        logger.info("*** ENTERED GET_USER_DATA METHOD ***")
         try:
             query = text("""
                 EXEC SP_USUARIO_LOGIN 
                 @USUARIO = :usuario
             """)
-            
-            logger.info(f"Executing SP_USUARIO_LOGIN for user: {usuario}")
             
             # Use raw connection to handle multiple result sets
             raw_conn = self.db.connection().connection
@@ -112,41 +105,31 @@ class AuthService:
                 result_set_num = 1
                 
                 while True:
-                    print(f"*** PROCESSING RESULT SET {result_set_num} ***")
                     
                     try:
                         # Check if we have columns (indicating data)
                         if cursor.description:
                             columns = [desc[0] for desc in cursor.description]
-                            print(f"*** COLUMNS: {columns} ***")
                             
                             rows = cursor.fetchall()
-                            print(f"*** ROWS COUNT: {len(rows)} ***")
                             
-                            if result_set_num == 1:  # Status message
-                                print("*** SKIPPING STATUS MESSAGE ***")
-                            elif result_set_num == 3 and rows:  # User data
+                            if result_set_num == 3 and rows:  # User data
                                 user_row = rows[0]
                                 user_data = dict(zip(columns, user_row))
-                                print(f"*** USER DATA EXTRACTED: {user_data} ***")
                             elif result_set_num == 4 and rows:  # Role data
                                 for row in rows:
                                     role_dict = dict(zip(columns, row))
                                     roles_data.append(role_dict)
-                                print(f"*** ROLES DATA EXTRACTED: {roles_data} ***")
-                        else:
-                            print("*** NO COLUMNS - EMPTY RESULT SET ***")
                     
                     except Exception as fetch_error:
-                        print(f"*** FETCH ERROR: {fetch_error} ***")
+                        logger.error(f"Fetch error: {fetch_error}")
                     
                     # Move to next result set
                     try:
                         if not cursor.nextset():
-                            print("*** NO MORE RESULT SETS ***")
                             break
                     except Exception as nextset_error:
-                        print(f"*** NEXTSET ERROR: {nextset_error} ***")
+                        logger.error(f"Nextset error: {nextset_error}")
                         break
                     
                     result_set_num += 1
@@ -158,12 +141,11 @@ class AuthService:
                     **user_data,
                     'roles': roles_data
                 }
-                print(f"*** COMPLETE USER DATA: {complete_user_data} ***")
                 
                 return complete_user_data
                 
             except Exception as cursor_error:
-                print(f"*** CURSOR ERROR: {cursor_error} ***")
+                logger.error(f"Cursor error: {cursor_error}")
                 cursor.close()
                 raise
             
@@ -183,26 +165,18 @@ class AuthService:
         """
         try:
             # Step 1: Verify password
-            logger.info(f"About to verify password for user: {login_request.usuario}")
             is_valid = await self.verify_user_password(login_request.usuario, login_request.clave_acceso)
-            logger.info(f"Password verification result: {is_valid} for user: {login_request.usuario}")
             
             if not is_valid:
                 logger.warning(f"Password verification FAILED for user: {login_request.usuario}")
                 return None
             
-            logger.info(f"Password verification SUCCESSFUL for user: {login_request.usuario}")
-            
             # Step 2: Get user data
-            logger.info("=== CALLING GET_USER_DATA METHOD ===")
             user_data = await self.get_user_data(login_request.usuario)
-            logger.info("=== GET_USER_DATA METHOD COMPLETED ===")
             
             if not user_data:
                 logger.error(f"Failed to get user data for: {login_request.usuario}")
                 return None
-            
-            logger.info(f"User data retrieved successfully for: {login_request.usuario}")
             
             # Create JWT token
             jwt_token = self.create_jwt_token(user_data)
@@ -251,7 +225,6 @@ class AuthService:
             if user:
                 user.ID_CONECTADO = False
                 self.db.commit()
-                logger.info(f"User logged out: {user.USUARIO}")
                 return True
             return False
         except Exception as e:
