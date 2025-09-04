@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     # CORS Configuration
     cors_origins: str
     
+    
     @validator('aws_region')
     def validate_aws_region(cls, v):
         if not v:

@@ -43,6 +43,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# IP filtering disabled - using CORS only for web access control
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins.split(","),  # From environment variable
