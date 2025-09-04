@@ -173,40 +173,40 @@ async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(g
     except ValidationError as e:
         logger.error(f"Validation error in chat endpoint: {e}")
         error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
-        raise HTTPException(status_code=422, detail={"result": error_response.dict()})
+        raise HTTPException(status_code=422, detail={"result": error_response.model_dump()})
         
     except ClientError as e:
         error_code = e.response['Error']['Code']
         logger.error(f"AWS Client error in chat endpoint: {error_code} - {e}")
         if error_code == 'ValidationException':
             error_response = create_error_response("Parámetros inválidos para el modelo de lenguaje")
-            raise HTTPException(status_code=400, detail={"result": error_response.dict()})
+            raise HTTPException(status_code=400, detail={"result": error_response.model_dump()})
         elif error_code == 'ThrottlingException':
             error_response = create_error_response("Límite de tasa excedido. Por favor, inténtelo de nuevo más tarde")
-            raise HTTPException(status_code=429, detail={"result": error_response.dict()})
+            raise HTTPException(status_code=429, detail={"result": error_response.model_dump()})
         else:
             error_response = create_error_response("Error del servicio de modelo de lenguaje")
-            raise HTTPException(status_code=500, detail={"result": error_response.dict()})
+            raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
             
     except NoCredentialsError as e:
         logger.error(f"AWS credentials error in chat endpoint: {e}")
         error_response = create_error_response("Credenciales de AWS no configuradas")
-        raise HTTPException(status_code=500, detail={"result": error_response.dict()})
+        raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
         
     except EndpointConnectionError as e:
         logger.error(f"AWS connection error in chat endpoint: {e}")
         error_response = create_error_response("No se puede conectar a los servicios de AWS")
-        raise HTTPException(status_code=503, detail={"result": error_response.dict()})
+        raise HTTPException(status_code=503, detail={"result": error_response.model_dump()})
         
     except ConnectionError as e:
         logger.error(f"Connection error in chat endpoint: {e}")
         error_response = create_error_response("Error de conexión del servicio")
-        raise HTTPException(status_code=503, detail={"result": error_response.dict()})
+        raise HTTPException(status_code=503, detail={"result": error_response.model_dump()})
         
     except TimeoutError as e:
         logger.error(f"Timeout error in chat endpoint: {e}")
         error_response = create_error_response("Tiempo de espera de la solicitud agotado")
-        raise HTTPException(status_code=504, detail={"result": error_response.dict()})
+        raise HTTPException(status_code=504, detail={"result": error_response.model_dump()})
         
     except ValueError as e:
         logger.error(f"Value error in chat endpoint: {e}")
@@ -216,7 +216,7 @@ async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(g
     except Exception as e:
         logger.error(f"Unexpected error in chat endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(status_code=500, detail={"result": error_response.dict()})
+        raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
 
 
 @router.post("/chat-test", response_model=EmbeddingTestResponse)
@@ -325,22 +325,22 @@ async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple =
                 elif error_code == 'ThrottlingException':
                     error_msg = "Límite de tasa excedido. Por favor, inténtelo de nuevo más tarde"
                 error_response = create_error_response(error_msg)
-                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'result': error_response.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'result': error_response.model_dump()})}\n\n"
                 
             except (NoCredentialsError, EndpointConnectionError, ConnectionError) as e:
                 logger.error(f"Connection error in streaming: {e}")
                 error_response = create_error_response("Error de conexión del servicio")
-                yield f"data: {json.dumps({'type': 'error', 'message': 'Error de conexión del servicio', 'result': error_response.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Error de conexión del servicio', 'result': error_response.model_dump()})}\n\n"
                 
             except TimeoutError as e:
                 logger.error(f"Timeout error in streaming: {e}")
                 error_response = create_error_response("Tiempo de espera de la solicitud agotado")
-                yield f"data: {json.dumps({'type': 'error', 'message': 'Tiempo de espera de la solicitud agotado', 'result': error_response.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Tiempo de espera de la solicitud agotado', 'result': error_response.model_dump()})}\n\n"
                 
             except Exception as e:
                 logger.error(f"Unexpected error in streaming: {e}")
                 error_response = create_error_response("Error interno del servidor")
-                yield f"data: {json.dumps({'type': 'error', 'message': 'Error interno del servidor', 'result': error_response.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Error interno del servidor', 'result': error_response.model_dump()})}\n\n"
         
         return StreamingResponse(
             generate_stream(),
@@ -356,7 +356,7 @@ async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple =
     except ValidationError as e:
         logger.error(f"Validation error in streaming endpoint: {e}")
         error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
-        raise HTTPException(status_code=422, detail={"result": error_response.dict()})
+        raise HTTPException(status_code=422, detail={"result": error_response.model_dump()})
         
     except ValueError as e:
         logger.error(f"Value error in streaming endpoint: {e}")
@@ -366,4 +366,4 @@ async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple =
     except Exception as e:
         logger.error(f"Unexpected error in streaming endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(status_code=500, detail={"result": error_response.dict()})
+        raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})

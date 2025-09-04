@@ -45,7 +45,7 @@ async def login_endpoint(
             error_response = create_error_response("Credenciales inválidas")
             raise HTTPException(
                 status_code=401,
-                detail={"result": error_response.dict()}
+                detail={"result": error_response.model_dump()}
             )
         
         logger.info(f"User login successful: {login_request.usuario}")
@@ -56,7 +56,7 @@ async def login_endpoint(
         error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
         raise HTTPException(
             status_code=422,
-            detail={"result": error_response.dict()}
+            detail={"result": error_response.model_dump()}
         )
         
     except HTTPException:
@@ -68,7 +68,7 @@ async def login_endpoint(
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,
-            detail={"result": error_response.dict()}
+            detail={"result": error_response.model_dump()}
         )
 
 
@@ -98,11 +98,11 @@ async def logout_endpoint(
             error_response = create_error_response("Usuario no encontrado")
             raise HTTPException(
                 status_code=404,
-                detail={"result": error_response.dict()}
+                detail={"result": error_response.model_dump()}
             )
         
         success_response = create_success_response("Sesión cerrada exitosamente")
-        return {"result": success_response.dict()}
+        return {"result": success_response.model_dump()}
         
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -113,7 +113,7 @@ async def logout_endpoint(
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,
-            detail={"result": error_response.dict()}
+            detail={"result": error_response.model_dump()}
         )
 
 
@@ -143,7 +143,7 @@ async def get_user_info_endpoint(
             error_response = create_error_response("Usuario no encontrado")
             raise HTTPException(
                 status_code=404,
-                detail={"result": error_response.dict()}
+                detail={"result": error_response.model_dump()}
             )
         
         return user_info
@@ -157,5 +157,5 @@ async def get_user_info_endpoint(
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,
-            detail={"result": error_response.dict()}
+            detail={"result": error_response.model_dump()}
         )

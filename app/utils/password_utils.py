@@ -25,64 +25,52 @@ class PasswordUtils:
         return hashlib.sha256(password.encode()).hexdigest()
     
     @staticmethod
-    def verify_password(stored_password: str, provided_password: str) -> bool:
+    def hash_password_binary(password: str) -> bytes:
         """
-        Verify password against stored hash with backward compatibility.
-        
-        Supports:
-        - SHA256 hashed passwords (64 hex characters)
-        - Plain text passwords (legacy support)
+        Hash password using SHA256, return as binary.
         
         Args:
-            stored_password: Password stored in database
+            password: Plain text password to hash
+            
+        Returns:
+            Hashed password as binary data
+        """
+        return hashlib.sha256(password.encode()).digest()
+    
+    
+    @staticmethod
+    def verify_password(stored_password: str, provided_password: str) -> bool:
+        """
+        Verify password against SHA256 hash stored as binary data in SQL Server.
+        
+        Args:
+            stored_password: Password hash stored in database (binary data as Unicode string)
             provided_password: Password provided by user
             
         Returns:
             True if passwords match, False otherwise
         """
         try:
-            # Check if stored password looks like SHA256 hash (64 hex characters)
-            if PasswordUtils._is_sha256_hash(stored_password):
-                # Compare hashed versions
-                hashed_provided = PasswordUtils.hash_password(provided_password)
-                return stored_password.lower() == hashed_provided.lower()
-            else:
-                # Legacy plain text comparison
-                logger.warning("Plain text password detected - consider migrating to hashed passwords")
-                return stored_password == provided_password
+            # Convert Unicode characters back to bytes (SQL Server VARBINARY -> Unicode conversion)
+            byte_values = []
+            for char in stored_password:
+                byte_values.append(ord(char) & 0xFF)
+            stored_bytes = bytes(byte_values)
+            
+            # Only support SHA256 (32 bytes)
+            if len(stored_bytes) == 32:
+                # Generate SHA256 hash of provided password
+                hashed_provided_binary = PasswordUtils.hash_password_binary(provided_password)
+                
+                # Compare binary hashes
+                return stored_bytes == hashed_provided_binary
+            
+            # If not 32 bytes, it's not our expected SHA256 format
+            return False
                 
         except Exception as e:
             logger.error(f"Password verification error: {e}")
             return False
-    
-    @staticmethod
-    def _is_sha256_hash(password: str) -> bool:
-        """
-        Check if a string looks like a SHA256 hash.
-        
-        Args:
-            password: String to check
-            
-        Returns:
-            True if string appears to be SHA256 hash
-        """
-        return (
-            len(password) == 64 and 
-            all(c in '0123456789abcdefABCDEF' for c in password)
-        )
-    
-    @staticmethod
-    def needs_rehashing(stored_password: str) -> bool:
-        """
-        Check if password needs to be rehashed (e.g., plain text to hash).
-        
-        Args:
-            stored_password: Password stored in database
-            
-        Returns:
-            True if password should be rehashed
-        """
-        return not PasswordUtils._is_sha256_hash(stored_password)
     
     @staticmethod
     def get_password_strength(password: str) -> Tuple[bool, str]:
