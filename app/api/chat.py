@@ -4,6 +4,7 @@ from pydantic import BaseModel, ValidationError
 from typing import List, Dict, Any, Optional
 import json
 import logging
+from app.utils.jwt_auth import get_current_user
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.application.chat_service import ChatService
 from app.core.config import settings
@@ -131,7 +132,11 @@ def get_full_rag_dependencies():
     return container.get_full_rag_chat_service()
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(get_full_rag_dependencies)):
+async def chat_endpoint(
+    request: UnifiedRequest, 
+    dependencies: tuple = Depends(get_full_rag_dependencies),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Clean chat endpoint with RAG-powered answer generation.
     
@@ -146,6 +151,9 @@ async def chat_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(g
     """
     try:
         chat_service, llm_provider = dependencies
+        
+        # Log authenticated user information
+        logger.info(f"Chat request from authenticated user ID: {current_user.get('ID_USUARIO')}")
         
         # Process complete RAG query with LLM answer generation
         result = await chat_service.process_rag_query(
@@ -277,7 +285,11 @@ async def search_endpoint(request: UnifiedRequest, chat_service: ChatService = D
 
 
 @router.post("/chat-streaming")
-async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple = Depends(get_full_rag_dependencies)):
+async def chat_streaming_endpoint(
+    request: UnifiedRequest, 
+    dependencies: tuple = Depends(get_full_rag_dependencies),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Streaming chat endpoint with RAG-powered answer generation.
     
@@ -291,6 +303,9 @@ async def chat_streaming_endpoint(request: UnifiedRequest, dependencies: tuple =
     """
     try:
         chat_service, llm_provider = dependencies
+        
+        # Log authenticated user information  
+        logger.info(f"Streaming chat request from authenticated user ID: {current_user.get('ID_USUARIO')}")
         
         async def generate_stream():
             try:

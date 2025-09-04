@@ -1,0 +1,148 @@
+from fastapi import HTTPException, Cookie, Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional, Dict, Any
+import jwt
+from datetime import datetime, timezone
+import logging
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+security = HTTPBearer(auto_error=False)  # Don't auto-error, let us handle it
+
+class JWTAuth:
+    """JWT Authentication utility"""
+    
+    @staticmethod
+    def verify_jwt_token(token: str) -> Dict[str, Any]:
+        """Verify JWT token and extract required user data"""
+        try:
+            payload = jwt.decode(
+                token, 
+                settings.jwt_secret_key, 
+                algorithms=['HS256']
+            )
+            
+            # Extract the 4 required parameters
+            user_id = payload.get('ID_USUARIO')
+            username = payload.get('USUARIO')
+            rol = payload.get('STRING1')  # rol name
+            rol_id = payload.get('ID_TIPO_ROL')  # rol id
+            
+            # Validate that all 4 parameters exist
+            if not all([user_id, username, rol, rol_id]):
+                missing = []
+                if not user_id: missing.append('ID_USUARIO')
+                if not username: missing.append('USUARIO') 
+                if not rol: missing.append('STRING1 (rol)')
+                if not rol_id: missing.append('ID_TIPO_ROL')
+                
+                logger.warning(f"JWT missing required fields: {missing}")
+                raise HTTPException(
+                    status_code=401,
+                    detail={"result": {"idTipoMensaje": 1, "mensaje": f"Token inválido - faltan campos: {missing}"}}
+                )
+            
+            # Check expiration
+            exp_timestamp = payload.get('exp')
+            if exp_timestamp:
+                exp_datetime = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+                if datetime.now(timezone.utc) > exp_datetime:
+                    logger.warning(f"Token expired for user: {username}")
+                    raise HTTPException(
+                        status_code=401,
+                        detail={"result": {"idTipoMensaje": 1, "mensaje": "Token expirado"}}
+                    )
+            
+            # Return only user ID for now
+            extracted_data = {
+                'ID_USUARIO': user_id
+            }
+            
+            logger.info(f"JWT validated - User ID: {user_id}")
+            return extracted_data
+            
+        except jwt.ExpiredSignatureError:
+            logger.warning("JWT token expired")
+            raise HTTPException(
+                status_code=401,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Token expirado"}}
+            )
+        except jwt.InvalidTokenError:
+            logger.warning("Invalid JWT token")
+            raise HTTPException(
+                status_code=401,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Token inválido"}}
+            )
+        except Exception as e:
+            logger.error(f"JWT verification error: {e}")
+            raise HTTPException(
+                status_code=401,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Error de autenticación"}}
+            )
+
+# Dependency functions
+async def get_jwt_from_cookie(jwt_token: Optional[str] = Cookie(None)) -> str:
+    """Get JWT token from cookie"""
+    if not jwt_token:
+        logger.warning("JWT token not found in cookie")
+        raise HTTPException(
+            status_code=401,
+            detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
+        )
+    return jwt_token
+
+async def get_jwt_from_header(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    """Get JWT token from Authorization header"""
+    return credentials.credentials
+
+async def get_current_user_from_cookie(token: str = Depends(get_jwt_from_cookie)) -> Dict[str, Any]:
+    """Get current user from JWT token in cookie"""
+    return JWTAuth.verify_jwt_token(token)
+
+async def get_current_user_from_header(token: str = Depends(get_jwt_from_header)) -> Dict[str, Any]:
+    """Get current user from JWT token in Authorization header"""
+    return JWTAuth.verify_jwt_token(token)
+
+# Flexible authentication that accepts both cookie and header
+async def get_current_user(
+    request: Request,
+    jwt_cookie: Optional[str] = Cookie(None, alias="jwt_token"),
+    auth_header: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Dict[str, Any]:
+    """Get current user from JWT token (cookie preferred, header as fallback)"""
+    
+    print("*** get_current_user CALLED ***")
+    print(f"Request URL: {request.url}")
+    print(f"Request headers: {dict(request.headers)}")
+    print(f"All cookies: {request.cookies}")
+    print(f"JWT Cookie present: {jwt_cookie is not None}")
+    print(f"JWT Cookie value: {jwt_cookie[:50] if jwt_cookie else None}...")
+    print(f"Auth header present: {auth_header is not None}")
+    logger.info("*** get_current_user CALLED ***")
+    logger.info(f"JWT Cookie present: {jwt_cookie is not None}")
+    logger.info(f"Auth header present: {auth_header is not None}")
+    
+    token = None
+    
+    # Try cookie first
+    if jwt_cookie:
+        token = jwt_cookie
+        print(f"*** USING JWT FROM COOKIE - LENGTH: {len(jwt_cookie)} ***")
+        logger.info("Using JWT from cookie")
+        logger.info(f"Cookie token length: {len(jwt_cookie)}")
+    # Fallback to Authorization header
+    elif auth_header:
+        token = auth_header.credentials
+        print(f"*** USING JWT FROM HEADER - LENGTH: {len(auth_header.credentials)} ***")
+        logger.info("Using JWT from Authorization header")
+        logger.info(f"Header token length: {len(auth_header.credentials)}")
+    else:
+        print("*** NO JWT TOKEN FOUND - RETURNING 401 ***")
+        logger.warning("No JWT token found in cookie or header")
+        raise HTTPException(
+            status_code=401,
+            detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
+        )
+    
+    logger.info("About to verify JWT token...")
+    return JWTAuth.verify_jwt_token(token)

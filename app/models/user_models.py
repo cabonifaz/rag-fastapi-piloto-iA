@@ -43,8 +43,11 @@ class LoginResponse(BaseModel):
     id_empresa: int
     id_sucursal: Optional[int] = None
     ultimo_ingreso: Optional[datetime] = None
-    token: Optional[str] = None  # For future JWT implementation
+    token: Optional[str] = None  # JWT token
     status: str = "success"
+    # Role information for frontend display
+    id_tipo_rol: int
+    rol_nombre: str  # STRING1 from the role SP
 
 
 class UserInfo(BaseModel):

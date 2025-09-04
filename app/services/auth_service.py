@@ -1,11 +1,12 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, text
 from app.models.user_models import Usuario, LoginRequest, LoginResponse, UserInfo
 from app.core.database import get_db
-from app.utils.password_utils import PasswordUtils
-from datetime import datetime
+from app.core.config import settings
+from datetime import datetime, timezone, timedelta
 import logging
 from typing import Optional
+import jwt
 
 logger = logging.getLogger(__name__)
 
@@ -15,57 +16,219 @@ class AuthService:
     
     def __init__(self, db: Session):
         self.db = db
+        # JWT configuration from settings
+        self.jwt_secret = settings.jwt_secret_key
+        self.jwt_expiration_hours = settings.jwt_expiration_hours
+        self.jwt_algorithm = 'HS256'
     
-    def _verify_password(self, stored_password: str, provided_password: str) -> bool:
-        """Verify password against stored hash using centralized password utilities"""
-        return PasswordUtils.verify_password(stored_password, provided_password)
+    def create_jwt_token(self, user_data: dict) -> str:
+        """Create JWT token with user data for frontend cookie storage"""
+        try:
+            # Extract role information from roles array
+            role_name = 'User'  # Default role
+            role_id = 1  # Default role ID
+            if user_data.get('roles') and len(user_data['roles']) > 0:
+                role_info = user_data['roles'][0]
+                role_name = role_info.get('STRING1', 'User')
+                role_id = role_info.get('ID_TIPO_ROL', 1)
+            
+            # Create JWT payload with all fields needed by frontend
+            payload = {
+                'ID_USUARIO': user_data.get('ID_USUARIO'),
+                'USUARIO': user_data.get('USUARIO'),
+                'NOMBRES': user_data.get('NOMBRES'),
+                'APELLIDOS': user_data.get('APELLIDOS'),
+                'ID_TIPO_ROL': role_id,
+                'STRING1': role_name,
+                'ID_EMPRESA': user_data.get('ID_EMPRESA'),
+                'exp': datetime.now(timezone.utc) + timedelta(hours=self.jwt_expiration_hours),  # Configurable expiration
+                'iat': datetime.now(timezone.utc),  # Issued at
+                'iss': 'qamaq-rag-api'  # Issuer
+            }
+            
+            # Create JWT token
+            token = jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
+            print(f"*** JWT TOKEN CREATED: {token[:50]}... ***")
+            print(f"*** JWT PAYLOAD: {payload} ***")
+            
+            return token
+            
+        except Exception as e:
+            logger.error(f"Error creating JWT token: {e}")
+            raise
+    
+    async def verify_user_password(self, usuario: str, password: str) -> bool:
+        """Verify user password using SP_VERIFY_USER_PASS"""
+        try:
+            query = text("""
+                EXEC SP_VERIFY_USER_PASS 
+                @Username = :username, 
+                @Password = :password
+            """)
+            
+            logger.info(f"Executing SP_VERIFY_USER_PASS for user: {usuario}")
+            result = self.db.execute(query, {
+                'username': usuario,
+                'password': password
+            })
+            
+            status_data = result.fetchone()
+            result.close()
+            
+            if not status_data:
+                logger.warning(f"No response from SP_VERIFY_USER_PASS for user: {usuario}")
+                return False
+            
+            status_dict = dict(status_data._mapping) if hasattr(status_data, '_mapping') else dict(zip(result.keys(), status_data))
+            auth_status = status_dict.get('Status', 0)
+            
+            logger.info(f"SP_VERIFY_USER_PASS returned status: {auth_status} for user: {usuario}")
+            return auth_status == 1
+            
+        except Exception as e:
+            logger.error(f"Error in verify_user_password: {e}")
+            return False
+    
+    async def get_user_data(self, usuario: str) -> Optional[dict]:
+        """Get user data using SP_USUARIO_LOGIN"""
+        logger.info("*** ENTERED GET_USER_DATA METHOD ***")
+        try:
+            query = text("""
+                EXEC SP_USUARIO_LOGIN 
+                @USUARIO = :usuario
+            """)
+            
+            logger.info(f"Executing SP_USUARIO_LOGIN for user: {usuario}")
+            
+            # Use raw connection to handle multiple result sets
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+            
+            try:
+                cursor.execute("EXEC SP_USUARIO_LOGIN @USUARIO = ?", usuario)
+                
+                user_data = {}
+                roles_data = []
+                result_set_num = 1
+                
+                while True:
+                    print(f"*** PROCESSING RESULT SET {result_set_num} ***")
+                    
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            print(f"*** COLUMNS: {columns} ***")
+                            
+                            rows = cursor.fetchall()
+                            print(f"*** ROWS COUNT: {len(rows)} ***")
+                            
+                            if result_set_num == 1:  # Status message
+                                print("*** SKIPPING STATUS MESSAGE ***")
+                            elif result_set_num == 3 and rows:  # User data
+                                user_row = rows[0]
+                                user_data = dict(zip(columns, user_row))
+                                print(f"*** USER DATA EXTRACTED: {user_data} ***")
+                            elif result_set_num == 4 and rows:  # Role data
+                                for row in rows:
+                                    role_dict = dict(zip(columns, row))
+                                    roles_data.append(role_dict)
+                                print(f"*** ROLES DATA EXTRACTED: {roles_data} ***")
+                        else:
+                            print("*** NO COLUMNS - EMPTY RESULT SET ***")
+                    
+                    except Exception as fetch_error:
+                        print(f"*** FETCH ERROR: {fetch_error} ***")
+                    
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            print("*** NO MORE RESULT SETS ***")
+                            break
+                    except Exception as nextset_error:
+                        print(f"*** NEXTSET ERROR: {nextset_error} ***")
+                        break
+                    
+                    result_set_num += 1
+                
+                cursor.close()
+                
+                # Combine user data with roles
+                complete_user_data = {
+                    **user_data,
+                    'roles': roles_data
+                }
+                print(f"*** COMPLETE USER DATA: {complete_user_data} ***")
+                
+                return complete_user_data
+                
+            except Exception as cursor_error:
+                print(f"*** CURSOR ERROR: {cursor_error} ***")
+                cursor.close()
+                raise
+            
+        except Exception as e:
+            logger.error(f"Error in get_user_data: {e}")
+            return None
     
     async def authenticate_user(self, login_request: LoginRequest) -> Optional[LoginResponse]:
         """
-        Authenticate user credentials against SQL Server database
+        Authenticate user credentials using separate stored procedure calls
         
         Args:
-            login_request: LoginRequest containing usuario and clave_acceso
+            login_request: LoginRequest containing usuario and clave_acceso (plain text)
             
         Returns:
             LoginResponse with user details if successful, None if failed
         """
         try:
-            # Query user from database
-            user = self.db.query(Usuario).filter(
-                and_(
-                    Usuario.USUARIO == login_request.usuario,
-                    Usuario.ID_ESTADO_REGISTRO == 1  # Only active users
-                )
-            ).first()
+            # Step 1: Verify password
+            logger.info(f"About to verify password for user: {login_request.usuario}")
+            is_valid = await self.verify_user_password(login_request.usuario, login_request.clave_acceso)
+            logger.info(f"Password verification result: {is_valid} for user: {login_request.usuario}")
             
-            if not user:
-                logger.warning(f"User not found: {login_request.usuario}")
+            if not is_valid:
+                logger.warning(f"Password verification FAILED for user: {login_request.usuario}")
                 return None
             
-            # Verify password
-            if not self._verify_password(user.CLAVE_ACCESO, login_request.clave_acceso):
-                logger.warning(f"Invalid password for user: {login_request.usuario}")
+            logger.info(f"Password verification SUCCESSFUL for user: {login_request.usuario}")
+            
+            # Step 2: Get user data
+            logger.info("=== CALLING GET_USER_DATA METHOD ===")
+            user_data = await self.get_user_data(login_request.usuario)
+            logger.info("=== GET_USER_DATA METHOD COMPLETED ===")
+            
+            if not user_data:
+                logger.error(f"Failed to get user data for: {login_request.usuario}")
                 return None
             
-            # Update last login timestamp
-            user.ULTIMO_INGRESO = datetime.utcnow()
-            user.ID_CONECTADO = True
-            self.db.commit()
+            logger.info(f"User data retrieved successfully for: {login_request.usuario}")
             
-            logger.info(f"User authenticated successfully: {login_request.usuario}")
+            # Create JWT token
+            jwt_token = self.create_jwt_token(user_data)
             
-            # Return successful login response
+            # Extract role information for frontend display
+            role_name = 'User'  # Default role
+            role_id = 1  # Default role ID
+            if user_data.get('roles') and len(user_data['roles']) > 0:
+                role_info = user_data['roles'][0]
+                role_name = role_info.get('STRING1', 'User')
+                role_id = role_info.get('ID_TIPO_ROL', 1)
+            
+            # Return complete login response with real user data, JWT, and role info
             return LoginResponse(
-                user_id=user.ID_USUARIO,
-                usuario=user.USUARIO,
-                nombres=user.NOMBRES,
-                apellidos=user.APELLIDOS,
-                email=user.EMAIL,
-                id_empresa=user.ID_EMPRESA,
-                id_sucursal=user.ID_SUCURSAL,
-                ultimo_ingreso=user.ULTIMO_INGRESO,
-                status="success"
+                user_id=user_data.get('ID_USUARIO'),
+                usuario=user_data.get('USUARIO'),
+                nombres=user_data.get('NOMBRES'),
+                apellidos=user_data.get('APELLIDOS'),
+                email=None,  # Not provided by SP
+                id_empresa=user_data.get('ID_EMPRESA'),
+                id_sucursal=user_data.get('ID_SUCURSAL'),
+                ultimo_ingreso=datetime.now(timezone.utc),
+                token=jwt_token,  # JWT token for authentication
+                status="success",
+                id_tipo_rol=role_id,  # Role ID for permissions
+                rol_nombre=role_name  # Role name for display
             )
             
         except Exception as e:

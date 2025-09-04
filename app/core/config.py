@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 from pydantic import validator
 from typing import Optional
 import logging
+from .database_config import database_config
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +36,6 @@ class Settings(BaseSettings):
     rag_top_k_results: int
     rag_similarity_threshold: float
     
-    # SQL Server Database Configuration
-    db_server: str
-    db_database: str
-    db_username: str
-    db_password: str
-    db_driver: str = "ODBC Driver 17 for SQL Server"
-    db_port: int = 1433
-    db_trusted_connection: bool = False
     
     log_level: str
     log_format: str
@@ -50,6 +43,13 @@ class Settings(BaseSettings):
     rate_limit_requests_per_minute: int
     
     environment: str
+    
+    # JWT Configuration
+    jwt_secret_key: str
+    jwt_expiration_hours: int = 8
+    
+    # CORS Configuration
+    cors_origins: str
     
     @validator('aws_region')
     def validate_aws_region(cls, v):
@@ -105,29 +105,18 @@ class Settings(BaseSettings):
             raise ValueError("RAG similarity threshold must be between 0.0 and 1.0")
         return v
     
-    @validator('db_server')
-    def validate_db_server(cls, v):
-        if not v:
-            raise ValueError("Database server is required")
+    @validator('jwt_secret_key')
+    def validate_jwt_secret_key(cls, v):
+        if not v or len(v) < 32:
+            raise ValueError("JWT secret key must be at least 32 characters long")
         return v
     
-    @validator('db_database')
-    def validate_db_database(cls, v):
-        if not v:
-            raise ValueError("Database name is required")
+    @validator('jwt_expiration_hours')
+    def validate_jwt_expiration_hours(cls, v):
+        if v <= 0 or v > 24:
+            raise ValueError("JWT expiration hours must be between 1 and 24")
         return v
     
-    @validator('db_username')
-    def validate_db_username(cls, v):
-        if not v:
-            raise ValueError("Database username is required")
-        return v
-    
-    @validator('db_password')
-    def validate_db_password(cls, v):
-        if not v:
-            raise ValueError("Database password is required")
-        return v
     
     @property
     def vectordb_url(self) -> Optional[str]:
@@ -139,15 +128,13 @@ class Settings(BaseSettings):
     
     @property
     def database_url(self) -> str:
-        """Generate SQL Server connection string"""
-        if self.db_trusted_connection:
-            return f"mssql+pyodbc://@{self.db_server}:{self.db_port}/{self.db_database}?driver={self.db_driver.replace(' ', '+')}&trusted_connection=yes"
-        else:
-            return f"mssql+pyodbc://{self.db_username}:{self.db_password}@{self.db_server}:{self.db_port}/{self.db_database}?driver={self.db_driver.replace(' ', '+')}"
+        """Get database connection string from database config"""
+        return database_config.database_url
     
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # Ignore extra fields not defined in this model
 
 try:
     settings = Settings()
