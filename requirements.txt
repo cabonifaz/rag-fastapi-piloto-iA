@@ -23,8 +23,8 @@ python-dotenv==1.0.0
 # JSON handling and utilities
 # orjson==3.9.10          # Removed - not being used
 
-# Token counting for cost calculation
-tiktoken==0.8.0
+# Token counting for cost calculation (deactivated)
+# tiktoken==0.8.0
 
 # Logging and monitoring
 # structlog==23.2.0       # Removed - not being used

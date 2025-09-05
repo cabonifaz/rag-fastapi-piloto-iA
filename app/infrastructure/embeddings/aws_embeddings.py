@@ -4,7 +4,7 @@ import logging
 from typing import List, Optional
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.domain.ports.embeddings_port import EmbeddingsPort
-from app.utils.token_counter import TokenCounter, TokenUsage
+# from app.utils.token_counter import TokenCounter, TokenUsage
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -46,9 +46,9 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
             if not text or not text.strip():
                 raise ValueError("Input text cannot be empty")
             
-            # Costs calculation
+            # Costs calculation (deactivated)
             # Count input tokens
-            input_tokens = TokenCounter.estimate_tokens(text, self.model_id)
+            # input_tokens = TokenCounter.estimate_tokens(text, self.model_id)
                 
             body = json.dumps({
                 "inputText": text
@@ -63,23 +63,23 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
 
             response_body = json.loads(response["body"].read())
             
-            # Costs calculation
+            # Costs calculation (deactivated)
             # Extract token usage from response (if available)
-            token_usage = TokenCounter.extract_token_usage_from_response(response_body, self.model_id)
-            
-            # If no usage data from AWS, use our estimation
-            if token_usage.input_tokens == 0:
-                token_usage = TokenUsage(
-                    input_tokens=input_tokens,
-                    output_tokens=0,  # Embeddings don't have output tokens
-                    total_tokens=input_tokens,
-                    model_id=self.model_id
-                )
-            
-            # Calculate and log costs
-            cost_calc = TokenCounter.calculate_cost(token_usage)
-            TokenCounter.log_usage_and_cost(token_usage, cost_calc, f"EMBEDDING - {self.model_id}")
-            # Costs calculation
+            # token_usage = TokenCounter.extract_token_usage_from_response(response_body, self.model_id)
+            # 
+            # # If no usage data from AWS, use our estimation
+            # if token_usage.input_tokens == 0:
+            #     token_usage = TokenUsage(
+            #         input_tokens=input_tokens,
+            #         output_tokens=0,  # Embeddings don't have output tokens
+            #         total_tokens=input_tokens,
+            #         model_id=self.model_id
+            #     )
+            # 
+            # # Calculate and log costs
+            # cost_calc = TokenCounter.calculate_cost(token_usage)
+            # TokenCounter.log_usage_and_cost(token_usage, cost_calc, f"EMBEDDING - {self.model_id}")
+            # # Costs calculation (deactivated)
             
             # Titan embeddings devuelve "embedding"
             embedding = response_body.get("embedding", [])
