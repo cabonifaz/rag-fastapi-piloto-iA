@@ -221,7 +221,7 @@ class AuthService:
                 apellidos=user_data.get('APELLIDOS'),
                 email=None,  # Not provided by SP
                 ultimo_ingreso=datetime.now(timezone.utc),
-                token=jwt_token,  # JWT token for authentication
+                token=jwt_token,  # Send JWT token in response body for frontend sessionStorage
                 status="success",
                 id_tipo_rol=role_id,  # Role ID for permissions
                 rol_nombre=role_name,  # Role name for display

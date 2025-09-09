@@ -125,12 +125,12 @@ async def get_current_user(
     
     token = None
     
-    # Try cookie first
-    if jwt_cookie:
-        token = jwt_cookie
-    # Fallback to Authorization header
-    elif auth_header:
+    # Try Authorization header first (preferred for sessionStorage approach)
+    if auth_header:
         token = auth_header.credentials
+    # Fallback to cookie (for backward compatibility)
+    elif jwt_cookie:
+        token = jwt_cookie
     else:
         logger.warning("No JWT token found in cookie or header")
         raise HTTPException(
