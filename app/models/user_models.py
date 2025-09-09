@@ -33,31 +33,11 @@ class LoginRequest(BaseModel):
     clave_acceso: str
 
 
-class RefreshCompanyAreaRequest(BaseModel):
-    """Request model for company/area refresh endpoint"""
-    id_empresa: int
-    empresa: str
-    id_area: int
-    area: str
-    
 
 class LoginResponse(BaseModel):
-    """Response model for successful login"""
-    user_id: int
-    usuario: str
-    nombres: str
-    apellidos: str
-    email: Optional[str] = None
-    id_empresa: Optional[int] = None
-    id_sucursal: Optional[int] = None
-    ultimo_ingreso: Optional[datetime] = None
-    token: Optional[str] = None  # JWT token
+    """Simplified response model for successful login - all user data is in JWT"""
+    token: str  # JWT token containing all user information
     status: str = "success"
-    # Role information for frontend display
-    id_tipo_rol: int
-    rol_nombre: str  # STRING1 from the role SP
-    # Company areas information
-    company_areas: Optional[List[Dict[str, Any]]] = None
 
 
 class UserInfo(BaseModel):

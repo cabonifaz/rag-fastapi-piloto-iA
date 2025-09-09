@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, text
-from app.models.user_models import Usuario, LoginRequest, LoginResponse, UserInfo, RefreshCompanyAreaRequest
+from app.models.user_models import Usuario, LoginRequest, LoginResponse, UserInfo
 from app.core.database import get_db
 from app.core.config import settings
 from datetime import datetime, timezone, timedelta
@@ -32,18 +32,6 @@ class AuthService:
                 role_name = role_info.get('STRING1', 'User')
                 role_id = role_info.get('ID_TIPO_ROL', 1)
             
-            # Extract company and area information from company_areas
-            id_empresa = None
-            empresa_nombre = None
-            id_area = None
-            area_nombre = None
-            if user_data.get('company_areas') and len(user_data['company_areas']) > 0:
-                first_company_area = user_data['company_areas'][0]
-                id_empresa = first_company_area.get('ID_EMPRESA')
-                empresa_nombre = first_company_area.get('EMPRESA')
-                id_area = first_company_area.get('ID_AREA')
-                area_nombre = first_company_area.get('AREA')
-            
             # Create JWT payload with all fields needed by frontend
             payload = {
                 'ID_USUARIO': user_data.get('ID_USUARIO'),
@@ -52,10 +40,7 @@ class AuthService:
                 'APELLIDOS': user_data.get('APELLIDOS'),
                 'ID_TIPO_ROL': role_id,
                 'STRING1': role_name,
-                'ID_EMPRESA': id_empresa,
-                'EMPRESA': empresa_nombre,
-                'ID_AREA': id_area,
-                'AREA': area_nombre,
+                'company_areas': user_data.get('company_areas', []),  # Include all available company areas
                 'exp': datetime.now(timezone.utc) + timedelta(hours=self.jwt_expiration_hours),  # Configurable expiration
                 'iat': datetime.now(timezone.utc),  # Issued at
                 'iss': 'qamaq-rag-api'  # Issuer
@@ -205,27 +190,10 @@ class AuthService:
             # Create JWT token
             jwt_token = self.create_jwt_token(user_data)
             
-            # Extract role information for frontend display
-            role_name = 'User'  # Default role
-            role_id = 1  # Default role ID
-            if user_data.get('roles') and len(user_data['roles']) > 0:
-                role_info = user_data['roles'][0]
-                role_name = role_info.get('STRING1', 'User')
-                role_id = role_info.get('ID_TIPO_ROL', 1)
-            
-            # Return complete login response with real user data, JWT, and role info
+            # Return simplified response with only JWT token - all user data is in the JWT
             return LoginResponse(
-                user_id=user_data.get('ID_USUARIO'),
-                usuario=user_data.get('USUARIO'),
-                nombres=user_data.get('NOMBRES'),
-                apellidos=user_data.get('APELLIDOS'),
-                email=None,  # Not provided by SP
-                ultimo_ingreso=datetime.now(timezone.utc),
-                token=jwt_token,  # Send JWT token in response body for frontend sessionStorage
-                status="success",
-                id_tipo_rol=role_id,  # Role ID for permissions
-                rol_nombre=role_name,  # Role name for display
-                company_areas=user_data.get('company_areas')
+                token=jwt_token,
+                status="success"
             )
             
         except Exception as e:
@@ -290,69 +258,6 @@ class AuthService:
             logger.error(f"Error getting user info for ID {user_id}: {e}")
             return None
 
-    async def refresh_company_area_jwt(self, user_id: int, refresh_request: RefreshCompanyAreaRequest) -> Optional[str]:
-        """
-        Create new JWT token with updated company/area information
-        
-        Args:
-            user_id: ID of the user
-            refresh_request: New company/area information
-            
-        Returns:
-            New JWT token string if successful, None if failed
-        """
-        try:
-            # Get user data to validate and create new JWT
-            user_data = await self.get_user_data_by_id(user_id)
-            
-            if not user_data:
-                logger.warning(f"User not found for JWT refresh: {user_id}")
-                return None
-            
-            # Validate that the user has access to the requested company/area
-            if user_data.get('company_areas'):
-                has_access = any(
-                    ca.get('ID_EMPRESA') == refresh_request.id_empresa and 
-                    ca.get('ID_AREA') == refresh_request.id_area
-                    for ca in user_data['company_areas']
-                )
-                
-                if not has_access:
-                    logger.warning(f"User {user_id} doesn't have access to company {refresh_request.id_empresa}, area {refresh_request.id_area}")
-                    return None
-            
-            # Extract role information from user data
-            role_name = 'User'  
-            role_id = 1  
-            if user_data.get('roles') and len(user_data['roles']) > 0:
-                role_info = user_data['roles'][0]
-                role_name = role_info.get('STRING1', 'User')
-                role_id = role_info.get('ID_TIPO_ROL', 1)
-            
-            # Create JWT payload with new company/area information
-            payload = {
-                'ID_USUARIO': user_data.get('ID_USUARIO'),
-                'USUARIO': user_data.get('USUARIO'),
-                'NOMBRES': user_data.get('NOMBRES'),
-                'APELLIDOS': user_data.get('APELLIDOS'),
-                'ID_TIPO_ROL': role_id,
-                'STRING1': role_name,
-                'ID_EMPRESA': refresh_request.id_empresa,
-                'EMPRESA': refresh_request.empresa,
-                'ID_AREA': refresh_request.id_area,
-                'AREA': refresh_request.area,
-                'exp': datetime.now(timezone.utc) + timedelta(hours=self.jwt_expiration_hours),
-                'iat': datetime.now(timezone.utc),
-                'iss': 'qamaq-rag-api'
-            }
-            
-            # Create and return new JWT token
-            token = jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
-            return token
-            
-        except Exception as e:
-            logger.error(f"Error refreshing JWT for user {user_id}: {e}")
-            return None
 
     async def get_user_data_by_id(self, user_id: int) -> Optional[dict]:
         """Get user data by user ID (similar to get_user_data but by ID)"""

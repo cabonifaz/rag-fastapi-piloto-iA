@@ -27,14 +27,11 @@ class JWTAuth:
             username = payload.get('USUARIO')
             rol = payload.get('STRING1')  # rol name
             rol_id = payload.get('ID_TIPO_ROL')  # rol id
-            id_empresa = payload.get('ID_EMPRESA')
-            empresa = payload.get('EMPRESA')
-            id_area = payload.get('ID_AREA')
-            area = payload.get('AREA')
+            company_areas = payload.get('company_areas', [])
             
             # Validate that all required parameters exist
-            required_fields = [user_id, username, rol, rol_id, id_empresa, empresa, id_area, area]
-            field_names = ['ID_USUARIO', 'USUARIO', 'STRING1 (rol)', 'ID_TIPO_ROL', 'ID_EMPRESA', 'EMPRESA', 'ID_AREA', 'AREA']
+            required_fields = [user_id, username, rol, rol_id]
+            field_names = ['ID_USUARIO', 'USUARIO', 'STRING1 (rol)', 'ID_TIPO_ROL']
             
             missing = []
             for field, name in zip(required_fields, field_names):
@@ -65,10 +62,7 @@ class JWTAuth:
                 'USUARIO': username,
                 'STRING1': rol,
                 'ID_TIPO_ROL': rol_id,
-                'ID_EMPRESA': id_empresa,
-                'EMPRESA': empresa,
-                'ID_AREA': id_area,
-                'AREA': area
+                'company_areas': company_areas
             }
             
             return extracted_data

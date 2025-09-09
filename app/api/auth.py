@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.auth_service import AuthService
-from app.models.user_models import LoginRequest, LoginResponse, UserInfo, RefreshCompanyAreaRequest
+from app.models.user_models import LoginRequest, LoginResponse, UserInfo
 from app.models.response_models import create_success_response, create_error_response
 from app.utils.jwt_auth import get_current_user
 from pydantic import ValidationError
@@ -202,78 +202,3 @@ async def validate_jwt_endpoint(
         )
 
 
-@router.post("/refresh-company-area")
-async def refresh_company_area_endpoint(
-    request: Request,
-    response: Response,
-    refresh_request: RefreshCompanyAreaRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    auth_service: AuthService = Depends(get_auth_service)
-):
-    """
-    Refresh JWT token with new company/area information
-    
-    Updates the JWT cookie with new company/area values while maintaining
-    the same expiration time and other user information.
-    
-    Args:
-        refresh_request: New company/area information
-        current_user: Current authenticated user from JWT
-        
-    Returns:
-        Success response if refresh successful
-        
-    Raises:
-        HTTPException: 400 for invalid company/area, 401 for auth errors, 500 for server errors
-    """
-    try:
-        user_id = current_user.get('ID_USUARIO')
-        if not user_id:
-            error_response = create_error_response("Usuario no válido")
-            raise HTTPException(
-                status_code=401,
-                detail={"result": error_response.model_dump()}
-            )
-        
-        # Validate that JWT contains valid company/area parameters
-        current_empresa = current_user.get('ID_EMPRESA')
-        current_area = current_user.get('ID_AREA')
-        
-        if current_empresa is None or current_area is None:
-            error_response = create_error_response("JWT no contiene información válida de empresa/área")
-            raise HTTPException(
-                status_code=401,
-                detail={"result": error_response.model_dump()}
-            )
-        
-        logger.info(f"User {user_id} requesting company/area change from {current_empresa}/{current_area} to {refresh_request.id_empresa}/{refresh_request.id_area}")
-        
-        # Create new JWT token with updated company/area
-        new_jwt_token = await auth_service.refresh_company_area_jwt(user_id, refresh_request)
-        
-        if not new_jwt_token:
-            error_response = create_error_response("No tienes acceso a la empresa/área seleccionada")
-            raise HTTPException(
-                status_code=400,
-                detail={"result": error_response.model_dump()}
-            )
-        
-        # Return new JWT token in response for frontend session storage update
-        
-        success_response = create_success_response("Empresa/área actualizada exitosamente")
-        return {
-            "result": success_response.model_dump(),
-            "token": new_jwt_token  # Include new JWT token for frontend session storage
-        }
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
-        raise
-        
-    except Exception as e:
-        logger.error(f"Unexpected error in refresh company/area endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(
-            status_code=500,
-            detail={"result": error_response.model_dump()}
-        )
