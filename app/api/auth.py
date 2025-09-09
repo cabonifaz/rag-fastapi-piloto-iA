@@ -52,20 +52,8 @@ async def login_endpoint(
                 detail={"result": error_response.model_dump()}
             )
         
-        # Set HttpOnly cookie with JWT token (8 hours expiration)
-        
-        response.set_cookie(
-            key="jwt_token",
-            value=login_response.token,
-            max_age=8 * 60 * 60,  # 8 hours in seconds
-            httponly=True,  # Can't be accessed via JavaScript (XSS protection)
-            secure=False,   # Set to True in production with HTTPS
-            samesite="lax",  # Less strict for development
-            path="/"  # Explicitly set path
-        )
-        
-        # Remove token from response body for security
-        login_response.token = None
+        # JWT token will be stored in frontend session storage
+        # No cookie needed - token remains in response body
         return login_response
         
     except ValidationError as e:
@@ -122,15 +110,7 @@ async def logout_endpoint(
                 detail={"result": error_response.model_dump()}
             )
         
-        # Clear the HttpOnly cookie
-        response.set_cookie(
-            key="jwt_token",
-            value="",
-            max_age=0,  # Expire immediately
-            httponly=True,
-            secure=False,   # Set to True in production with HTTPS
-            samesite="lax"  # Less strict for development
-        )
+        # JWT token will be cleared from frontend session storage
         
         success_response = create_success_response("Sesión cerrada exitosamente")
         return {"result": success_response.model_dump()}
@@ -278,19 +258,13 @@ async def refresh_company_area_endpoint(
                 detail={"result": error_response.model_dump()}
             )
         
-        # Update HttpOnly cookie with new JWT token (same settings as login)
-        response.set_cookie(
-            key="jwt_token",
-            value=new_jwt_token,
-            max_age=8 * 60 * 60,  # 8 hours in seconds
-            httponly=True,  # Can't be accessed via JavaScript (XSS protection)
-            secure=False,   # Set to True in production with HTTPS
-            samesite="lax",  # Less strict for development
-            path="/"  # Explicitly set path
-        )
+        # Return new JWT token in response for frontend session storage update
         
         success_response = create_success_response("Empresa/área actualizada exitosamente")
-        return {"result": success_response.model_dump()}
+        return {
+            "result": success_response.model_dump(),
+            "token": new_jwt_token  # Include new JWT token for frontend session storage
+        }
         
     except HTTPException:
         # Re-raise HTTP exceptions as-is

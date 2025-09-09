@@ -1,4 +1,4 @@
-from fastapi import HTTPException, Cookie, Depends, Request
+from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
 import jwt
@@ -92,50 +92,17 @@ class JWTAuth:
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Error de autenticación"}}
             )
 
-# Dependency functions
-async def get_jwt_from_cookie(jwt_token: Optional[str] = Cookie(None)) -> str:
-    """Get JWT token from cookie"""
-    if not jwt_token:
-        logger.warning("JWT token not found in cookie")
-        raise HTTPException(
-            status_code=401,
-            detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
-        )
-    return jwt_token
-
-async def get_jwt_from_header(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """Get JWT token from Authorization header"""
-    return credentials.credentials
-
-async def get_current_user_from_cookie(token: str = Depends(get_jwt_from_cookie)) -> Dict[str, Any]:
-    """Get current user from JWT token in cookie"""
-    return JWTAuth.verify_jwt_token(token)
-
-async def get_current_user_from_header(token: str = Depends(get_jwt_from_header)) -> Dict[str, Any]:
-    """Get current user from JWT token in Authorization header"""
-    return JWTAuth.verify_jwt_token(token)
-
-# Flexible authentication that accepts both cookie and header
+# Dependency function
 async def get_current_user(
-    request: Request,
-    jwt_cookie: Optional[str] = Cookie(None, alias="jwt_token"),
-    auth_header: Optional[HTTPAuthorizationCredentials] = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
-    """Get current user from JWT token (cookie preferred, header as fallback)"""
+    """Get current user from JWT token in Authorization header"""
     
-    token = None
-    
-    # Try Authorization header first (preferred for sessionStorage approach)
-    if auth_header:
-        token = auth_header.credentials
-    # Fallback to cookie (for backward compatibility)
-    elif jwt_cookie:
-        token = jwt_cookie
-    else:
-        logger.warning("No JWT token found in cookie or header")
+    if not credentials:
+        logger.warning("No JWT token found in Authorization header")
         raise HTTPException(
             status_code=401,
             detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
         )
-
-    return JWTAuth.verify_jwt_token(token)
+    
+    return JWTAuth.verify_jwt_token(credentials.credentials)
