@@ -1,7 +1,7 @@
 # app/core/container.py
 
 from app.core.config import settings
-from app.application.chat_service import ChatService
+from app.services.chat_service import ChatService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
