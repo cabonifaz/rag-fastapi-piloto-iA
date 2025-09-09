@@ -6,7 +6,7 @@ import json
 import logging
 from app.utils.jwt_auth import get_current_user
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
-from app.application.chat_service import ChatService
+from app.services.chat_service import ChatService
 from app.core.config import settings
 from app.core.container import container
 from app.models.response_models import (
