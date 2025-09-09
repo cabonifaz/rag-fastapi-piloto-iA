@@ -22,20 +22,26 @@ class JWTAuth:
                 algorithms=['HS256']
             )
             
-            # Extract the 4 required parameters
+            # Extract the required parameters
             user_id = payload.get('ID_USUARIO')
             username = payload.get('USUARIO')
             rol = payload.get('STRING1')  # rol name
             rol_id = payload.get('ID_TIPO_ROL')  # rol id
+            id_empresa = payload.get('ID_EMPRESA')
+            empresa = payload.get('EMPRESA')
+            id_area = payload.get('ID_AREA')
+            area = payload.get('AREA')
             
-            # Validate that all 4 parameters exist
-            if not all([user_id, username, rol, rol_id]):
-                missing = []
-                if not user_id: missing.append('ID_USUARIO')
-                if not username: missing.append('USUARIO') 
-                if not rol: missing.append('STRING1 (rol)')
-                if not rol_id: missing.append('ID_TIPO_ROL')
-                
+            # Validate that all required parameters exist
+            required_fields = [user_id, username, rol, rol_id, id_empresa, empresa, id_area, area]
+            field_names = ['ID_USUARIO', 'USUARIO', 'STRING1 (rol)', 'ID_TIPO_ROL', 'ID_EMPRESA', 'EMPRESA', 'ID_AREA', 'AREA']
+            
+            missing = []
+            for field, name in zip(required_fields, field_names):
+                if field is None:
+                    missing.append(name)
+                    
+            if missing:
                 logger.warning(f"JWT missing required fields: {missing}")
                 raise HTTPException(
                     status_code=401,
@@ -53,9 +59,16 @@ class JWTAuth:
                         detail={"result": {"idTipoMensaje": 1, "mensaje": "Token expirado"}}
                     )
             
-            # Return only user ID for now
+            # Return all validated JWT data
             extracted_data = {
-                'ID_USUARIO': user_id
+                'ID_USUARIO': user_id,
+                'USUARIO': username,
+                'STRING1': rol,
+                'ID_TIPO_ROL': rol_id,
+                'ID_EMPRESA': id_empresa,
+                'EMPRESA': empresa,
+                'ID_AREA': id_area,
+                'AREA': area
             }
             
             return extracted_data

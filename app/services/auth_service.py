@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, text
-from app.models.user_models import Usuario, LoginRequest, LoginResponse, UserInfo
+from app.models.user_models import Usuario, LoginRequest, LoginResponse, UserInfo, RefreshCompanyAreaRequest
 from app.core.database import get_db
 from app.core.config import settings
 from datetime import datetime, timezone, timedelta
@@ -32,6 +32,18 @@ class AuthService:
                 role_name = role_info.get('STRING1', 'User')
                 role_id = role_info.get('ID_TIPO_ROL', 1)
             
+            # Extract company and area information from company_areas
+            id_empresa = None
+            empresa_nombre = None
+            id_area = None
+            area_nombre = None
+            if user_data.get('company_areas') and len(user_data['company_areas']) > 0:
+                first_company_area = user_data['company_areas'][0]
+                id_empresa = first_company_area.get('ID_EMPRESA')
+                empresa_nombre = first_company_area.get('EMPRESA')
+                id_area = first_company_area.get('ID_AREA')
+                area_nombre = first_company_area.get('AREA')
+            
             # Create JWT payload with all fields needed by frontend
             payload = {
                 'ID_USUARIO': user_data.get('ID_USUARIO'),
@@ -40,7 +52,10 @@ class AuthService:
                 'APELLIDOS': user_data.get('APELLIDOS'),
                 'ID_TIPO_ROL': role_id,
                 'STRING1': role_name,
-                'ID_EMPRESA': user_data.get('ID_EMPRESA'),
+                'ID_EMPRESA': id_empresa,
+                'EMPRESA': empresa_nombre,
+                'ID_AREA': id_area,
+                'AREA': area_nombre,
                 'exp': datetime.now(timezone.utc) + timedelta(hours=self.jwt_expiration_hours),  # Configurable expiration
                 'iat': datetime.now(timezone.utc),  # Issued at
                 'iss': 'qamaq-rag-api'  # Issuer
@@ -102,6 +117,7 @@ class AuthService:
                 
                 user_data = {}
                 roles_data = []
+                company_areas_data = []
                 result_set_num = 1
                 
                 while True:
@@ -120,6 +136,10 @@ class AuthService:
                                 for row in rows:
                                     role_dict = dict(zip(columns, row))
                                     roles_data.append(role_dict)
+                            elif result_set_num == 5 and rows:  # Company Areas data
+                                for row in rows:
+                                    area_dict = dict(zip(columns, row))
+                                    company_areas_data.append(area_dict)
                     
                     except Exception as fetch_error:
                         logger.error(f"Fetch error: {fetch_error}")
@@ -136,10 +156,14 @@ class AuthService:
                 
                 cursor.close()
                 
-                # Combine user data with roles
+                # Remove ID_SUCURSAL and ID_EMPRESA from user_data
+                filtered_user_data = {k: v for k, v in user_data.items() if k not in ['ID_SUCURSAL', 'ID_EMPRESA']}
+                
+                # Combine user data with roles and company areas
                 complete_user_data = {
-                    **user_data,
-                    'roles': roles_data
+                    **filtered_user_data,
+                    'roles': roles_data,
+                    'company_areas': company_areas_data
                 }
                 
                 return complete_user_data
@@ -196,13 +220,12 @@ class AuthService:
                 nombres=user_data.get('NOMBRES'),
                 apellidos=user_data.get('APELLIDOS'),
                 email=None,  # Not provided by SP
-                id_empresa=user_data.get('ID_EMPRESA'),
-                id_sucursal=user_data.get('ID_SUCURSAL'),
                 ultimo_ingreso=datetime.now(timezone.utc),
                 token=jwt_token,  # JWT token for authentication
                 status="success",
                 id_tipo_rol=role_id,  # Role ID for permissions
-                rol_nombre=role_name  # Role name for display
+                rol_nombre=role_name,  # Role name for display
+                company_areas=user_data.get('company_areas')
             )
             
         except Exception as e:
@@ -265,6 +288,91 @@ class AuthService:
             return None
         except Exception as e:
             logger.error(f"Error getting user info for ID {user_id}: {e}")
+            return None
+
+    async def refresh_company_area_jwt(self, user_id: int, refresh_request: RefreshCompanyAreaRequest) -> Optional[str]:
+        """
+        Create new JWT token with updated company/area information
+        
+        Args:
+            user_id: ID of the user
+            refresh_request: New company/area information
+            
+        Returns:
+            New JWT token string if successful, None if failed
+        """
+        try:
+            # Get user data to validate and create new JWT
+            user_data = await self.get_user_data_by_id(user_id)
+            
+            if not user_data:
+                logger.warning(f"User not found for JWT refresh: {user_id}")
+                return None
+            
+            # Validate that the user has access to the requested company/area
+            if user_data.get('company_areas'):
+                has_access = any(
+                    ca.get('ID_EMPRESA') == refresh_request.id_empresa and 
+                    ca.get('ID_AREA') == refresh_request.id_area
+                    for ca in user_data['company_areas']
+                )
+                
+                if not has_access:
+                    logger.warning(f"User {user_id} doesn't have access to company {refresh_request.id_empresa}, area {refresh_request.id_area}")
+                    return None
+            
+            # Extract role information from user data
+            role_name = 'User'  
+            role_id = 1  
+            if user_data.get('roles') and len(user_data['roles']) > 0:
+                role_info = user_data['roles'][0]
+                role_name = role_info.get('STRING1', 'User')
+                role_id = role_info.get('ID_TIPO_ROL', 1)
+            
+            # Create JWT payload with new company/area information
+            payload = {
+                'ID_USUARIO': user_data.get('ID_USUARIO'),
+                'USUARIO': user_data.get('USUARIO'),
+                'NOMBRES': user_data.get('NOMBRES'),
+                'APELLIDOS': user_data.get('APELLIDOS'),
+                'ID_TIPO_ROL': role_id,
+                'STRING1': role_name,
+                'ID_EMPRESA': refresh_request.id_empresa,
+                'EMPRESA': refresh_request.empresa,
+                'ID_AREA': refresh_request.id_area,
+                'AREA': refresh_request.area,
+                'exp': datetime.now(timezone.utc) + timedelta(hours=self.jwt_expiration_hours),
+                'iat': datetime.now(timezone.utc),
+                'iss': 'qamaq-rag-api'
+            }
+            
+            # Create and return new JWT token
+            token = jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
+            return token
+            
+        except Exception as e:
+            logger.error(f"Error refreshing JWT for user {user_id}: {e}")
+            return None
+
+    async def get_user_data_by_id(self, user_id: int) -> Optional[dict]:
+        """Get user data by user ID (similar to get_user_data but by ID)"""
+        try:
+            # Get user from database
+            user = self.db.query(Usuario).filter(
+                and_(
+                    Usuario.ID_USUARIO == user_id,
+                    Usuario.ID_ESTADO_REGISTRO == 1
+                )
+            ).first()
+            
+            if not user:
+                return None
+                
+            # Get user data using the stored procedure with username
+            return await self.get_user_data(user.USUARIO)
+            
+        except Exception as e:
+            logger.error(f"Error getting user data by ID {user_id}: {e}")
             return None
 
 
