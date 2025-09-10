@@ -1,6 +1,7 @@
 import boto3
 import json
 import logging
+import os
 from typing import Optional, AsyncGenerator
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.domain.ports.llm_port import LLMPort
@@ -31,7 +32,8 @@ class AWSLLMProvider(LLMPort):
         :param profile_name: AWS profile name (opcional si usas IAM Role)
         """
         session_params = {"region_name": region}
-        if profile_name:
+        # Solo usar profile en desarrollo local, no en producción con IAM Role
+        if profile_name and os.getenv('ENVIRONMENT', '').lower() != 'production':
             session_params["profile_name"] = profile_name
 
         session = boto3.Session(**session_params)
