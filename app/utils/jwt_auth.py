@@ -1,4 +1,4 @@
-from fastapi import HTTPException, Cookie, Depends, Request
+from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
 import jwt
@@ -27,14 +27,11 @@ class JWTAuth:
             username = payload.get('USUARIO')
             rol = payload.get('STRING1')  # rol name
             rol_id = payload.get('ID_TIPO_ROL')  # rol id
-            id_empresa = payload.get('ID_EMPRESA')
-            empresa = payload.get('EMPRESA')
-            id_area = payload.get('ID_AREA')
-            area = payload.get('AREA')
+            company_areas = payload.get('company_areas', [])
             
             # Validate that all required parameters exist
-            required_fields = [user_id, username, rol, rol_id, id_empresa, empresa, id_area, area]
-            field_names = ['ID_USUARIO', 'USUARIO', 'STRING1 (rol)', 'ID_TIPO_ROL', 'ID_EMPRESA', 'EMPRESA', 'ID_AREA', 'AREA']
+            required_fields = [user_id, username, rol, rol_id]
+            field_names = ['ID_USUARIO', 'USUARIO', 'STRING1 (rol)', 'ID_TIPO_ROL']
             
             missing = []
             for field, name in zip(required_fields, field_names):
@@ -65,10 +62,7 @@ class JWTAuth:
                 'USUARIO': username,
                 'STRING1': rol,
                 'ID_TIPO_ROL': rol_id,
-                'ID_EMPRESA': id_empresa,
-                'EMPRESA': empresa,
-                'ID_AREA': id_area,
-                'AREA': area
+                'company_areas': company_areas
             }
             
             return extracted_data
@@ -92,50 +86,17 @@ class JWTAuth:
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Error de autenticación"}}
             )
 
-# Dependency functions
-async def get_jwt_from_cookie(jwt_token: Optional[str] = Cookie(None)) -> str:
-    """Get JWT token from cookie"""
-    if not jwt_token:
-        logger.warning("JWT token not found in cookie")
-        raise HTTPException(
-            status_code=401,
-            detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
-        )
-    return jwt_token
-
-async def get_jwt_from_header(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """Get JWT token from Authorization header"""
-    return credentials.credentials
-
-async def get_current_user_from_cookie(token: str = Depends(get_jwt_from_cookie)) -> Dict[str, Any]:
-    """Get current user from JWT token in cookie"""
-    return JWTAuth.verify_jwt_token(token)
-
-async def get_current_user_from_header(token: str = Depends(get_jwt_from_header)) -> Dict[str, Any]:
-    """Get current user from JWT token in Authorization header"""
-    return JWTAuth.verify_jwt_token(token)
-
-# Flexible authentication that accepts both cookie and header
+# Dependency function
 async def get_current_user(
-    request: Request,
-    jwt_cookie: Optional[str] = Cookie(None, alias="jwt_token"),
-    auth_header: Optional[HTTPAuthorizationCredentials] = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
-    """Get current user from JWT token (cookie preferred, header as fallback)"""
+    """Get current user from JWT token in Authorization header"""
     
-    token = None
-    
-    # Try cookie first
-    if jwt_cookie:
-        token = jwt_cookie
-    # Fallback to Authorization header
-    elif auth_header:
-        token = auth_header.credentials
-    else:
-        logger.warning("No JWT token found in cookie or header")
+    if not credentials:
+        logger.warning("No JWT token found in Authorization header")
         raise HTTPException(
             status_code=401,
             detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
         )
-
-    return JWTAuth.verify_jwt_token(token)
+    
+    return JWTAuth.verify_jwt_token(credentials.credentials)
