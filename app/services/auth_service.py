@@ -103,6 +103,7 @@ class AuthService:
                 user_data = {}
                 roles_data = []
                 company_areas_data = []
+                chats_data = []
                 result_set_num = 1
                 
                 while True:
@@ -125,6 +126,10 @@ class AuthService:
                                 for row in rows:
                                     area_dict = dict(zip(columns, row))
                                     company_areas_data.append(area_dict)
+                            elif result_set_num == 6 and rows:  # Chats data
+                                for row in rows:
+                                    chat_dict = dict(zip(columns, row))
+                                    chats_data.append(chat_dict)
                     
                     except Exception as fetch_error:
                         logger.error(f"Fetch error: {fetch_error}")
@@ -144,11 +149,12 @@ class AuthService:
                 # Remove ID_SUCURSAL and ID_EMPRESA from user_data
                 filtered_user_data = {k: v for k, v in user_data.items() if k not in ['ID_SUCURSAL', 'ID_EMPRESA']}
                 
-                # Combine user data with roles and company areas
+                # Combine user data with roles, company areas, and chats
                 complete_user_data = {
                     **filtered_user_data,
                     'roles': roles_data,
-                    'company_areas': company_areas_data
+                    'company_areas': company_areas_data,
+                    'chats': chats_data
                 }
                 
                 return complete_user_data
@@ -190,10 +196,11 @@ class AuthService:
             # Create JWT token
             jwt_token = self.create_jwt_token(user_data)
             
-            # Return simplified response with only JWT token - all user data is in the JWT
+            # Return response with JWT token and chats data for TanStack
             return LoginResponse(
                 token=jwt_token,
-                status="success"
+                status="success",
+                chats=user_data.get('chats', [])
             )
             
         except Exception as e:
