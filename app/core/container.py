@@ -37,7 +37,9 @@ class DIContainer:
                     self._embeddings_provider = AWSBedrockEmbeddingsProvider(
                         region=settings.embeddings_region,
                         model_id=settings.embeddings_model_id,
-                        profile_name=settings.aws_profile
+                        profile_name=settings.aws_profile,
+                        aws_access_key_id=settings.aws_access_key_id,
+                        aws_secret_access_key=settings.aws_secret_access_key
                     )
                 else:
                     raise ValueError(f"Unsupported embeddings provider: {settings.embeddings_provider}")
@@ -77,7 +79,9 @@ class DIContainer:
                     self._llm_provider = AWSLLMProvider(
                         region=settings.llm_region,
                         model_id=settings.llm_model_id,
-                        profile_name=settings.aws_profile
+                        profile_name=settings.aws_profile,
+                        aws_access_key_id=settings.aws_access_key_id,
+                        aws_secret_access_key=settings.aws_secret_access_key
                     )
                 else:
                     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")

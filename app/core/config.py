@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     
     aws_region: str
     aws_profile: Optional[str] = None
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
     
     embeddings_provider: str
     embeddings_model_id: str
