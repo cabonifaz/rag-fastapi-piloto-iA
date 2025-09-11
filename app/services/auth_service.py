@@ -24,23 +24,37 @@ class AuthService:
     def create_jwt_token(self, user_data: dict) -> str:
         """Create JWT token with user data for frontend cookie storage"""
         try:
+            # Helper function to convert Decimal objects to int/float
+            def convert_decimal(obj):
+                from decimal import Decimal
+                if isinstance(obj, Decimal):
+                    return float(obj) if obj % 1 else int(obj)
+                elif isinstance(obj, dict):
+                    return {k: convert_decimal(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_decimal(item) for item in obj]
+                return obj
+            
+            # Convert user_data to handle Decimal objects
+            clean_user_data = convert_decimal(user_data)
+            
             # Extract role information from roles array
             role_name = 'User'  # Default role
             role_id = 1  # Default role ID
-            if user_data.get('roles') and len(user_data['roles']) > 0:
-                role_info = user_data['roles'][0]
+            if clean_user_data.get('roles') and len(clean_user_data['roles']) > 0:
+                role_info = clean_user_data['roles'][0]
                 role_name = role_info.get('STRING1', 'User')
                 role_id = role_info.get('ID_TIPO_ROL', 1)
             
             # Create JWT payload with all fields needed by frontend
             payload = {
-                'ID_USUARIO': user_data.get('ID_USUARIO'),
-                'USUARIO': user_data.get('USUARIO'),
-                'NOMBRES': user_data.get('NOMBRES'),
-                'APELLIDOS': user_data.get('APELLIDOS'),
+                'ID_USUARIO': clean_user_data.get('ID_USUARIO'),
+                'USUARIO': clean_user_data.get('USUARIO'),
+                'NOMBRES': clean_user_data.get('NOMBRES'),
+                'APELLIDOS': clean_user_data.get('APELLIDOS'),
                 'ID_TIPO_ROL': role_id,
                 'STRING1': role_name,
-                'company_areas': user_data.get('company_areas', []),  # Include all available company areas
+                'company_areas': clean_user_data.get('company_areas', []),  # Include all available company areas
                 'exp': datetime.now(timezone.utc) + timedelta(hours=self.jwt_expiration_hours),  # Configurable expiration
                 'iat': datetime.now(timezone.utc),  # Issued at
                 'iss': 'qamaq-rag-api'  # Issuer
@@ -103,7 +117,6 @@ class AuthService:
                 user_data = {}
                 roles_data = []
                 company_areas_data = []
-                chats_data = []
                 result_set_num = 1
                 
                 while True:
@@ -126,10 +139,6 @@ class AuthService:
                                 for row in rows:
                                     area_dict = dict(zip(columns, row))
                                     company_areas_data.append(area_dict)
-                            elif result_set_num == 6 and rows:  # Chats data
-                                for row in rows:
-                                    chat_dict = dict(zip(columns, row))
-                                    chats_data.append(chat_dict)
                     
                     except Exception as fetch_error:
                         logger.error(f"Fetch error: {fetch_error}")
@@ -153,8 +162,7 @@ class AuthService:
                 complete_user_data = {
                     **filtered_user_data,
                     'roles': roles_data,
-                    'company_areas': company_areas_data,
-                    'chats': chats_data
+                    'company_areas': company_areas_data
                 }
                 
                 return complete_user_data

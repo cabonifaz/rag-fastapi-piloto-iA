@@ -227,61 +227,6 @@ async def chat_endpoint(
         raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
 
 
-@router.post("/chat-test", response_model=EmbeddingTestResponse)
-async def chat_test_endpoint(request: EmbeddingTestRequest, chat_service: ChatService = Depends(get_chat_service)):
-    """
-    Dedicated endpoint for testing embeddings model only.
-    Returns detailed embedding information for testing purposes.
-    Follows hexagonal architecture principles.
-    """
-    # Use ChatService to test embeddings with detailed response
-    result = await chat_service.test_embedding(request.message, settings.embeddings_model_id)
-    
-    # Add user_id to result for consistent response
-    result["user_id"] = request.user_id
-    result["result"] = create_success_response("Embedding generado exitosamente")
-    
-    return EmbeddingTestResponse(**result)
-
-
-@router.post("/search", response_model=SearchResponse)
-async def search_endpoint(request: UnifiedRequest, chat_service: ChatService = Depends(get_rag_chat_service)):
-    """
-    Vector database search endpoint.
-    
-    Performs semantic search on the vector database using embeddings.
-    Returns relevant documents with similarity scores.
-    
-    Flow:
-    1. Convert query text to embedding
-    2. Search vector database for similar documents
-    3. Return ranked results with relevance scores
-    
-    Args:
-        user_id: User identifier
-        message: Search query text
-        company_id: Company identifier for filtering results
-        area: Area identifier for additional filtering (optional)
-        collection: Collection to search in (optional, defaults to env config)
-        top_k: Number of results to return (optional, defaults to env config)
-        similarity_threshold: Minimum similarity score (optional, defaults to env config)
-    """
-    # Perform vector search using ChatService
-    result = await chat_service.search_documents(
-        query=request.message,  # Use 'message' field consistently
-        company_id=request.company_id,
-        area=request.area,
-        collection=request.collection,
-        top_k=request.top_k,
-        similarity_threshold=request.similarity_threshold
-    )
-    
-    # Add user_id and message to result for consistent response
-    result["user_id"] = request.user_id
-    result["message"] = request.message
-    result["result"] = create_success_response("Búsqueda completada exitosamente")
-    
-    return SearchResponse(**result)
 
 
 @router.post("/chat-streaming")

@@ -32,7 +32,6 @@ class Settings(BaseSettings):
     weaviate_class_name: str
     weaviate_grpc: Optional[str] = None
     
-    rag_max_context_length: int
     rag_top_k_results: int
     rag_similarity_threshold: float
     
