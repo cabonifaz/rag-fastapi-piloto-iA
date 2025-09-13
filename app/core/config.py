@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # CORS Configuration
     cors_origins: str
     
+    # Document Processing Configuration
+    carga_conocimiento_path: str
+    processing_venv_path: str
+    processing_timeout_seconds: int
+    upload_directory: str
+    
     
     @validator('aws_region')
     def validate_aws_region(cls, v):
