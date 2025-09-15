@@ -2,13 +2,14 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import uvicorn
 import os
 import logging
 from app.core.config import settings
 from app.core.database import init_database, close_database
-from app.api import chat, auth
+from app.api import chat, auth, processing
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,8 @@ app.add_middleware(
 
 app.include_router(chat.router, prefix="/api/v1/rag", tags=["rag"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
+app.include_router(processing.router, prefix="/api/v1/processing", tags=["document-processing"])
+
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):

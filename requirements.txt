@@ -63,3 +63,6 @@ pyodbc==5.0.1             # SQL Server
 # Security
 python-multipart==0.0.6
 PyJWT==2.8.0
+
+# WebSocket support is built into FastAPI/Starlette
+# websockets>=13.0  # Removed - causes deprecation warnings
