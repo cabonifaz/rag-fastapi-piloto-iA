@@ -58,8 +58,6 @@ app.include_router(chat.router, prefix="/api/v1/rag", tags=["rag"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(processing.router, prefix="/api/v1/processing", tags=["document-processing"])
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):

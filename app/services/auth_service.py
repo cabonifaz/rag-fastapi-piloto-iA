@@ -37,7 +37,7 @@ class AuthService:
             
             # Convert user_data to handle Decimal objects
             clean_user_data = convert_decimal(user_data)
-            
+
             # Extract role information from roles array
             role_name = 'User'  # Default role
             role_id = 1  # Default role ID
@@ -59,7 +59,7 @@ class AuthService:
                 'iat': datetime.now(timezone.utc),  # Issued at
                 'iss': 'qamaq-rag-api'  # Issuer
             }
-            
+
             # Create JWT token
             token = jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
             

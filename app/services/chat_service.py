@@ -229,16 +229,16 @@ A:"""
         """
         try:
             from app.core.config import settings
-            
+
             # Validate inputs
             if not message or not message.strip():
                 raise ValueError("Message cannot be empty")
             if not user_id:
                 raise ValueError("User ID is required")
-            if not company_id:
-                # Use WEAVIATE_CLASS_NAME as fallback if no company_id provided
-                company_id = settings.weaviate_class_name
-                logger.info(f"No company_id provided, using default: {company_id}")
+            if not company_id or not company_id.strip():
+                raise ValueError("Company ID is required and cannot be empty")
+            if not area or not area.strip():
+                raise ValueError("Area is required and cannot be empty")
             
             if not self.vectorstore:
                 raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
@@ -263,9 +263,6 @@ A:"""
             top_k=search_top_k,
             similarity_threshold=search_threshold
         )
-        
-        # Log total found documents
-        logger.info(f"Vector search returned {search_result['total_found']} documents")
         
         # Check if no documents found at database level
         if search_result["total_found"] == 0:

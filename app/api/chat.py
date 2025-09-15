@@ -4,7 +4,7 @@ from pydantic import BaseModel, ValidationError
 from typing import List, Dict, Any, Optional
 import json
 import logging
-from app.utils.jwt_auth import get_current_user
+from app.utils.jwt_auth import get_current_user, get_current_user_with_company_validation
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.services.chat_service import ChatService
 from app.core.config import settings
@@ -28,7 +28,7 @@ class UnifiedRequest(BaseModel):
     user_id: str
     message: str
     company_id: str                         # Required, for company-specific search
-    area: Optional[str] = None              # Optional, for area-specific filtering
+    area: str                               # Required, for area-specific filtering and user role validation
     collection: str = None                   # Optional, defaults to env config
     top_k: Optional[int] = None             # Optional, defaults to env config
     similarity_threshold: Optional[float] = None  # Optional, defaults to env config
@@ -231,9 +231,9 @@ async def chat_endpoint(
 
 @router.post("/chat-streaming")
 async def chat_streaming_endpoint(
-    request: UnifiedRequest, 
+    request: UnifiedRequest,
     dependencies: tuple = Depends(get_full_rag_dependencies),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
 ):
     """
     Streaming chat endpoint with RAG-powered answer generation.
@@ -248,9 +248,6 @@ async def chat_streaming_endpoint(
     """
     try:
         chat_service, llm_provider = dependencies
-        
-        # Log authenticated user information  
-        logger.info(f"Streaming chat request from authenticated user ID: {current_user.get('ID_USUARIO')}")
         
         async def generate_stream():
             try:

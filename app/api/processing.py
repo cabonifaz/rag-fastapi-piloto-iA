@@ -1,18 +1,26 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, UploadFile, File, Form
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Annotated
 import logging
 import os
 import shutil
 from pathlib import Path
 from datetime import datetime
 from pydantic import BaseModel
-from app.utils.jwt_auth import get_current_user
+from app.utils.jwt_auth import get_current_user, get_current_user_with_company_validation
 from app.core.config import settings
 from app.services.document_processing_service import document_processing_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+from pydantic import Field
+
+def validate_non_empty_string(value: str) -> str:
+    """Validator function for non-empty strings"""
+    if not value or not value.strip():
+        raise ValueError("Field cannot be empty or whitespace only")
+    return value.strip()
 
 # Models
 class TaskStatus(BaseModel):
@@ -65,10 +73,18 @@ async def websocket_logs(websocket: WebSocket):
 @router.post("/upload", response_model=UploadResponse)
 async def upload_files(
     files: List[UploadFile] = File(...),
-    company_name: str = Form(...),
-    area_name: str = Form(...),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    company_name: Annotated[str, Form(), Field(min_length=1)] = None,
+    area_name: Annotated[str, Form(), Field(min_length=1)] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
 ):
+    # Validate non-empty strings manually
+    if not company_name or not company_name.strip():
+        raise HTTPException(status_code=422, detail="Company name cannot be empty")
+    if not area_name or not area_name.strip():
+        raise HTTPException(status_code=422, detail="Area name cannot be empty")
+
+    company_name = company_name.strip()
+    area_name = area_name.strip()
     """Upload PDF files for processing"""
     try:
         # Log authenticated user information
