@@ -263,8 +263,6 @@ class AuthService:
                     nombres=user.NOMBRES,
                     apellidos=user.APELLIDOS,
                     email=user.EMAIL,
-                    id_empresa=user.ID_EMPRESA,
-                    id_sucursal=user.ID_SUCURSAL,
                     ultimo_ingreso=user.ULTIMO_INGRESO,
                     id_estado_registro=user.ID_ESTADO_REGISTRO
                 )
