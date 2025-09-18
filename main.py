@@ -111,7 +111,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 async def root():
     return {"message": "Welcome to Qamaq RAG API", "version": "1.0.0"}
 
-@app.get("/health")
+@app.get("/api/v1/health/check")
 async def health_check():
     try:
         return JSONResponse(
