@@ -41,10 +41,12 @@ class JWTAuth:
             # Extract user identification
             user_id = payload.get('ID_USUARIO')
             username = payload.get('USUARIO')
+            role_id = payload.get('ID_TIPO_ROL')
 
             return {
                 'ID_USUARIO': user_id,
-                'USUARIO': username
+                'USUARIO': username,
+                'ID_TIPO_ROL': role_id
             }
 
         except jwt.ExpiredSignatureError:
@@ -87,19 +89,19 @@ class JWTAuth:
             # Extract full payload
             payload = JWTAuth._extract_payload(token)
 
-            role = payload.get('STRING1', '').lower()
+            role_id = payload.get('ID_TIPO_ROL')
             company_areas = payload.get('company_areas', [])
 
-            # SuperAdmin: Always allow access
-            if 'super admin' in role:
+            # SuperAdmin (role_id = 1): Always allow access
+            if role_id == 1:
                 return True
 
-            # Admin: Validate company_id exists in any company_areas row
-            if role == 'admin':
+            # Admin (role_id = 2): Validate company_id exists in any company_areas row
+            if role_id == 2:
                 return any(ca.get('EMPRESA') == company_id for ca in company_areas)
 
-            # User: Validate both company_id and area exist in the same row
-            if role == 'user':
+            # User (role_id = 3): Validate both company_id and area exist in the same row
+            if role_id == 3:
                 if not area:
                     return False
                 return any(

@@ -154,13 +154,10 @@ class AuthService:
                     result_set_num += 1
                 
                 cursor.close()
-                
-                # Remove ID_SUCURSAL and ID_EMPRESA from user_data
-                filtered_user_data = {k: v for k, v in user_data.items() if k not in ['ID_SUCURSAL', 'ID_EMPRESA']}
-                
-                # Combine user data with roles, company areas, and chats
+
+                # Combine user data with roles and company areas
                 complete_user_data = {
-                    **filtered_user_data,
+                    **user_data,
                     'roles': roles_data,
                     'company_areas': company_areas_data
                 }
@@ -203,12 +200,11 @@ class AuthService:
             
             # Create JWT token
             jwt_token = self.create_jwt_token(user_data)
-            
-            # Return response with JWT token and chats data for TanStack
+
+            # Return response with JWT token
             return LoginResponse(
                 token=jwt_token,
-                status="success",
-                chats=user_data.get('chats', [])
+                status="success"
             )
             
         except Exception as e:
@@ -282,15 +278,50 @@ class AuthService:
                     Usuario.ID_ESTADO_REGISTRO == 1
                 )
             ).first()
-            
+
             if not user:
                 return None
-                
+
             # Get user data using the stored procedure with username
             return await self.get_user_data(user.USUARIO)
-            
+
         except Exception as e:
             logger.error(f"Error getting user data by ID {user_id}: {e}")
+            return None
+
+    async def get_user_company_areas(self, user_id: int, role_id: int) -> Optional[list]:
+        """Get user company areas using SP_USUARIO_EMPR_AREA_LST"""
+        try:
+            query = text("""
+                EXEC SP_USUARIO_EMPR_AREA_LST
+                @ID_USUARIO = :user_id,
+                @ID_TIPO_ROL = :role_id
+            """)
+
+            result = self.db.execute(query, {
+                'user_id': user_id,
+                'role_id': role_id
+            })
+
+            # Get column names and rows
+            columns = result.keys()
+            rows = result.fetchall()
+            result.close()
+
+            if not rows:
+                logger.info(f"No company areas found for user ID: {user_id}")
+                return []
+
+            # Convert rows to list of dictionaries
+            company_areas = []
+            for row in rows:
+                area_dict = dict(zip(columns, row))
+                company_areas.append(area_dict)
+
+            return company_areas
+
+        except Exception as e:
+            logger.error(f"Error getting user company areas for user ID {user_id}: {e}")
             return None
 
 
