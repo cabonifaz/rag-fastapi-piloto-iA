@@ -51,10 +51,10 @@ class Settings(BaseSettings):
     cors_origins: str
     
     # Document Processing Configuration
-    carga_conocimiento_path: str
-    processing_venv_path: str
-    processing_timeout_seconds: int
-    upload_directory: str
+    carga_conocimiento_path: Optional[str] = None
+    processing_venv_path: Optional[str] = None
+    processing_timeout_seconds: Optional[int] = None
+    upload_directory: Optional[str] = None
     
     
     @validator('aws_region')

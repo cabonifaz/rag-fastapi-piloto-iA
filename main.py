@@ -7,9 +7,21 @@ from contextlib import asynccontextmanager
 import uvicorn
 import os
 import logging
+
+# Configure logging to filter health checks BEFORE other imports
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record):
+        # Check if this is an access log record for health check endpoint
+        if hasattr(record, 'args') and record.args and len(record.args) >= 3:
+            return record.args[2] != "/api/v1/health/check"
+        return True
+
+# Apply filter immediately
+logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
+
 from app.core.config import settings
 from app.core.database import init_database, close_database
-from app.api import chat, auth, processing
+from app.api import chat, auth#, processing
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +68,7 @@ app.add_middleware(
 
 app.include_router(chat.router, prefix="/api/v1/rag", tags=["rag"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
-app.include_router(processing.router, prefix="/api/v1/processing", tags=["document-processing"])
+#app.include_router(processing.router, prefix="/api/v1/processing", tags=["document-processing"])
 
 
 @app.exception_handler(HTTPException)
@@ -111,7 +123,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 async def root():
     return {"message": "Welcome to Qamaq RAG API", "version": "1.0.0"}
 
-@app.get("/health")
+@app.get("/api/v1/health/check")
 async def health_check():
     try:
         return JSONResponse(
