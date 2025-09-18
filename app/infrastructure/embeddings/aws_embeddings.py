@@ -1,6 +1,7 @@
 import boto3
 import json
 import logging
+import os
 from typing import List, Optional
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.domain.ports.embeddings_port import EmbeddingsPort
@@ -21,6 +22,8 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
         region: str,
         model_id: str,
         profile_name: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None,
     ):
         """
         Inicializa el cliente de AWS Bedrock.
@@ -28,10 +31,18 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
         :param region: región de AWS (ej. "us-east-1")
         :param model_id: ID del modelo de embeddings (ej. "amazon.titan-embed-text-v1")
         :param profile_name: AWS profile name (opcional si usas IAM Role)
+        :param aws_access_key_id: AWS access key ID (opcional, usado si no hay profile)
+        :param aws_secret_access_key: AWS secret access key (opcional, usado si no hay profile)
         """
         session_params = {"region_name": region}
-        if profile_name:
+        
+        # Solo usar profile en desarrollo local, no en producción con IAM Role
+        if profile_name and os.getenv('ENVIRONMENT', '').lower() != 'production':
             session_params["profile_name"] = profile_name
+        # Si no hay profile, usar credenciales directas si están disponibles
+        elif aws_access_key_id and aws_secret_access_key:
+            session_params["aws_access_key_id"] = aws_access_key_id
+            session_params["aws_secret_access_key"] = aws_secret_access_key
 
         session = boto3.Session(**session_params)
         self.client = session.client("bedrock-runtime")
