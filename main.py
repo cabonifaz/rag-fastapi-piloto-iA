@@ -7,6 +7,18 @@ from contextlib import asynccontextmanager
 import uvicorn
 import os
 import logging
+
+# Configure logging to filter health checks BEFORE other imports
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record):
+        # Check if this is an access log record for health check endpoint
+        if hasattr(record, 'args') and record.args and len(record.args) >= 3:
+            return record.args[2] != "/api/v1/health/check"
+        return True
+
+# Apply filter immediately
+logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
+
 from app.core.config import settings
 from app.core.database import init_database, close_database
 from app.api import chat, auth#, processing
