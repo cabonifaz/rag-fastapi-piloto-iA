@@ -178,23 +178,78 @@ async def validate_jwt_endpoint(
 ):
     """
     JWT validation endpoint for route guarding.
-    
+
     Simply validates that the JWT cookie is present and valid.
     Returns user info if valid, 401 if not.
-    
+
     This is used by GuardRoute to protect frontend routes.
     """
     try:
-        
+
         success_response = create_success_response("JWT válido")
         return {
             "valid": True,
             "user_id": current_user.get('ID_USUARIO'),
             "result": success_response.model_dump()
         }
-        
+
     except Exception as e:
         logger.error(f"Unexpected error in validate endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.get("/company-areas")
+async def get_user_company_areas_endpoint(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Get user company areas endpoint
+
+    Retrieves company areas for the authenticated user using their user ID and role ID from JWT.
+
+    Returns:
+        List of company areas for the user
+
+    Raises:
+        HTTPException: 404 if no areas found, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id or not role_id:
+            error_response = create_error_response("Información de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        company_areas = await auth_service.get_user_company_areas(user_id, role_id)
+
+        if company_areas is None:
+            error_response = create_error_response("Error al obtener áreas de empresa")
+            raise HTTPException(
+                status_code=500,
+                detail={"result": error_response.model_dump()}
+            )
+
+        success_response = create_success_response("Áreas de empresa obtenidas exitosamente")
+        return {
+            "company_areas": company_areas,
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get company areas endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,

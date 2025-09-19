@@ -34,7 +34,6 @@ class Settings(BaseSettings):
     weaviate_class_name: str
     weaviate_grpc: Optional[str] = None
     
-    rag_max_context_length: int
     rag_top_k_results: int
     rag_similarity_threshold: float
     
@@ -52,6 +51,12 @@ class Settings(BaseSettings):
     
     # CORS Configuration
     cors_origins: str
+    
+    # Document Processing Configuration
+    carga_conocimiento_path: Optional[str] = None
+    processing_venv_path: Optional[str] = None
+    processing_timeout_seconds: Optional[int] = None
+    upload_directory: Optional[str] = None
     
     
     @validator('aws_region')

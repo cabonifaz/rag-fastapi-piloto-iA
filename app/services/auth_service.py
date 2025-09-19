@@ -24,28 +24,42 @@ class AuthService:
     def create_jwt_token(self, user_data: dict) -> str:
         """Create JWT token with user data for frontend cookie storage"""
         try:
+            # Helper function to convert Decimal objects to int/float
+            def convert_decimal(obj):
+                from decimal import Decimal
+                if isinstance(obj, Decimal):
+                    return float(obj) if obj % 1 else int(obj)
+                elif isinstance(obj, dict):
+                    return {k: convert_decimal(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_decimal(item) for item in obj]
+                return obj
+            
+            # Convert user_data to handle Decimal objects
+            clean_user_data = convert_decimal(user_data)
+
             # Extract role information from roles array
             role_name = 'User'  # Default role
             role_id = 1  # Default role ID
-            if user_data.get('roles') and len(user_data['roles']) > 0:
-                role_info = user_data['roles'][0]
+            if clean_user_data.get('roles') and len(clean_user_data['roles']) > 0:
+                role_info = clean_user_data['roles'][0]
                 role_name = role_info.get('STRING1', 'User')
                 role_id = role_info.get('ID_TIPO_ROL', 1)
             
             # Create JWT payload with all fields needed by frontend
             payload = {
-                'ID_USUARIO': user_data.get('ID_USUARIO'),
-                'USUARIO': user_data.get('USUARIO'),
-                'NOMBRES': user_data.get('NOMBRES'),
-                'APELLIDOS': user_data.get('APELLIDOS'),
+                'ID_USUARIO': clean_user_data.get('ID_USUARIO'),
+                'USUARIO': clean_user_data.get('USUARIO'),
+                'NOMBRES': clean_user_data.get('NOMBRES'),
+                'APELLIDOS': clean_user_data.get('APELLIDOS'),
                 'ID_TIPO_ROL': role_id,
                 'STRING1': role_name,
-                'company_areas': user_data.get('company_areas', []),  # Include all available company areas
+                'company_areas': clean_user_data.get('company_areas', []),  # Include all available company areas
                 'exp': datetime.now(timezone.utc) + timedelta(hours=self.jwt_expiration_hours),  # Configurable expiration
                 'iat': datetime.now(timezone.utc),  # Issued at
                 'iss': 'qamaq-rag-api'  # Issuer
             }
-            
+
             # Create JWT token
             token = jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
             
@@ -140,13 +154,10 @@ class AuthService:
                     result_set_num += 1
                 
                 cursor.close()
-                
-                # Remove ID_SUCURSAL and ID_EMPRESA from user_data
-                filtered_user_data = {k: v for k, v in user_data.items() if k not in ['ID_SUCURSAL', 'ID_EMPRESA']}
-                
+
                 # Combine user data with roles and company areas
                 complete_user_data = {
-                    **filtered_user_data,
+                    **user_data,
                     'roles': roles_data,
                     'company_areas': company_areas_data
                 }
@@ -189,8 +200,8 @@ class AuthService:
             
             # Create JWT token
             jwt_token = self.create_jwt_token(user_data)
-            
-            # Return simplified response with only JWT token - all user data is in the JWT
+
+            # Return response with JWT token
             return LoginResponse(
                 token=jwt_token,
                 status="success"
@@ -248,8 +259,6 @@ class AuthService:
                     nombres=user.NOMBRES,
                     apellidos=user.APELLIDOS,
                     email=user.EMAIL,
-                    id_empresa=user.ID_EMPRESA,
-                    id_sucursal=user.ID_SUCURSAL,
                     ultimo_ingreso=user.ULTIMO_INGRESO,
                     id_estado_registro=user.ID_ESTADO_REGISTRO
                 )
@@ -269,15 +278,50 @@ class AuthService:
                     Usuario.ID_ESTADO_REGISTRO == 1
                 )
             ).first()
-            
+
             if not user:
                 return None
-                
+
             # Get user data using the stored procedure with username
             return await self.get_user_data(user.USUARIO)
-            
+
         except Exception as e:
             logger.error(f"Error getting user data by ID {user_id}: {e}")
+            return None
+
+    async def get_user_company_areas(self, user_id: int, role_id: int) -> Optional[list]:
+        """Get user company areas using SP_USUARIO_EMPR_AREA_LST"""
+        try:
+            query = text("""
+                EXEC SP_USUARIO_EMPR_AREA_LST
+                @ID_USUARIO = :user_id,
+                @ID_TIPO_ROL = :role_id
+            """)
+
+            result = self.db.execute(query, {
+                'user_id': user_id,
+                'role_id': role_id
+            })
+
+            # Get column names and rows
+            columns = result.keys()
+            rows = result.fetchall()
+            result.close()
+
+            if not rows:
+                logger.info(f"No company areas found for user ID: {user_id}")
+                return []
+
+            # Convert rows to list of dictionaries
+            company_areas = []
+            for row in rows:
+                area_dict = dict(zip(columns, row))
+                company_areas.append(area_dict)
+
+            return company_areas
+
+        except Exception as e:
+            logger.error(f"Error getting user company areas for user ID {user_id}: {e}")
             return None
 
 

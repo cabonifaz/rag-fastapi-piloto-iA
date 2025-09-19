@@ -4,7 +4,7 @@ from pydantic import BaseModel, ValidationError
 from typing import List, Dict, Any, Optional
 import json
 import logging
-from app.utils.jwt_auth import get_current_user
+from app.utils.jwt_auth import get_current_user, get_current_user_with_company_validation
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.services.chat_service import ChatService
 from app.core.config import settings
@@ -28,7 +28,7 @@ class UnifiedRequest(BaseModel):
     user_id: str
     message: str
     company_id: str                         # Required, for company-specific search
-    area: Optional[str] = None              # Optional, for area-specific filtering
+    area: str                               # Required, for area-specific filtering and user role validation
     collection: str = None                   # Optional, defaults to env config
     top_k: Optional[int] = None             # Optional, defaults to env config
     similarity_threshold: Optional[float] = None  # Optional, defaults to env config
@@ -131,164 +131,12 @@ def get_full_rag_dependencies():
     """Dependency injection for complete RAG with LLM answer generation."""
     return container.get_full_rag_chat_service()
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(
-    request: UnifiedRequest, 
-    dependencies: tuple = Depends(get_full_rag_dependencies),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-):
-    """
-    Clean chat endpoint with RAG-powered answer generation.
-    
-    Full RAG Flow:
-    1. Generate embedding for user message
-    2. Search relevant documents in Weaviate (using same flow as /search)
-    3. Assemble context from retrieved documents
-    4. Generate answer using LLM (Llama3) with context
-    5. Return clean chat response with just the answer
-    
-    Returns only essential chat information, hiding RAG implementation details.
-    """
-    try:
-        chat_service, llm_provider = dependencies
-        
-        # Log authenticated user information
-        logger.info(f"Chat request from authenticated user ID: {current_user.get('ID_USUARIO')}")
-        
-        # Process complete RAG query with LLM answer generation
-        result = await chat_service.process_rag_query(
-            user_id=request.user_id, 
-            message=request.message,
-            company_id=request.company_id,
-            area=request.area,
-            collection=request.collection,
-            top_k=request.top_k,
-            similarity_threshold=request.similarity_threshold,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            llm_provider=llm_provider
-        )
-        
-        return ChatResponse(
-            user_id=result["user_id"],
-            message=result["message"], 
-            answer=result["answer"],
-            llm_model_used=result["llm_model_used"],
-            status=result["status"],
-            result=create_success_response("Chat completado exitosamente")
-        )
-        
-    except ValidationError as e:
-        logger.error(f"Validation error in chat endpoint: {e}")
-        error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
-        raise HTTPException(status_code=422, detail={"result": error_response.model_dump()})
-        
-    except ClientError as e:
-        error_code = e.response['Error']['Code']
-        logger.error(f"AWS Client error in chat endpoint: {error_code} - {e}")
-        if error_code == 'ValidationException':
-            error_response = create_error_response("Parámetros inválidos para el modelo de lenguaje")
-            raise HTTPException(status_code=400, detail={"result": error_response.model_dump()})
-        elif error_code == 'ThrottlingException':
-            error_response = create_error_response("Límite de tasa excedido. Por favor, inténtelo de nuevo más tarde")
-            raise HTTPException(status_code=429, detail={"result": error_response.model_dump()})
-        else:
-            error_response = create_error_response("Error del servicio de modelo de lenguaje")
-            raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
-            
-    except NoCredentialsError as e:
-        logger.error(f"AWS credentials error in chat endpoint: {e}")
-        error_response = create_error_response("Credenciales de AWS no configuradas")
-        raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
-        
-    except EndpointConnectionError as e:
-        logger.error(f"AWS connection error in chat endpoint: {e}")
-        error_response = create_error_response("No se puede conectar a los servicios de AWS")
-        raise HTTPException(status_code=503, detail={"result": error_response.model_dump()})
-        
-    except ConnectionError as e:
-        logger.error(f"Connection error in chat endpoint: {e}")
-        error_response = create_error_response("Error de conexión del servicio")
-        raise HTTPException(status_code=503, detail={"result": error_response.model_dump()})
-        
-    except TimeoutError as e:
-        logger.error(f"Timeout error in chat endpoint: {e}")
-        error_response = create_error_response("Tiempo de espera de la solicitud agotado")
-        raise HTTPException(status_code=504, detail={"result": error_response.model_dump()})
-        
-    except ValueError as e:
-        logger.error(f"Value error in chat endpoint: {e}")
-        error_response = create_error_response(str(e))
-        raise HTTPException(status_code=400, detail={"result": error_response.dict()})
-        
-    except Exception as e:
-        logger.error(f"Unexpected error in chat endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
-
-
-@router.post("/chat-test", response_model=EmbeddingTestResponse)
-async def chat_test_endpoint(request: EmbeddingTestRequest, chat_service: ChatService = Depends(get_chat_service)):
-    """
-    Dedicated endpoint for testing embeddings model only.
-    Returns detailed embedding information for testing purposes.
-    Follows hexagonal architecture principles.
-    """
-    # Use ChatService to test embeddings with detailed response
-    result = await chat_service.test_embedding(request.message, settings.embeddings_model_id)
-    
-    # Add user_id to result for consistent response
-    result["user_id"] = request.user_id
-    result["result"] = create_success_response("Embedding generado exitosamente")
-    
-    return EmbeddingTestResponse(**result)
-
-
-@router.post("/search", response_model=SearchResponse)
-async def search_endpoint(request: UnifiedRequest, chat_service: ChatService = Depends(get_rag_chat_service)):
-    """
-    Vector database search endpoint.
-    
-    Performs semantic search on the vector database using embeddings.
-    Returns relevant documents with similarity scores.
-    
-    Flow:
-    1. Convert query text to embedding
-    2. Search vector database for similar documents
-    3. Return ranked results with relevance scores
-    
-    Args:
-        user_id: User identifier
-        message: Search query text
-        company_id: Company identifier for filtering results
-        area: Area identifier for additional filtering (optional)
-        collection: Collection to search in (optional, defaults to env config)
-        top_k: Number of results to return (optional, defaults to env config)
-        similarity_threshold: Minimum similarity score (optional, defaults to env config)
-    """
-    # Perform vector search using ChatService
-    result = await chat_service.search_documents(
-        query=request.message,  # Use 'message' field consistently
-        company_id=request.company_id,
-        area=request.area,
-        collection=request.collection,
-        top_k=request.top_k,
-        similarity_threshold=request.similarity_threshold
-    )
-    
-    # Add user_id and message to result for consistent response
-    result["user_id"] = request.user_id
-    result["message"] = request.message
-    result["result"] = create_success_response("Búsqueda completada exitosamente")
-    
-    return SearchResponse(**result)
-
 
 @router.post("/chat-streaming")
 async def chat_streaming_endpoint(
-    request: UnifiedRequest, 
+    request: UnifiedRequest,
     dependencies: tuple = Depends(get_full_rag_dependencies),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
 ):
     """
     Streaming chat endpoint with RAG-powered answer generation.
@@ -303,9 +151,6 @@ async def chat_streaming_endpoint(
     """
     try:
         chat_service, llm_provider = dependencies
-        
-        # Log authenticated user information  
-        logger.info(f"Streaming chat request from authenticated user ID: {current_user.get('ID_USUARIO')}")
         
         async def generate_stream():
             try:

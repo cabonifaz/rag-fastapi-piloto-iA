@@ -50,178 +50,7 @@ Please provide a clear, accurate response based solely on the provided context."
 Q: {message}
 A:"""
 
-    async def generate_embedding(self, text: str) -> List[float]:
-        """
-        Generate embedding for a given text.
-        This method encapsulates the embedding generation logic.
-        """
-        return await self.embeddings_provider.embed(text)
 
-    async def test_embedding(self, text: str, model_id: str) -> Dict[str, Any]:
-        """
-        Test embedding generation with detailed response.
-        Returns both the embedding and metadata for testing purposes.
-        """
-        embedding = await self.embeddings_provider.embed(text)
-        
-        return {
-            "message": text,
-            "embedding_model": model_id,
-            "embedding_dimensions": len(embedding),
-            "embedding": embedding,
-            "status": "success"
-        }
-
-    async def process_rag_query(self, user_id: str, message: str, company_id: str, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, llm_provider=None) -> Dict[str, Any]:
-        """
-        Complete RAG flow: embedding generation + vector search + context assembly + LLM answer generation.
-        
-        Args:
-            user_id: User identifier for potential session management
-            message: User's question/message
-            llm_provider: Optional LLM provider for answer generation
-            
-        Returns:
-            Dict with answer, context documents, and metadata
-        """
-        try:
-            from app.core.config import settings
-            
-            # Validate inputs
-            if not message or not message.strip():
-                raise ValueError("Message cannot be empty")
-            if not user_id:
-                raise ValueError("User ID is required")
-            if not company_id:
-                # Use WEAVIATE_CLASS_NAME as fallback if no company_id provided
-                company_id = settings.weaviate_class_name
-                logger.info(f"No company_id provided, using default: {company_id}")
-            
-            if not self.vectorstore:
-                raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
-                
-        except ValueError as e:
-            logger.error(f"Validation error in process_rag_query: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Initialization error in process_rag_query: {e}")
-            raise ConnectionError(f"RAG service initialization failed: {str(e)}")
-        
-        try:
-            # Step 1: Use the search_documents method for consistent vector search
-            # Use provided parameters or fall back to environment defaults
-            search_top_k = top_k if top_k is not None else settings.rag_top_k_results
-            search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
-            
-            search_result = await self.search_documents(
-                query=message,
-                company_id=company_id,
-                area=area,
-                collection=collection,
-                top_k=search_top_k,
-                similarity_threshold=search_threshold
-            )
-            
-        except ConnectionError as e:
-            logger.error(f"Connection error during document search: {e}")
-            raise
-        except ValueError as e:
-            logger.error(f"Search parameter error: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error during document search: {e}")
-            raise ConnectionError(f"Document search failed: {str(e)}")
-        
-        # Log total found documents
-        logger.info(f"Vector search returned {search_result['total_found']} documents")
-        
-        # Check if no documents found at database level
-        if search_result["total_found"] == 0:
-            # No documents found - return predefined message without LLM call
-            return {
-                "user_id": user_id,
-                "message": message,
-                "answer": "Parece que tu pregunta no es lo suficientemente específica 🤔. ¿Me das un poco más de contexto para ayudarte mejor?",
-                "context_documents": [],
-                "context_text": "",
-                "total_documents_found": 0,
-                "embedding_dimensions": search_result["embedding_dimensions"],
-                "collection_searched": settings.weaviate_class_name,
-                "llm_model_used": None,
-                "search_parameters": search_result["search_parameters"],
-                "status": "success"
-            }
-        
-        # Step 2: Extract documents from search result
-        context_documents = []
-        for doc in search_result["documents"]:
-            context_documents.append({
-                "content": doc["content"],
-                "company_id": doc["company_id"],
-                "doc_id": doc["doc_id"],
-                "chunk_id": doc["chunk_id"],
-                "page_start": doc["page_start"],
-                "page_end": doc["page_end"],
-                "char_start": doc["char_start"],
-                "char_end": doc["char_end"],
-                "token_count": doc["token_count"],
-                "distance": doc["distance"],
-                "relevance_score": doc["relevance_score"]
-            })
-        
-        # Step 3: Prepare context text for LLM with source metadata
-        context_with_sources = []
-        for doc in context_documents:
-            if doc["content"]:
-                # Format page reference more accurately
-                if doc['page_start'] == doc['page_end']:
-                    page_ref = f"Page {doc['page_start']}"
-                else:
-                    page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
-                source_info = f"[Source: Document {doc['doc_id']}, {page_ref}]"
-                context_with_sources.append(f"{doc['content']}\n{source_info}")
-        
-        context_text = "\n\n".join(context_with_sources)
-        
-        # Step 4: Generate LLM answer (LLM is required for /chat endpoint)
-        if not llm_provider:
-            raise ValueError("LLM provider is required for /chat endpoint but was not provided")
-        
-        try:
-            # Normal RAG flow with context
-            rag_prompt = self._build_rag_prompt(message, context_text)
-            
-            # Use provided parameters or fall back to environment defaults
-            llm_temperature = temperature if temperature is not None else settings.llm_temperature
-            llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
-            
-            answer = await llm_provider.generate(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature)
-            llm_model_used = settings.llm_model_id
-            
-        except ConnectionError as e:
-            logger.error(f"Connection error during LLM generation: {e}")
-            raise ConnectionError(f"LLM service unavailable: {str(e)}")
-        except ValueError as e:
-            logger.error(f"LLM parameter error: {e}")
-            raise ValueError(f"Invalid LLM parameters: {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error during LLM generation: {e}")
-            raise ConnectionError(f"LLM generation failed: {str(e)}")
-        
-        # Step 5: Return complete RAG response
-        return {
-            "user_id": user_id,
-            "message": message,
-            "answer": answer,
-            "context_documents": context_documents,
-            "context_text": context_text,
-            "total_documents_found": len(context_documents),
-            "embedding_dimensions": search_result["embedding_dimensions"],
-            "collection_searched": settings.weaviate_class_name,
-            "llm_model_used": llm_model_used,
-            "search_parameters": search_result["search_parameters"],
-            "status": "success"
-        }
 
     async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, llm_provider=None) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -229,16 +58,16 @@ A:"""
         """
         try:
             from app.core.config import settings
-            
+
             # Validate inputs
             if not message or not message.strip():
                 raise ValueError("Message cannot be empty")
             if not user_id:
                 raise ValueError("User ID is required")
-            if not company_id:
-                # Use WEAVIATE_CLASS_NAME as fallback if no company_id provided
-                company_id = settings.weaviate_class_name
-                logger.info(f"No company_id provided, using default: {company_id}")
+            if not company_id or not company_id.strip():
+                raise ValueError("Company ID is required and cannot be empty")
+            if not area or not area.strip():
+                raise ValueError("Area is required and cannot be empty")
             
             if not self.vectorstore:
                 raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
@@ -250,22 +79,25 @@ A:"""
             logger.error(f"Initialization error in process_rag_query_stream: {e}")
             raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
         
-        # Step 1: Use the search_documents method for consistent vector search
+        # Step 1: Generate embedding for the query
+        query_embedding = await self.generate_embedding(message)
+
+        # Step 2: Search vector database using the embedding
         # Use provided parameters or fall back to environment defaults
         search_top_k = top_k if top_k is not None else settings.rag_top_k_results
         search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
-        
-        search_result = await self.search_documents(
-            query=message,
+
+        search_result = await self.search_by_embedding(
+            query_embedding=query_embedding,
             company_id=company_id,
             area=area,
             collection=collection,
             top_k=search_top_k,
             similarity_threshold=search_threshold
         )
-        
-        # Log total found documents
-        logger.info(f"Vector search returned {search_result['total_found']} documents")
+
+        # Add query to result for compatibility
+        search_result["query"] = message
         
         # Check if no documents found at database level
         if search_result["total_found"] == 0:
@@ -350,41 +182,19 @@ A:"""
             "status": "success"
         }
 
-    async def search_documents(self, query: str, company_id: str = None, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
+    async def generate_embedding(self, query: str) -> List[float]:
         """
-        Basic vector database search implementation.
-        
+        Generate embedding for a query text.
+
         Args:
-            query: Search query text
-            company_id: Company identifier for filtering results
-            area: Area identifier for additional filtering
-            collection: Collection/class name to search in (defaults to config or company_id)
-            top_k: Number of results to return (defaults to config)
-            similarity_threshold: Minimum similarity score (defaults to config)
-            
+            query: Text to convert to embedding
+
         Returns:
-            Dict with search results and metadata
+            List of float values representing the embedding
         """
-        from app.core.config import settings
-        
-        if not self.vectorstore:
-            raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for search functionality.")
-        
-        # Use provided values or fall back to config defaults
-        # If company_id is provided and no collection specified, use company_id as collection name
-        if collection is not None:
-            search_collection = collection
-        elif company_id is not None:
-            search_collection = company_id  # Use company_id as collection name
-        else:
-            search_collection = settings.weaviate_class_name
-            
-        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
-        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
-        
         try:
-            # Step 1: Convert query to embedding
             query_embedding = await self.embeddings_provider.embed(query)
+            return query_embedding
         except ConnectionError as e:
             logger.error(f"Connection error during embedding generation: {e}")
             raise ConnectionError(f"Embedding service unavailable: {str(e)}")
@@ -394,9 +204,41 @@ A:"""
         except Exception as e:
             logger.error(f"Unexpected error during embedding generation: {e}")
             raise ConnectionError(f"Embedding generation failed: {str(e)}")
-        
+
+    async def search_by_embedding(self, query_embedding: List[float], company_id: str = None, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
+        """
+        Search vector database using pre-generated embedding.
+
+        Args:
+            query_embedding: Pre-generated embedding vector
+            company_id: Company identifier for filtering results
+            area: Area identifier for additional filtering
+            collection: Collection/class name to search in (defaults to config or company_id)
+            top_k: Number of results to return (defaults to config)
+            similarity_threshold: Minimum similarity score (defaults to config)
+
+        Returns:
+            Dict with search results and metadata
+        """
+        from app.core.config import settings
+
+        if not self.vectorstore:
+            raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for search functionality.")
+
+        # Use provided values or fall back to config defaults
+        # If company_id is provided and no collection specified, use company_id as collection name
+        if collection is not None:
+            search_collection = collection
+        elif company_id is not None:
+            search_collection = company_id  # Use company_id as collection name
+        else:
+            search_collection = settings.weaviate_class_name
+
+        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
+        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
+
         try:
-            # Step 2: Search vector database in specified collection with company and area filtering
+            # Search vector database in specified collection with company and area filtering
             search_results = await self.vectorstore.search_in_collection(
                 collection_name=search_collection,
                 query_vector=query_embedding,
@@ -417,8 +259,8 @@ A:"""
         except Exception as e:
             logger.error(f"Unexpected error during vector search: {e}")
             raise ConnectionError(f"Vector search failed: {str(e)}")
-        
-        # Step 3: Format results
+
+        # Format results
         documents = []
         for result in search_results:
             metadata = result.get("metadata", {})
@@ -437,9 +279,8 @@ A:"""
                 "distance": metadata.get("distance", 0.0),
                 "relevance_score": metadata.get("relevance_score", 1.0 - metadata.get("distance", 0.0))
             })
-        
+
         return {
-            "query": query,
             "documents": documents,
             "total_found": len(documents),
             "search_parameters": {
@@ -454,79 +295,4 @@ A:"""
             "status": "success"
         }
 
-    async def handle_message(self, session_id: str, user_message: str) -> Tuple[str, List[Dict[str, Any]]]:
-        try:
-            if not session_id:
-                raise ValueError("Session ID cannot be empty")
-            if not user_message or not user_message.strip():
-                raise ValueError("User message cannot be empty")
-            
-            self.memory_repository.save_message(session_id, role="user", content=user_message)
 
-            try:
-                query_vector = await self.embeddings_provider.embed(user_message)
-            except ConnectionError as e:
-                logger.error(f"Connection error during embedding generation: {e}")
-                raise ConnectionError(f"Embedding service unavailable: {str(e)}")
-            except Exception as e:
-                logger.error(f"Unexpected error during embedding generation: {e}")
-                raise ConnectionError(f"Embedding generation failed: {str(e)}")
-
-            try:
-                results = await self.vector_repository.search_by_vector(
-                    class_name="Documents",
-                    vector=query_vector,
-                    top_k=5,
-                    return_properties=["text", "source"],
-                )
-            except ConnectionError as e:
-                logger.error(f"Connection error during vector search: {e}")
-                raise ConnectionError(f"Vector database unavailable: {str(e)}")
-            except Exception as e:
-                logger.error(f"Unexpected error during vector search: {e}")
-                raise ConnectionError(f"Vector search failed: {str(e)}")
-
-            context_chunks = [r["properties"].get("text", "") for r in results]
-
-            try:
-                history = self.memory_repository.get_history(session_id)
-                formatted_history = "\n".join([f"{m['role']}: {m['content']}" for m in history])
-                context_text = "\n".join(context_chunks)
-
-                prompt = f"""
-                You are an assistant. Use the following context to answer the question.
-                
-                Context:
-                {context_text}
-
-                Conversation so far:
-                {formatted_history}
-
-                User: {user_message}
-                Assistant:
-                """
-
-                answer = await self.llm_provider.generate(prompt)
-            except ConnectionError as e:
-                logger.error(f"Connection error during LLM generation: {e}")
-                raise ConnectionError(f"LLM service unavailable: {str(e)}")
-            except Exception as e:
-                logger.error(f"Unexpected error during LLM generation: {e}")
-                raise ConnectionError(f"LLM generation failed: {str(e)}")
-
-            try:
-                self.memory_repository.save_message(session_id, role="assistant", content=answer)
-                history = self.memory_repository.get_history(session_id)
-                return answer, history
-            except Exception as e:
-                logger.error(f"Error saving conversation history: {e}")
-                # Return answer even if history save fails
-                return answer, []
-                
-        except ValueError:
-            raise  # Re-raise validation errors
-        except ConnectionError:
-            raise  # Re-raise connection errors
-        except Exception as e:
-            logger.error(f"Unexpected error in handle_message: {e}")
-            raise ConnectionError(f"Message handling failed: {str(e)}")
