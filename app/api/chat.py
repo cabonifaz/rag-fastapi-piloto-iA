@@ -119,14 +119,6 @@ class SearchResponse(BaseModel):
     result: MensajeResponse
 
 
-def get_chat_service() -> ChatService:
-    """Dependency injection for ChatService using the DI container."""
-    return container.get_chat_service()
-
-def get_rag_chat_service() -> ChatService:
-    """Dependency injection for ChatService with Weaviate vectorstore for full RAG."""
-    return container.get_chat_service_with_vectorstore()
-
 def get_full_rag_dependencies():
     """Dependency injection for complete RAG with LLM answer generation."""
     return container.get_full_rag_chat_service()
@@ -164,8 +156,7 @@ async def chat_streaming_endpoint(
                     top_k=request.top_k,
                     similarity_threshold=request.similarity_threshold,
                     temperature=request.temperature,
-                    max_tokens=request.max_tokens,
-                    llm_provider=llm_provider
+                    max_tokens=request.max_tokens
                 ):
                     if chunk_data["type"] == "chunk":
                         # Concatenate content

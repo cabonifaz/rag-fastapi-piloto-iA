@@ -18,7 +18,7 @@ class AuthService:
         self.db = db
         # JWT configuration from settings
         self.jwt_secret = settings.jwt_secret_key
-        self.jwt_expiration_hours = settings.jwt_expiration_hours
+        self.jwt_expiration_minutes = settings.jwt_expiration_minutes
         self.jwt_algorithm = 'HS256'
     
     def create_jwt_token(self, user_data: dict) -> str:
@@ -55,7 +55,7 @@ class AuthService:
                 'ID_TIPO_ROL': role_id,
                 'STRING1': role_name,
                 'company_areas': clean_user_data.get('company_areas', []),  # Include all available company areas
-                'exp': datetime.now(timezone.utc) + timedelta(hours=self.jwt_expiration_hours),  # Configurable expiration
+                'exp': datetime.now(timezone.utc) + timedelta(minutes=self.jwt_expiration_minutes),  # Configurable expiration
                 'iat': datetime.now(timezone.utc),  # Issued at
                 'iss': 'qamaq-rag-api'  # Issuer
             }

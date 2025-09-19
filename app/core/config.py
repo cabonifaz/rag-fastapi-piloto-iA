@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     
     # JWT Configuration
     jwt_secret_key: str
-    jwt_expiration_hours: int = 8
+    jwt_expiration_minutes: int = 480
     
     # CORS Configuration
     cors_origins: str
@@ -117,10 +117,10 @@ class Settings(BaseSettings):
             raise ValueError("JWT secret key must be at least 32 characters long")
         return v
     
-    @validator('jwt_expiration_hours')
-    def validate_jwt_expiration_hours(cls, v):
-        if v <= 0 or v > 24:
-            raise ValueError("JWT expiration hours must be between 1 and 24")
+    @validator('jwt_expiration_minutes')
+    def validate_jwt_expiration_minutes(cls, v):
+        if v <= 0 or v > 1440:  # 1440 minutes = 24 hours
+            raise ValueError("JWT expiration minutes must be between 1 and 1440")
         return v
     
     
