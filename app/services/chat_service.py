@@ -2,9 +2,14 @@ from typing import Tuple, List, Dict, Any, AsyncGenerator
 import logging
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
+from app.domain.ports.llm_port import LLMPort
+from app.core.config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Constants
+NO_CONTEXT_MESSAGE = "Parece que tu pregunta no es lo suficientemente específica 🤔. ¿Me das un poco más de contexto para ayudarte mejor?"
 
 
 class ChatService:
@@ -12,13 +17,14 @@ class ChatService:
     Application service that orchestrates RAG flow following hexagonal architecture:
     1. Generates embeddings using the embeddings port
     2. Searches context in vector database using vectorstore port
-    3. Calls LLM with history + context
+    3. Calls LLM with context
     4. Returns response
     """
 
-    def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort):
+    def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort, llm_provider: LLMPort):
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
+        self.llm_provider = llm_provider
     
     def _build_rag_prompt(self, message: str, context_text: str) -> str:
         """
@@ -52,13 +58,11 @@ A:"""
 
 
 
-    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, llm_provider=None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
         try:
-            from app.core.config import settings
-
             # Validate inputs
             if not message or not message.strip():
                 raise ValueError("Message cannot be empty")
@@ -68,9 +72,6 @@ A:"""
                 raise ValueError("Company ID is required and cannot be empty")
             if not area or not area.strip():
                 raise ValueError("Area is required and cannot be empty")
-            
-            if not self.vectorstore:
-                raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for RAG functionality.")
                 
         except ValueError as e:
             logger.error(f"Validation error in process_rag_query_stream: {e}")
@@ -110,7 +111,7 @@ A:"""
             }
             yield {
                 "type": "chunk",
-                "content": "Parece que tu pregunta no es lo suficientemente específica 🤔. ¿Me das un poco más de contexto para ayudarte mejor?"
+                "content": NO_CONTEXT_MESSAGE
             }
             yield {
                 "type": "complete",
@@ -118,26 +119,9 @@ A:"""
             }
             return
         
-        # Step 2: Extract documents from search result
-        context_documents = []
-        for doc in search_result["documents"]:
-            context_documents.append({
-                "content": doc["content"],
-                "company_id": doc["company_id"],
-                "doc_id": doc["doc_id"],
-                "chunk_id": doc["chunk_id"],
-                "page_start": doc["page_start"],
-                "page_end": doc["page_end"],
-                "char_start": doc["char_start"],
-                "char_end": doc["char_end"],
-                "token_count": doc["token_count"],
-                "distance": doc["distance"],
-                "relevance_score": doc["relevance_score"]
-            })
-        
         # Step 3: Prepare context text for LLM with source metadata
         context_with_sources = []
-        for doc in context_documents:
+        for doc in search_result["documents"]:
             if doc["content"]:
                 # Format page reference more accurately
                 if doc['page_start'] == doc['page_end']:
@@ -149,9 +133,7 @@ A:"""
         
         context_text = "\n\n".join(context_with_sources)
         
-        # Step 4: Generate LLM answer (LLM is required for /chat endpoint)
-        if not llm_provider:
-            raise ValueError("LLM provider is required for /chat-streaming endpoint but was not provided")
+        # Step 4: Generate LLM answer
         
         # Normal RAG flow with context
         rag_prompt = self._build_rag_prompt(message, context_text)
@@ -170,7 +152,7 @@ A:"""
         }
         
         # Stream the LLM response
-        async for chunk in llm_provider.generate_stream(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
+        async for chunk in self.generate_text_stream(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
             yield {
                 "type": "chunk",
                 "content": chunk
@@ -212,7 +194,8 @@ A:"""
         Args:
             query_embedding: Pre-generated embedding vector
             company_id: Company identifier for filtering results
-            area: Area identifier for additional filtering
+            area: Area identifier for additional filtering. When specified, returns documents
+                  from both the specific area AND the "Default" area (which are visible to all areas)
             collection: Collection/class name to search in (defaults to config or company_id)
             top_k: Number of results to return (defaults to config)
             similarity_threshold: Minimum similarity score (defaults to config)
@@ -221,9 +204,6 @@ A:"""
             Dict with search results and metadata
         """
         from app.core.config import settings
-
-        if not self.vectorstore:
-            raise ValueError("Vectorstore not initialized. Use get_chat_service_with_vectorstore() for search functionality.")
 
         # Use provided values or fall back to config defaults
         # If company_id is provided and no collection specified, use company_id as collection name
@@ -294,5 +274,49 @@ A:"""
             "embedding_dimensions": len(query_embedding),
             "status": "success"
         }
+
+    async def generate_text_stream(self, prompt: str, max_tokens: int = None, temperature: float = None) -> AsyncGenerator[str, None]:
+        """
+        Generate streaming text response using LLM.
+
+        Args:
+            prompt: Text prompt to send to LLM
+            max_tokens: Maximum tokens to generate (defaults to config)
+            temperature: Sampling temperature (defaults to config)
+
+        Yields:
+            Text chunks as they are generated by the LLM
+        """
+        from app.core.config import settings
+
+        if not prompt or not prompt.strip():
+            raise ValueError("Prompt cannot be empty")
+
+        # Use provided values or fall back to config defaults
+        llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+        llm_temperature = temperature if temperature is not None else settings.llm_temperature
+
+        # Validate parameters
+        if llm_max_tokens <= 0:
+            raise ValueError("max_tokens must be greater than 0")
+
+        if not (0.0 <= llm_temperature <= 2.0):
+            raise ValueError("temperature must be between 0.0 and 2.0")
+
+        try:
+            async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
+                yield chunk
+        except ConnectionError as e:
+            logger.error(f"Connection error during LLM generation: {e}")
+            raise ConnectionError(f"LLM service unavailable: {str(e)}")
+        except ValueError as e:
+            logger.error(f"Invalid input for LLM: {e}")
+            raise ValueError(f"Invalid prompt or parameters: {str(e)}")
+        except TimeoutError as e:
+            logger.error(f"Timeout error during LLM generation: {e}")
+            raise TimeoutError(f"LLM generation timeout: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during LLM generation: {e}")
+            raise ConnectionError(f"LLM generation failed: {str(e)}")
 
 

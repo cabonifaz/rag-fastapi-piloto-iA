@@ -272,7 +272,12 @@ class WeaviateRepository(VectorStorePort):
                 filter_conditions.append(Filter.by_property("company_id").equal(company_id))
             
             if area:
-                filter_conditions.append(Filter.by_property("area").equal(area))
+                # Include both the specific area AND Default area documents
+                area_filter = (
+                    Filter.by_property("area").equal(area) |
+                    Filter.by_property("area").equal("Default")
+                )
+                filter_conditions.append(area_filter)
             
             # Combine multiple conditions with & operator
             if len(filter_conditions) == 1:

@@ -22,7 +22,6 @@ class DIContainer:
         self._embeddings_provider = None
         self._vectorstore = None
         self._llm_provider = None
-        self._chat_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -90,30 +89,6 @@ class DIContainer:
         
         return self._llm_provider
 
-    def get_chat_service(self) -> ChatService:
-        """Get chat service instance (singleton)."""
-        if self._chat_service is None:
-            embeddings_provider = self.get_embeddings_provider()
-            # Don't initialize vectorstore unless needed to avoid connection errors
-            vectorstore = None
-            
-            self._chat_service = ChatService(
-                embeddings_provider=embeddings_provider,
-                vectorstore=vectorstore
-            )
-        
-        return self._chat_service
-
-    def get_chat_service_with_vectorstore(self) -> ChatService:
-        """Get chat service with vectorstore for full RAG functionality."""
-        embeddings_provider = self.get_embeddings_provider()
-        vectorstore = self.get_vectorstore()
-        
-        return ChatService(
-            embeddings_provider=embeddings_provider,
-            vectorstore=vectorstore
-        )
-
     def get_full_rag_chat_service(self) -> tuple[ChatService, LLMPort]:
         """Get chat service with vectorstore AND LLM provider for complete RAG with answer generation."""
         embeddings_provider = self.get_embeddings_provider()
@@ -122,7 +97,8 @@ class DIContainer:
         
         chat_service = ChatService(
             embeddings_provider=embeddings_provider,
-            vectorstore=vectorstore
+            vectorstore=vectorstore,
+            llm_provider=llm_provider
         )
         
         return chat_service, llm_provider
