@@ -12,8 +12,12 @@ engine = create_engine(
     echo=settings.api_debug,  # Log SQL queries in debug mode
     pool_size=10,
     max_overflow=20,
-    pool_pre_ping=True,  # Verify connections before use
+    pool_pre_ping=False,  # Don't test immediately during startup
     pool_recycle=3600,   # Recycle connections every hour
+    connect_args={
+        "timeout": 10,        # 10 second connection timeout
+        "login_timeout": 5    # 5 second SQL Server login timeout
+    }
 )
 
 # Create session factory
@@ -38,14 +42,22 @@ def get_db() -> Session:
 
 async def init_database():
     """Initialize database connection and create tables if they don't exist"""
+    import asyncio
     try:
-        # Test database connection
-        with engine.connect() as connection:
-            pass
-        
+        # Test database connection with timeout
+        await asyncio.wait_for(
+            asyncio.to_thread(lambda: engine.connect().close()),
+            timeout=15.0  # 15 second timeout for the entire operation
+        )
+        logger.info("Database connection successful")
+
+    except asyncio.TimeoutError:
+        logger.warning("Database connection timeout - application will continue but database features may not work")
+        # Don't raise - allow app to start without database
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        raise
+        logger.warning("Application will continue but database features may not work")
+        # Don't raise - allow app to start without database
 
 
 async def close_database():
