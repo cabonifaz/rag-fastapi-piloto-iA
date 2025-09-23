@@ -5,17 +5,17 @@ import os
 from typing import Optional, AsyncGenerator
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.domain.ports.llm_port import LLMPort
-from app.infrastructure.llm.model_formats import ModelFormatFactory
+from app.infrastructure.llm.model_factory import ModelConfigFactory
 # from app.utils.token_counter import TokenCounter, TokenUsage
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class AWSLLMProvider(LLMPort):
+class AWSBedrockLLMProvider(LLMPort):
     """
-    Adaptador para usar un LLM desde AWS (ej. Bedrock).
-    Implementa el puerto LLMPort.
+    Generic AWS Bedrock LLM provider that supports multiple model families.
+    Uses model-specific configurations for proper request/response formatting.
     """
 
     def __init__(
@@ -27,20 +27,21 @@ class AWSLLMProvider(LLMPort):
         aws_secret_access_key: Optional[str] = None,
     ):
         """
-        Inicializa el cliente de AWS Bedrock.
+        Initialize AWS Bedrock client with model-specific configuration.
 
-        :param region: región de AWS (ej. "us-east-1")
-        :param model_id: ID del modelo de Bedrock (ej. "anthropic.claude-v2")
-        :param profile_name: AWS profile name (opcional si usas IAM Role)
-        :param aws_access_key_id: AWS access key ID (opcional, usado si no hay profile)
-        :param aws_secret_access_key: AWS secret access key (opcional, usado si no hay profile)
+        Args:
+            region: AWS region (e.g., "us-east-1")
+            model_id: Bedrock model ID (e.g., "anthropic.claude-v2")
+            profile_name: AWS profile name (optional, for local development)
+            aws_access_key_id: AWS access key ID (optional)
+            aws_secret_access_key: AWS secret access key (optional)
         """
         session_params = {"region_name": region}
-        
-        # Solo usar profile en desarrollo local, no en producción con IAM Role
+
+        # Use profile only in development, not in production with IAM roles
         if profile_name and os.getenv('ENVIRONMENT', '').lower() != 'production':
             session_params["profile_name"] = profile_name
-        # Si no hay profile, usar credenciales directas si están disponibles
+        # If no profile, use direct credentials if available
         elif aws_access_key_id and aws_secret_access_key:
             session_params["aws_access_key_id"] = aws_access_key_id
             session_params["aws_secret_access_key"] = aws_secret_access_key
@@ -48,7 +49,12 @@ class AWSLLMProvider(LLMPort):
         session = boto3.Session(**session_params)
         self.client = session.client("bedrock-runtime")
         self.model_id = model_id
-        self.format_strategy = ModelFormatFactory.get_format_strategy(model_id)
+
+        # Get model-specific configuration
+        self.model_config = ModelConfigFactory.get_model_config(model_id)
+
+        logger.info(f"AWS Bedrock LLM provider initialized with model: {model_id} "
+                   f"(Provider: {ModelConfigFactory.get_model_provider(model_id)})")
 
     async def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
         """
@@ -63,8 +69,8 @@ class AWSLLMProvider(LLMPort):
             # Count input tokens
             # input_tokens = TokenCounter.estimate_tokens(prompt, self.model_id)
             
-            # Use strategy pattern for model-specific formatting
-            body = self.format_strategy.format_request(
+            # Use model-specific configuration for formatting
+            body = self.model_config.format_request(
                 prompt=prompt,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -79,7 +85,7 @@ class AWSLLMProvider(LLMPort):
             )
 
             response_body = json.loads(response["body"].read())
-            generated_text = self.format_strategy.extract_response(response_body)
+            generated_text = self.model_config.extract_response(response_body)
             
             # Costs calculation (deactivated)
             # Count output tokens
@@ -151,8 +157,8 @@ class AWSLLMProvider(LLMPort):
             # input_tokens = TokenCounter.estimate_tokens(prompt, self.model_id)
             generated_text = ""  # Accumulate for output token counting
             
-            # Use strategy pattern for model-specific formatting
-            body = self.format_strategy.format_request(
+            # Use model-specific configuration for formatting
+            body = self.model_config.format_request(
                 prompt=prompt,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -172,7 +178,7 @@ class AWSLLMProvider(LLMPort):
                     chunk = event.get("chunk")
                     if chunk:
                         chunk_data = json.loads(chunk.get("bytes").decode())
-                        text_chunk = self.format_strategy.extract_stream_chunk(chunk_data)
+                        text_chunk = self.model_config.extract_stream_chunk(chunk_data)
                         if text_chunk:
                             generated_text += text_chunk  # Accumulate for token counting
                             yield text_chunk

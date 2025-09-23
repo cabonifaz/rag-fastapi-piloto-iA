@@ -5,11 +5,13 @@ from app.services.chat_service import ChatService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
+from app.domain.ports.task_decomposition_port import TaskDecompositionPort
 
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
 from app.infrastructure.vectorstores.weaviate_repository import WeaviateRepository
-from app.infrastructure.llm.aws_provider import AWSLLMProvider
+from app.infrastructure.llm.aws_bedrock_provider import AWSBedrockLLMProvider
+from app.infrastructure.task_decomposition.aws_bedrock_provider import AWSBedrockTaskDecompositionProvider
 
 
 class DIContainer:
@@ -22,6 +24,7 @@ class DIContainer:
         self._embeddings_provider = None
         self._vectorstore = None
         self._llm_provider = None
+        self._task_decomposition_provider = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -75,7 +78,7 @@ class DIContainer:
                     if not settings.llm_model_id:
                         raise ValueError("LLM model ID is required for AWS provider")
                     
-                    self._llm_provider = AWSLLMProvider(
+                    self._llm_provider = AWSBedrockLLMProvider(
                         region=settings.llm_region,
                         model_id=settings.llm_model_id,
                         profile_name=settings.aws_profile,
@@ -102,6 +105,17 @@ class DIContainer:
         )
         
         return chat_service, llm_provider
+
+    def get_task_decomposition_provider(self) -> TaskDecompositionPort:
+        """Get task decomposition provider instance (singleton)."""
+        if self._task_decomposition_provider is None:
+            try:
+                # Generic AWS Bedrock provider with Mistral configuration (default)
+                self._task_decomposition_provider = AWSBedrockTaskDecompositionProvider()
+            except Exception as e:
+                raise ConnectionError(f"Failed to initialize task decomposition provider: {str(e)}")
+
+        return self._task_decomposition_provider
 
 
 # Global container instance
