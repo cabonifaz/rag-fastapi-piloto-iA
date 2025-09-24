@@ -24,9 +24,9 @@ class MistralTaskDecompositionConfig:
         available_schemas: Optional[Dict[str, Any]] = None
     ) -> str:
         """
-        Build the task decomposition prompt for Mistral 7B.
+        Build the task decomposition prompt for Mistral 7B (concise version).
         """
-        # Base prompt template
+        # Base prompt - concise version from implementation plan
         base_prompt = """You are a task decomposer. Analyze user questions and return JSON task arrays.
 
 AVAILABLE TASKS:
@@ -37,7 +37,7 @@ AVAILABLE TASKS:
 - llm_response: Generate final answer (always last)
 
 DECISION RULES:
-1. Conversation reference ("anterior", "eso", "resume") → get_context
+1. Conversation reference ("anterior", "eso") → get_context
 2. Knowledge/documentation question → embedding + retrieval
 3. Structured data question → sql_select ONLY if table schema provided
 4. NEVER mix retrieval with sql_select in same task
@@ -46,33 +46,26 @@ DECISION RULES:
 
 """
 
-        # Add table schemas if available
+        # Add table schemas in simplified format
         if available_schemas:
-            base_prompt += f"""TABLE SCHEMAS (when provided):
-{json.dumps(available_schemas, indent=2)}
-
-"""
+            base_prompt += "TABLE SCHEMAS (when provided):\n"
+            for table_name, schema in available_schemas.items():
+                columns = schema.get('columns', [])
+                base_prompt += f"- {table_name}: {columns}\n"
+            base_prompt += "\n"
         else:
-            base_prompt += """NO TABLE SCHEMAS PROVIDED - Use vectorial search only for all data queries.
+            base_prompt += "NO TABLE SCHEMAS PROVIDED - Use vectorial search only.\n\n"
 
-"""
-
-        # Add conversation context if available
-        conversation_context = ""
-        if conversation_history:
-            conversation_context = f"""CONVERSATION CONTEXT:
-{json.dumps(conversation_history[-3:], indent=2)}
-
-"""
-
-        # Examples
+        # Examples - concise format
         examples = """EXAMPLES:
 Knowledge: "¿Qué es BGP?" → [{"action": "embedding", "input": "BGP protocol"}, {"action": "retrieval", "vector_source": "embedding_result"}, {"action": "llm_response", "instructions": ["explain clearly"]}]
+
+Data: "Ventas Q1" → [{"action": "sql_select", "query": "SELECT product, revenue FROM sales_data WHERE company_id = '{company_id}' AND quarter = 'Q1'"}, {"action": "llm_response", "instructions": ["summarize sales"]}]
 
 Context: "Resume lo anterior" → [{"action": "get_context", "source": "conversation_history"}, {"action": "llm_response", "instructions": ["summarize"]}]
 
 CRITICAL RULES:
-- Questions about technical topics/documentation → VECTORIAL ONLY
+- Questions about switch models/specifications → VECTORIAL ONLY
 - Questions about sales/inventory data → SQL ONLY if table schema provided
 - NEVER combine retrieval + sql_select in same task
 - NEVER create sql_select without exact table schema
@@ -82,10 +75,9 @@ CRITICAL RULES:
 
         # Final query
         query_section = f"""DECOMPOSE: "{user_query}"
+"""
 
-Return ONLY a valid JSON array of tasks. No explanations or additional text."""
-
-        return base_prompt + conversation_context + examples + query_section
+        return base_prompt + examples + query_section
 
     @staticmethod
     def build_intent_analysis_prompt(
