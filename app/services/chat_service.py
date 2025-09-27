@@ -25,6 +25,84 @@ class ChatService:
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
         self.llm_provider = llm_provider
+
+    async def analyze_query_with_orchestrator(self, user_query: str) -> Dict[str, Any]:
+        """
+        Analyze user query using the orchestrator model to determine workflow requirements.
+        """
+        try:
+            # Get orchestrator analyzer from container first
+            from app.core.container import container
+            orchestrator = container.get_orchestrator_analyzer()
+
+            user_query = user_query.strip()
+            quote_chars = ['"', '“', '”', "'"]
+
+            while True:
+                original_query = user_query
+
+                # Handle special " and " pattern first
+                if user_query.startswith('" and "') and user_query.endswith('" and "'):
+                    user_query = user_query[6:-6].strip()
+                elif user_query.startswith('" and "'):
+                    user_query = user_query[6:].strip()
+                elif user_query.endswith('" and "'):
+                    user_query = user_query[:-6].strip()
+                else:
+                    # Remove single quotes from start and end
+                    for quote in quote_chars:
+                        if user_query.startswith(quote):
+                            user_query = user_query[1:].strip()
+                            break
+                    for quote in quote_chars:
+                        if user_query.endswith(quote):
+                            user_query = user_query[:-1].strip()
+                            break
+
+                # If no change was made, break the loop
+                if user_query == original_query:
+                    break
+
+            # Define available APIs (this could be loaded from config)
+            available_apis = [
+                {"method": "GET", "endpoint": "/network/switches", "description": "Table: switches, Columns: id, name, model, capacity, status", "params": {}},
+                {"method": "GET", "endpoint": "/network/routers", "description": "Table: routers, Columns: id, name, model, ip_address, status", "params": {}},
+                {"method": "GET", "endpoint": "/user/profile", "description": "Table: user_profiles, Columns: user_id, name, email, role, created_at", "params": {}},
+                {"method": "GET", "endpoint": "/user/settings", "description": "Table: user_settings, Columns: user_id, setting_name, value", "params": {}},
+                {"method": "GET", "endpoint": "/orders/recent", "description": "Table: orders, Columns: order_id, user_id, product, quantity, status, created_at", "params": {"limit": {"type": "integer", "required": False}, "user_id": {"type": "string", "required": True}}},
+                {"method": "GET", "endpoint": "/account/balance", "description": "Table: accounts, Columns: account_id, user_id, balance, currency", "params": {"user_id": {"type": "string", "required": True}}},
+                {"method": "GET", "endpoint": "/transactions/monthly", "description": "Table: transactions, Columns: transaction_id, account_id, amount, type, date", "params": {"month": {"type": "string", "required": True}, "account_id": {"type": "string", "required": False}}},
+                {"method": "POST", "endpoint": "/orders/search", "description": "Table: orders, Columns: order_id, user_id, product, quantity, status, created_at", "params": {"query": {"type": "string", "required": True}, "limit": {"type": "integer", "required": False}}},
+                {"method": "POST", "endpoint": "/user/search", "description": "Table: user_profiles, Columns: user_id, name, email, role, created_at", "params": {"query": {"type": "string", "required": True}, "role": {"type": "string", "required": False}}}
+            ]
+
+            # Call orchestrator to analyze the query
+            analysis = await orchestrator.analyze_query(user_query, available_apis)
+
+            # Generate tasks from analysis
+            from app.infrastructure.task_decomposition.task_generator import TaskGenerator
+            tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
+
+            return tasks
+
+        except Exception as e:
+            logger.error(f"Error in query analysis: {e}")
+            # Return fallback analysis
+            fallback_analysis = {
+                "needs_context": False,
+                "context_messages": 0,
+                "needs_system_data": False,
+                "system_calls": [],
+                "needs_external_knowledge": True,
+                "semantic_query": user_query,
+                "format": None,
+                "query_clean": user_query
+            }
+            # Generate tasks from fallback analysis
+            from app.infrastructure.task_decomposition.task_generator import TaskGenerator
+            fallback_tasks = TaskGenerator.generate_tasks_from_analysis(fallback_analysis, available_apis, user_query)
+
+            return fallback_tasks
     
     def _build_rag_prompt(self, message: str, context_text: str) -> str:
         """
@@ -167,12 +245,6 @@ A:"""
     async def generate_embedding(self, query: str) -> List[float]:
         """
         Generate embedding for a query text.
-
-        Args:
-            query: Text to convert to embedding
-
-        Returns:
-            List of float values representing the embedding
         """
         try:
             query_embedding = await self.embeddings_provider.embed(query)
@@ -190,18 +262,6 @@ A:"""
     async def search_by_embedding(self, query_embedding: List[float], company_id: str = None, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
         """
         Search vector database using pre-generated embedding.
-
-        Args:
-            query_embedding: Pre-generated embedding vector
-            company_id: Company identifier for filtering results
-            area: Area identifier for additional filtering. When specified, returns documents
-                  from both the specific area AND the "Default" area (which are visible to all areas)
-            collection: Collection/class name to search in (defaults to config or company_id)
-            top_k: Number of results to return (defaults to config)
-            similarity_threshold: Minimum similarity score (defaults to config)
-
-        Returns:
-            Dict with search results and metadata
         """
         from app.core.config import settings
 
@@ -278,14 +338,6 @@ A:"""
     async def generate_text_stream(self, prompt: str, max_tokens: int = None, temperature: float = None) -> AsyncGenerator[str, None]:
         """
         Generate streaming text response using LLM.
-
-        Args:
-            prompt: Text prompt to send to LLM
-            max_tokens: Maximum tokens to generate (defaults to config)
-            temperature: Sampling temperature (defaults to config)
-
-        Yields:
-            Text chunks as they are generated by the LLM
         """
         from app.core.config import settings
 

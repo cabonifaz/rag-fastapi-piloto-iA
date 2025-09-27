@@ -40,6 +40,10 @@ class EmbeddingTestRequest(BaseModel):
     user_id: str
     message: str
 
+# Request Schema for orchestrator analysis
+class OrchestratorRequest(BaseModel):
+    message: str
+
 
 # Response Models
 class ChatResponse(BaseModel):
@@ -217,4 +221,35 @@ async def chat_streaming_endpoint(
     except Exception as e:
         logger.error(f"Unexpected error in streaming endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
+
+
+@router.post("/analyze-query")
+async def analyze_query_endpoint(
+    request: OrchestratorRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Analyze user query using orchestrator model to determine workflow requirements.
+
+    Returns structured analysis indicating what data sources and processing are needed.
+    """
+    try:
+        # Get chat service from container
+        chat_service, _ = container.get_full_rag_chat_service()
+
+        # Analyze query with orchestrator
+        tasks = await chat_service.analyze_query_with_orchestrator(request.message)
+
+        # Return structured response
+        success_response = create_success_response("Query analyzed successfully")
+        return {
+            "status": "success",
+            "tasks": tasks,
+            "result": success_response.model_dump()
+        }
+
+    except Exception as e:
+        logger.error(f"Error in orchestrator analysis: {e}")
+        error_response = create_error_response("Error analyzing query")
         raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})

@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     llm_max_tokens: int
     llm_temperature: float
     llm_top_p: float
+
+    orchestrator_model_id: str
+    orchestrator_max_tokens: int
+    orchestrator_temperature: float
+    orchestrator_top_p: float
     
     weaviate_url: Optional[str] = None
     weaviate_api_key: Optional[str] = None

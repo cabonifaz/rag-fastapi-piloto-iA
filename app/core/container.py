@@ -5,13 +5,13 @@ from app.services.chat_service import ChatService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
-from app.domain.ports.task_decomposition_port import TaskDecompositionPort
+from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
 from app.infrastructure.vectorstores.weaviate_repository import WeaviateRepository
 from app.infrastructure.llm.aws_bedrock_provider import AWSBedrockLLMProvider
-from app.infrastructure.task_decomposition.aws_bedrock_provider import AWSBedrockTaskDecompositionProvider
+from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 
 
 class DIContainer:
@@ -24,7 +24,7 @@ class DIContainer:
         self._embeddings_provider = None
         self._vectorstore = None
         self._llm_provider = None
-        self._task_decomposition_provider = None
+        self._orchestrator_analyzer = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -106,16 +106,15 @@ class DIContainer:
         
         return chat_service, llm_provider
 
-    def get_task_decomposition_provider(self) -> TaskDecompositionPort:
-        """Get task decomposition provider instance (singleton)."""
-        if self._task_decomposition_provider is None:
+    def get_orchestrator_analyzer(self) -> OrchestratorQueryAnalyzer:
+        """Get orchestrator query analyzer instance (singleton)."""
+        if self._orchestrator_analyzer is None:
             try:
-                # Generic AWS Bedrock provider with Mistral configuration (default)
-                self._task_decomposition_provider = AWSBedrockTaskDecompositionProvider()
+                self._orchestrator_analyzer = OrchestratorQueryAnalyzer()
             except Exception as e:
-                raise ConnectionError(f"Failed to initialize task decomposition provider: {str(e)}")
+                raise ConnectionError(f"Failed to initialize orchestrator analyzer: {str(e)}")
 
-        return self._task_decomposition_provider
+        return self._orchestrator_analyzer
 
 
 # Global container instance

@@ -1,0 +1,18 @@
+{
+  "needs_context": "boolean",
+  "context_messages": "number",
+  "needs_system_data": "boolean",
+  "system_calls": [
+    {
+      "entity": "string",
+      "endpoint": "string",
+      "method": "string",
+      "params": "object",
+      "missing_required_params": "array"
+    }
+  ],
+  "needs_external_knowledge": "boolean",
+  "semantic_query": "string",
+  "format": "table|list|null",
+  "query_clean": "string"
+}
