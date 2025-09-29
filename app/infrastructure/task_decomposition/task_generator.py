@@ -116,52 +116,36 @@ class TaskGenerator:
         return tasks
 
     @staticmethod
-    def validate_task(task: Dict[str, Any]) -> bool:
-        """Validate that a task has the required structure."""
-        if "action" not in task:
-            return False
-
-        action = task["action"]
-
-        # Validate specific action requirements
-        if action == "get_context":
-            return "messages" in task
-        elif action == "embedding":
-            return "input" in task
-        elif action == "retrieval":
-            return True  # No additional fields required
-        elif action == "api_call":
-            return all(field in task for field in ["method", "endpoint"])
-        elif action == "llm_response":
-            return True  # Format is optional
-
-        return False
+    def _find_api_definition(call: Dict[str, Any], available_apis: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Find API definition matching the call's endpoint and method."""
+        return next(
+            (api for api in available_apis
+             if api.get("endpoint") == call.get("endpoint") and api.get("method") == call.get("method")),
+            None
+        )
 
     @staticmethod
-    def print_tasks(tasks: List[Dict[str, Any]]) -> None:
-        """Print generated tasks in a readable format."""
-        print(f"\n=== GENERATED TASKS ({len(tasks)} total) ===")
+    def _sanitize_parameters(call_params: Dict[str, Any], allowed_params: set) -> Dict[str, Any]:
+        """Clean invalid or empty parameters from call params."""
+        return {
+            k: v for k, v in call_params.items()
+            if k in allowed_params and v != ""
+        }
 
-        for i, task in enumerate(tasks, 1):
-            print(f"\n{i}. Action: {task.get('action', 'unknown')}")
+    @staticmethod
+    def _validate_api_parameters(call_params: Dict[str, Any], params_def: Dict[str, Dict[str, Any]],
+                               required_params: List[str]) -> bool:
+        """Validate API parameters against definition requirements."""
+        # Check all required parameters are present
+        if not all(r in call_params for r in required_params):
+            return False
 
-            # Print task-specific details
-            action = task.get('action')
-            if action == "get_context":
-                print(f"   Messages: {task.get('messages', 0)}")
-            elif action == "embedding":
-                input_text = task.get('input', '')
-                preview = input_text[:50] + "..." if len(input_text) > 50 else input_text
-                print(f"   Input: {preview}")
-            elif action == "api_call":
-                print(f"   Method: {task.get('method', 'GET')}")
-                print(f"   Endpoint: {task.get('endpoint', '')}")
-                if task.get('params'):
-                    print(f"   Params: {task.get('params')}")
-            elif action == "llm_response":
-                if 'format' in task:
-                    print(f"   Format: {task.get('format')}")
-                else:
-                    print("   Format: default")
+        # Validate parameter types
+        for k, v in call_params.items():
+            expected_type = params_def.get(k, {}).get("type")
+            if expected_type == "integer" and not isinstance(v, int):
+                return False
+            if expected_type == "string" and not isinstance(v, str):
+                return False
 
-        print("\n" + "="*50)
+        return True
