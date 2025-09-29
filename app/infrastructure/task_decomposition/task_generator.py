@@ -42,47 +42,31 @@ class TaskGenerator:
         if analysis.get("needs_system_data", False) and available_apis:
             system_calls = analysis.get("system_calls", [])
             for call in system_calls:
+                # Skip calls with missing required params
                 missing = call.get("missing_required_params", [])
-                if missing:  # si faltan parámetros requeridos, se salta
+                if missing:
                     continue
 
-                # Buscar en available_apis la definición de ese endpoint y método
-                api_def = next(
-                    (api for api in available_apis if api.get("endpoint") == call.get("endpoint") and api.get("method") == call.get("method")),
-                    None
-                )
+                # Find API definition
+                api_def = TaskGenerator._find_api_definition(call, available_apis)
                 if not api_def:
-                    continue  # si no está definida en available_apis, la ignoramos
+                    continue
 
-                # Extraer definición de parámetros
+                # Extract parameter definitions
                 params_def = api_def.get("params", {})
                 required_params = [p for p, meta in params_def.items() if meta.get("required")]
                 allowed_params = set(params_def.keys())
 
-                # Limpiar parámetros inválidos o vacíos ("")
-                call_params = {
-                    k: v for k, v in call.get("params", {}).items()
-                    if k in allowed_params and v != ""
-                }
+                # Sanitize parameters
+                call_params = TaskGenerator._sanitize_parameters(
+                    call.get("params", {}), allowed_params
+                )
 
-                # Verificar que todos los obligatorios estén presentes
-                if not all(r in call_params for r in required_params):
-                    continue  # falta algún parámetro obligatorio, no se agrega
+                # Validate parameters
+                if not TaskGenerator._validate_api_parameters(call_params, params_def, required_params):
+                    continue
 
-                # Validar tipos de parámetros según la definición
-                valid = True
-                for k, v in call_params.items():
-                    expected_type = params_def.get(k, {}).get("type")
-                    if expected_type == "integer" and not isinstance(v, int):
-                        valid = False
-                        break
-                    if expected_type == "string" and not isinstance(v, str):
-                        valid = False
-                        break
-                if not valid:
-                    continue  # si algún parámetro no respeta el tipo → se descarta
-
-                # Si pasa todas las validaciones, se agrega la tarea
+                # Create valid API call task
                 tasks.append({
                     "action": "api_call",
                     "method": call.get("method", "GET"),
