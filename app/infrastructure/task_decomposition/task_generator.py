@@ -42,11 +42,6 @@ class TaskGenerator:
         if analysis.get("needs_system_data", False) and available_apis:
             system_calls = analysis.get("system_calls", [])
             for call in system_calls:
-                # Skip calls with missing required params
-                missing = call.get("missing_required_params", [])
-                if missing:
-                    continue
-
                 # Find API definition
                 api_def = TaskGenerator._find_api_definition(call, available_apis)
                 if not api_def:
@@ -56,6 +51,16 @@ class TaskGenerator:
                 params_def = api_def.get("params", {})
                 required_params = [p for p, meta in params_def.items() if meta.get("required")]
                 allowed_params = set(params_def.keys())
+
+                # Check if actually required params are missing
+                # Ignore orchestrator's missing_required_params - check actual values in params
+                provided_params = call.get("params", {})
+                actually_missing_required = [
+                    p for p in required_params
+                    if p not in provided_params or provided_params[p] in [None, "", []]
+                ]
+                if actually_missing_required:
+                    continue
 
                 # Sanitize parameters
                 call_params = TaskGenerator._sanitize_parameters(
@@ -102,9 +107,13 @@ class TaskGenerator:
     @staticmethod
     def _find_api_definition(call: Dict[str, Any], available_apis: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Find API definition matching the call's endpoint and method."""
+        call_endpoint = call.get("endpoint", "")
+        call_method = call.get("method", "")
+
         return next(
             (api for api in available_apis
-             if api.get("endpoint") == call.get("endpoint") and api.get("method") == call.get("method")),
+             if (api.get("endpoint") == call_endpoint or call_endpoint in api.get("endpoint", ""))
+             and api.get("method") == call_method),
             None
         )
 

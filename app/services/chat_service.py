@@ -103,7 +103,174 @@ class ChatService:
             fallback_tasks = TaskGenerator.generate_tasks_from_analysis(fallback_analysis, available_apis, user_query)
 
             return fallback_tasks
-    
+
+    async def analyze_query_with_agent_orchestrator_stream(self, user_id: str, message: str, company_id: str, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
+        """
+        Analyze user query using the agent orchestrator model to determine workflow requirements.
+        Enhanced version that accepts all process_rag_query_stream parameters for complete context.
+        """
+        # Get orchestrator analyzer from container first
+        from app.core.container import container
+        orchestrator = container.get_orchestrator_analyzer()
+
+        user_query = message.strip()
+        quote_chars = ['"', '“', '”', "'"]
+
+        while True:
+            original_query = user_query
+
+            # Handle special " and " pattern first
+            if user_query.startswith('" and "') and user_query.endswith('" and "'):
+                user_query = user_query[6:-6].strip()
+            elif user_query.startswith('" and "'):
+                user_query = user_query[6:].strip()
+            elif user_query.endswith('" and "'):
+                user_query = user_query[:-6].strip()
+            else:
+                # Remove single quotes from start and end
+                for quote in quote_chars:
+                    if user_query.startswith(quote):
+                        user_query = user_query[1:].strip()
+                        break
+                for quote in quote_chars:
+                    if user_query.endswith(quote):
+                        user_query = user_query[:-1].strip()
+                        break
+
+            # If no change was made, break the loop
+            if user_query == original_query:
+                break
+
+        # Define available APIs (this could be loaded from config)
+        available_apis = [
+            {
+                "method": "GET",
+                "endpoint": "/bdt/talent/list",
+                "description": "Table: talents, Columns: idTalento, nombres, apellidoPaterno, apellidoMaterno, imagen, puesto, pais, ciudad, idModalidadFacturacion, montoInicialPlanilla, montoFinalPlanilla, montoInicialRxH, montoFinalRxH, moneda, estrellas, esFavorito, idMonedaPlan, idMonedaRxh",
+                "params": {
+                    "nPag": { "type": "integer", "required": True },
+                    "search": { "type": "string", "required": False },
+                    "techAbilities": { "type": "string", "required": False },
+                    "idEnglishLevel": { "type": "integer", "required": False },
+                    "idTalentCollection": { "type": "integer", "required": False }
+                }
+            }
+        ]
+
+        # Call orchestrator to analyze the query
+        analysis = await orchestrator.analyze_query(user_query, available_apis)
+
+        # Generate tasks from analysis
+        from app.infrastructure.task_decomposition.task_generator import TaskGenerator
+        tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
+
+        # Execute tasks sequentially
+        query_embedding = None
+        context_text = ""
+        execution_failed = False
+
+        for task in tasks:
+            if execution_failed:
+                break
+            if task.get("action") == "embedding":
+                try:
+                    query_text = task.get("input", user_query)
+                    query_embedding = await self.generate_embedding(query_text)
+                except Exception as e:
+                    execution_failed = True
+                    break  # Stop execution if embedding fails
+
+            elif task.get("action") == "retrieval":
+                try:
+                    if query_embedding is None:
+                        # Generate embedding if not already done
+                        query_embedding = await self.generate_embedding(user_query)
+
+                    search_results = await self.search_by_embedding(
+                        query_embedding=query_embedding,
+                        company_id=company_id,
+                        area=area,
+                        collection=collection,
+                        top_k=top_k,
+                        similarity_threshold=similarity_threshold
+                    )
+                    # Build context from retrieved documents
+                    if search_results["documents"]:
+                        context_parts = []
+                        for doc in search_results["documents"]:
+                            if doc["content"]:
+                                context_parts.append(doc["content"])
+                        context_text = "\n\n".join(context_parts)
+                except Exception as e:
+                    execution_failed = True
+                    break  # Stop execution if retrieval fails
+
+            elif task.get("action") == "api_call":
+                try:
+                    from app.infrastructure.api_clients.api_client import curl_get, curl_post
+                    method = task.get("method", "GET").upper()
+                    if method == "GET":
+                        api_result = await curl_get(task.get("endpoint", ""), external_token, task.get("params", {}))
+                    else:
+                        api_result = await curl_post(task.get("endpoint", ""), external_token, task.get("params", {}))
+
+                    # Add API result to context only if there's actual data
+                    if api_result.get("success") and api_result.get("data"):
+                        import json
+                        api_data = json.dumps(api_result['data'])
+                        if api_data and api_data.strip() not in ["{}", "[]", "null"]:
+                            context_text += api_data
+
+                except Exception as e:
+                    execution_failed = True
+                    break  # Stop execution if API call fails
+
+            elif task.get("action") == "llm_response":
+                try:
+                    # Check if we have any context at all
+                    if not context_text or context_text.strip() == "":
+                        # No context available - return predefined message
+                        yield {
+                            "type": "chunk",
+                            "content": NO_CONTEXT_MESSAGE
+                        }
+                        break
+
+                    # Prepare the query, checking for format requirements
+                    query_to_use = user_query
+                    task_format = task.get("format")
+                    if task_format:
+                        if task_format.lower() == "list":
+                            query_to_use = f"{user_query}. Please provide your response as a markdown list showing ALL items from the data."
+                        elif task_format.lower() == "table":
+                            query_to_use = f"{user_query}. Please provide your response as a markdown table showing ALL rows from the data. Do not omit any entries."
+
+                    # Build prompt with context (we know context_text exists here)
+                    prompt = self._build_rag_prompt(query_to_use, context_text)
+
+                    # Use provided parameters or fall back to environment defaults
+                    from app.core.config import settings
+                    llm_temperature = temperature if temperature is not None else settings.llm_temperature
+                    llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+
+                    # Stream response directly from LLM provider (same as process_rag_query_stream)
+                    async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
+                        # Yield each chunk for streaming (same format as process_rag_query_stream)
+                        yield {
+                            "type": "chunk",
+                            "content": chunk
+                        }
+
+                except Exception as e:
+                    execution_failed = True
+                    break  # Stop execution if LLM response fails
+
+        # Send completion signal
+        yield {
+            "type": "complete",
+            "status": "success"
+        }
+
     def _build_rag_prompt(self, message: str, context_text: str) -> str:
         """
         Build the RAG prompt with context and user message.
@@ -116,23 +283,25 @@ class ChatService:
         is_claude = "claude" in model_id_lower or "anthropic" in model_id_lower
         
         if is_claude:
-            # Claude-optimized prompt: concise, natural, conversational
-            return f"""Based on the following context, please answer the user's question. Include relevant source references with document ID and page numbers. Do not search on internet. Answer in the same language as the question.
+            # Claude-optimized prompt: use all provided context
+            return f"""You are provided with data below. Present this data exactly as it appears. Do not make assumptions, calculations, or infer additional information beyond what is explicitly provided.
 
-Context:
+Data:
 {context_text}
 
 Question: {message}
 
-Please provide a clear, accurate response based solely on the provided context."""
+Provide a complete answer showing ALL the data provided above. Do not summarize or omit any entries. Answer in the same language as the question."""
         else:
-            # Llama-optimized prompt: explicit instructions, structured format
-            return f"""Answer directly and include the source references. Use ONLY the context provided to answer. Do NOT explain, justify, or comment on the correctness. Do NOT repeat text. Always cite your sources using the document ID and page numbers provided in the context.
+            # Llama-optimized prompt: use all provided context
+            return f"""Present the data provided below. Show ALL entries exactly as provided. Do not make assumptions or add information not in the data.
 
+Data:
 {context_text}
 
-Q: {message}
-A:"""
+Question: {message}
+
+Answer showing ALL the data in the same language as the question:"""
 
 
 
@@ -370,5 +539,4 @@ A:"""
         except Exception as e:
             logger.error(f"Unexpected error during LLM generation: {e}")
             raise ConnectionError(f"LLM generation failed: {str(e)}")
-
 

@@ -79,7 +79,6 @@ class OrchestratorQueryAnalyzer:
 
     def _get_fallback_analysis(self, user_query: str) -> Dict[str, Any]:
         """Fallback analysis when orchestrator fails."""
-        print("being used")
         return {
             "needs_context": False,
             "context_messages": 0,
