@@ -61,7 +61,7 @@ class WeaviateRepository(VectorStorePort):
         # Use proper HTTPS URL format
         if not url.startswith('https://'):
             url = f"https://{url}"
-            
+
         # Check what weaviate version is available and use appropriate connection
         try:
             # Try v4 connection (weaviate-client >= 4.0)
@@ -82,6 +82,30 @@ class WeaviateRepository(VectorStorePort):
                 additional_headers=extra_headers or {},
                 timeout_config=(5, 15)
             )
+
+    def _search_vector(self, collection, vector: List[float], actual_top_k: int,
+                       return_properties: Optional[List[str]], filters: Optional[Any],
+                       include_distance: bool):
+        """Vector similarity search using collection's configured distance metric."""
+        query_kwargs = {
+            "near_vector": list(vector),
+            "limit": actual_top_k,
+            "return_metadata": ["distance"] if include_distance else [],
+        }
+
+        if return_properties:
+            query_kwargs["return_properties"] = list(return_properties)
+
+        if filters:
+            return collection.query.near_vector(
+                near_vector=list(vector),
+                limit=actual_top_k,
+                return_metadata=["distance"] if include_distance else [],
+                return_properties=list(return_properties) if return_properties else None,
+                filters=filters
+            )
+        else:
+            return collection.query.near_vector(**query_kwargs)
 
     async def search_by_vector(
         self,
@@ -122,30 +146,10 @@ class WeaviateRepository(VectorStorePort):
                 
                 # First try a simple get to see if collection has any data
                 simple_response = collection.query.fetch_objects(limit=1)
-                
-                # Build query with optional filters
-                query_kwargs = {
-                    "near_vector": list(vector),
-                    "limit": actual_top_k,
-                    "return_metadata": ["distance"] if include_distance else [],
-                }
-                
-                # Only specify properties if they're provided
-                if return_properties:
-                    query_kwargs["return_properties"] = list(return_properties)
-                
-                # Build the query with filters if provided
-                if filters:
-                    response = collection.query.near_vector(
-                        near_vector=list(vector),
-                        limit=actual_top_k,
-                        return_metadata=["distance"] if include_distance else [],
-                        return_properties=list(return_properties) if return_properties else None,
-                        filters=filters
-                    )
-                else:
-                    response = collection.query.near_vector(**query_kwargs)
-                
+
+                # Perform vector search
+                response = self._search_vector(collection, vector, actual_top_k, return_properties, filters, include_distance)
+
                 results: List[VectorSearchResult] = []
                 for obj in response.objects:
                     item: VectorSearchResult = {
@@ -306,8 +310,17 @@ class WeaviateRepository(VectorStorePort):
         except Exception as e:
             logger.error(f"Unexpected error in search_in_collection: {e}")
             raise ConnectionError(f"Vector search service error: {str(e)}")
-        
-        
+
+        # Debug: Print raw search results before filtering
+        print(f"\n=== RAW SEARCH RESULTS (before filtering) ===")
+        print(f"Total results: {len(results)}")
+        for i, r in enumerate(results):
+            print(f"\nResult {i+1}:")
+            print(f"  ID: {r.get('id')}")
+            print(f"  Distance: {r.get('distance')}")
+            print(f"  Properties: {r.get('properties')}")
+        print(f"=== END RAW RESULTS ===\n")
+
         if actual_similarity_threshold is not None:
             for i, r in enumerate(results):
                 distance = r.get('distance', 1.0)

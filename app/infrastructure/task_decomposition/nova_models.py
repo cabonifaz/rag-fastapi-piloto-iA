@@ -59,24 +59,42 @@ Decision Hierarchy: 1) Quantified references 2) Singular/Plural indicators 3) Re
 System Data Rules
 needs_system_data → true only if the query requires internal data and mentions one or more columns that exist in an endpoint's "Columns" list from the API list.
 
-system_calls → include one entry only for endpoints whose columns match the query:
+ENTITY-PARAMETER MATCHING FRAMEWORK:
+1. Entity Precedence: Endpoint matching must begin with entity alignment
+2. Domain Integrity: Parameters operate within their endpoint's entity domain
+3. Semantic Coherence: All matches must maintain logical consistency
 
-entity = descriptive name of the entity
+system_calls → include endpoints ONLY when:
+
+MATCHING VALIDATION SEQUENCE:
+1. Identify the query's primary subject and intent
+2. Match to endpoints where the entity domain aligns with query subject
+3. Only after entity alignment, evaluate parameter applicability
+4. Reject matches that violate domain boundaries or logical coherence
+
+ENTITY = descriptive name of the entity from endpoint description
 endpoint = API endpoint path (ONLY use relative paths from API list, NEVER full URLs)
 method = GET or POST
 params = object containing only parameters explicitly provided in the query OR the special value "my_user_id" for user context references
 missing_required_params = array of required parameters that are missing from the query
 
-PARAMETER RESOLUTION RULES:
-1. Explicit Parameters: Use values explicitly provided in the query (specific IDs, numbers, strings)
-2. User Context Parameters: When the query contains possessive references indicating user-owned data, use the special value "my_user_id"
-3. Missing Parameters: When required parameters are not provided and no user context is detected, list them in missing_required_params
+CORE PRINCIPLES:
+- Entity alignment precedes parameter consideration
+- Parameters serve their endpoint's domain, cannot bridge unrelated domains
+- All components must maintain semantic coherence
+- Reject matches that rely on superficial keyword associations
 
-CRITICAL PARAMETER CONSISTENCY:
-- If a parameter is provided in 'params', it MUST NOT be in 'missing_required_params'
-- If a parameter is in 'missing_required_params', it MUST NOT be in 'params'
-- ONLY include parameters that are explicitly provided (never include parameters with None/null values)
-- DO NOT INFER REAL USER IDs - only use "my_user_id" as a placeholder for user context resolution
+PARAMETER RESOLUTION RULES:
+1. Explicit Parameters: Use values explicitly provided in the query
+2. User Context Parameters: Use "my_user_id" for possessive user references
+3. Missing Parameters: List required parameters not provided
+4. Semantic Validation: Values must align with parameter purpose and endpoint domain
+
+CRITICAL CONSTRAINTS:
+- Parameter presence in 'params' and 'missing_required_params' is mutually exclusive
+- Only include explicitly provided parameter values
+- No inference of real user identifiers
+- No inclusion of undefined parameters
 
 External Knowledge Rules
 needs_external_knowledge → true if query requires external knowledge retrieval

@@ -97,13 +97,15 @@ class DIContainer:
         embeddings_provider = self.get_embeddings_provider()
         vectorstore = self.get_vectorstore()
         llm_provider = self.get_llm_provider()
-        
+        orchestrator = self.get_orchestrator_analyzer()
+
         chat_service = ChatService(
             embeddings_provider=embeddings_provider,
             vectorstore=vectorstore,
-            llm_provider=llm_provider
+            llm_provider=llm_provider,
+            orchestrator=orchestrator
         )
-        
+
         return chat_service, llm_provider
 
     def get_orchestrator_analyzer(self) -> OrchestratorQueryAnalyzer:

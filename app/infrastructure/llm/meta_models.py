@@ -49,6 +49,19 @@ class MetaModelConfig:
             return chunk_data["text"]
         return ""
 
+    def build_rag_prompt(self, message: str, context_text: str) -> str:
+        """Build RAG prompt optimized for Llama models."""
+        return f"""IMPORTANT: Respond in the SAME LANGUAGE as the question.
+
+Present the data provided below. Show ALL entries exactly as provided. Do not make assumptions or add information not in the data.
+
+Data:
+{context_text}
+
+Question: {message}
+
+Answer showing ALL the data in the same language as the question:"""
+
 
 class Llama3_8BConfig(MetaModelConfig):
     """Specific configuration for Llama 3 8B - focused on request/response formatting."""

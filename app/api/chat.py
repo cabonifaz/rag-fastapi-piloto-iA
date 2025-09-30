@@ -29,7 +29,6 @@ class UnifiedRequest(BaseModel):
     message: str
     company_id: str                         # Required, for company-specific search
     area: str                               # Required, for area-specific filtering and user role validation
-    collection: str = None                   # Optional, defaults to env config
     top_k: Optional[int] = None             # Optional, defaults to env config
     similarity_threshold: Optional[float] = None  # Optional, defaults to env config
     temperature: Optional[float] = None      # Optional, defaults to env config
@@ -50,7 +49,6 @@ class AgentStreamingRequest(BaseModel):
     message: str
     company_id: str                         # Required, for company-specific search
     area: str                               # Required, for area-specific filtering and user role validation
-    collection: str = None                   # Optional, defaults to env config
     top_k: Optional[int] = None             # Optional, defaults to env config
     similarity_threshold: Optional[float] = None  # Optional, defaults to env config
     temperature: Optional[float] = None      # Optional, defaults to env config
@@ -169,7 +167,6 @@ async def chat_streaming_endpoint(
                     message=request.message,
                     company_id=request.company_id,
                     area=request.area,
-                    collection=request.collection,
                     top_k=request.top_k,
                     similarity_threshold=request.similarity_threshold,
                     temperature=request.temperature,
@@ -267,12 +264,11 @@ async def agent_streaming_endpoint(
         async def generate_stream():
             try:
                 answer = ""
-                async for chunk_data in chat_service.analyze_query_with_agent_orchestrator_stream(
+                async for chunk_data in chat_service.agent_orchestrator_stream(
                     user_id=request.user_id,
                     message=request.message,
                     company_id=request.company_id,
                     area=request.area,
-                    collection=request.collection,
                     top_k=request.top_k,
                     similarity_threshold=request.similarity_threshold,
                     temperature=request.temperature,
@@ -338,35 +334,4 @@ async def agent_streaming_endpoint(
     except Exception as e:
         logger.error(f"Unexpected error in agent streaming endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
-
-
-@router.post("/analyze-query")
-async def analyze_query_endpoint(
-    request: OrchestratorRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-):
-    """
-    Analyze user query using orchestrator model to determine workflow requirements.
-
-    Returns structured analysis indicating what data sources and processing are needed.
-    """
-    try:
-        # Get chat service from container
-        chat_service, _ = container.get_full_rag_chat_service()
-
-        # Analyze query with orchestrator
-        tasks = await chat_service.analyze_query_with_orchestrator(request.message)
-
-        # Return structured response
-        success_response = create_success_response("Query analyzed successfully")
-        return {
-            "status": "success",
-            "tasks": tasks,
-            "result": success_response.model_dump()
-        }
-
-    except Exception as e:
-        logger.error(f"Error in orchestrator analysis: {e}")
-        error_response = create_error_response("Error analyzing query")
         raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})

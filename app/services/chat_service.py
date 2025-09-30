@@ -1,9 +1,14 @@
 from typing import Tuple, List, Dict, Any, AsyncGenerator
 import logging
+import json
+import re
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
+from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.core.config import settings
+from app.infrastructure.task_decomposition.task_generator import TaskGenerator
+from app.infrastructure.api_clients.api_client import curl_get, curl_post
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -21,291 +26,203 @@ class ChatService:
     4. Returns response
     """
 
-    def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort, llm_provider: LLMPort):
+    def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort, llm_provider: LLMPort, orchestrator: QueryAnalysisPort = None):
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
         self.llm_provider = llm_provider
+        self.orchestrator = orchestrator
 
-    async def analyze_query_with_orchestrator(self, user_query: str) -> Dict[str, Any]:
+    @staticmethod
+    def clean_user_query(message: str) -> str:
         """
-        Analyze user query using the orchestrator model to determine workflow requirements.
+        Clean user query by removing special quotes, normalizing whitespace, and handling line breaks.
+
+        Args:
+            message: Raw user input message
+
+        Returns:
+            Cleaned query string
+        """
+        # First strip leading/trailing whitespace and line breaks
+        user_query = message.strip()
+
+        # Replace newlines/line breaks in the middle with spaces
+        user_query = user_query.replace('\n', ' ').replace('\r', ' ')
+
+        # Remove special quote characters from anywhere in the string
+        special_quotes = ['"', '“', '”', "'"]
+        for quote in special_quotes:
+            user_query = user_query.replace(quote, '')
+
+        # Normalize multiple spaces into single space and trim again
+        user_query = re.sub(r'\s+', ' ', user_query).strip()
+
+        return user_query
+
+
+    def _build_rag_prompt(self, message: str, context_text: str) -> str:
+        """
+        Build the RAG prompt with context and user message.
+        Delegates to model-specific configuration for optimal prompts.
+        """
+        # Get model configuration from LLM provider
+        model_config = self.llm_provider.get_model_config()
+
+        # Use model-specific prompt building
+        return model_config.build_rag_prompt(message, context_text)
+
+
+    async def agent_orchestrator_stream(self, user_id: str, message: str, company_id: str, area: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
+        """
+        Analyze user query using the agent orchestrator model to determine workflow requirements.
+        Enhanced version that accepts all process_rag_query_stream parameters for complete context.
         """
         try:
-            # Get orchestrator analyzer from container first
-            from app.core.container import container
-            orchestrator = container.get_orchestrator_analyzer()
+            # Use injected orchestrator
+            if not self.orchestrator:
+                raise ValueError("Orchestrator not configured for this service instance")
 
-            user_query = user_query.strip()
-            quote_chars = ['"', '“', '”', "'"]
+            orchestrator = self.orchestrator
 
-            while True:
-                original_query = user_query
-
-                # Handle special " and " pattern first
-                if user_query.startswith('" and "') and user_query.endswith('" and "'):
-                    user_query = user_query[6:-6].strip()
-                elif user_query.startswith('" and "'):
-                    user_query = user_query[6:].strip()
-                elif user_query.endswith('" and "'):
-                    user_query = user_query[:-6].strip()
-                else:
-                    # Remove single quotes from start and end
-                    for quote in quote_chars:
-                        if user_query.startswith(quote):
-                            user_query = user_query[1:].strip()
-                            break
-                    for quote in quote_chars:
-                        if user_query.endswith(quote):
-                            user_query = user_query[:-1].strip()
-                            break
-
-                # If no change was made, break the loop
-                if user_query == original_query:
-                    break
+            # Clean user query
+            user_query = self.clean_user_query(message)
 
             # Define available APIs (this could be loaded from config)
             available_apis = [
-                {"method": "GET", "endpoint": "/network/switches", "description": "Table: switches, Columns: id, name, model, capacity, status", "params": {}},
-                {"method": "GET", "endpoint": "/network/routers", "description": "Table: routers, Columns: id, name, model, ip_address, status", "params": {}},
-                {"method": "GET", "endpoint": "/user/profile", "description": "Table: user_profiles, Columns: user_id, name, email, role, created_at", "params": {}},
-                {"method": "GET", "endpoint": "/user/settings", "description": "Table: user_settings, Columns: user_id, setting_name, value", "params": {}},
-                {"method": "GET", "endpoint": "/orders/recent", "description": "Table: orders, Columns: order_id, user_id, product, quantity, status, created_at", "params": {"limit": {"type": "integer", "required": False}, "user_id": {"type": "string", "required": True}}},
-                {"method": "GET", "endpoint": "/account/balance", "description": "Table: accounts, Columns: account_id, user_id, balance, currency", "params": {"user_id": {"type": "string", "required": True}}},
-                {"method": "GET", "endpoint": "/transactions/monthly", "description": "Table: transactions, Columns: transaction_id, account_id, amount, type, date", "params": {"month": {"type": "string", "required": True}, "account_id": {"type": "string", "required": False}}},
-                {"method": "POST", "endpoint": "/orders/search", "description": "Table: orders, Columns: order_id, user_id, product, quantity, status, created_at", "params": {"query": {"type": "string", "required": True}, "limit": {"type": "integer", "required": False}}},
-                {"method": "POST", "endpoint": "/user/search", "description": "Table: user_profiles, Columns: user_id, name, email, role, created_at", "params": {"query": {"type": "string", "required": True}, "role": {"type": "string", "required": False}}}
+                {
+                    "method": "GET",
+                    "endpoint": "/bdt/talent/list",
+                    "description": "Table: talents, Columns: idTalento, nombres, apellidoPaterno, apellidoMaterno, imagen, puesto, pais, ciudad, idModalidadFacturacion, montoInicialPlanilla, montoFinalPlanilla, montoInicialRxH, montoFinalRxH, moneda, estrellas, esFavorito, idMonedaPlan, idMonedaRxh",
+                    "params": {
+                        "nPag": { "type": "integer", "required": False },
+                        "search": { "type": "string", "required": False },
+                        "techAbilities": { "type": "string", "required": False },
+                        "idEnglishLevel": { "type": "integer", "required": False },
+                        "idTalentCollection": { "type": "integer", "required": False }
+                    }
+                }
             ]
 
             # Call orchestrator to analyze the query
             analysis = await orchestrator.analyze_query(user_query, available_apis)
 
             # Generate tasks from analysis
-            from app.infrastructure.task_decomposition.task_generator import TaskGenerator
             tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
 
-            return tasks
+            print(tasks)
+
+            # Execute tasks sequentially
+            query_embedding = None
+            context_text = ""
+            execution_failed = False
+
+            for task in tasks:
+                if execution_failed:
+                    break
+                if task.get("action") == "embedding":
+                    try:
+                        query_text = task.get("input", user_query)
+                        query_embedding = await self.generate_embedding(query_text)
+                    except Exception as e:
+                        execution_failed = True
+                        break  # Stop execution if embedding fails
+
+                elif task.get("action") == "retrieval":
+                    try:
+                        if query_embedding is None:
+                            # Generate embedding if not already done
+                            query_embedding = await self.generate_embedding(user_query)
+
+                        search_results = await self.search_by_embedding(
+                            query_embedding=query_embedding,
+                            company_id=company_id,
+                            area=area,
+                            top_k=top_k,
+                            similarity_threshold=similarity_threshold
+                        )
+                        # Build context from retrieved documents
+                        if search_results["documents"]:
+                            context_parts = []
+                            for doc in search_results["documents"]:
+                                if doc["content"]:
+                                    context_parts.append(doc["content"])
+                            context_text = "\n\n".join(context_parts)
+                    except Exception as e:
+                        execution_failed = True
+                        break  # Stop execution if retrieval fails
+
+                elif task.get("action") == "api_call":
+                    try:
+                        method = task.get("method", "GET").upper()
+                        if method == "GET":
+                            api_result = await curl_get(task.get("endpoint", ""), external_token, task.get("params", {}))
+                        else:
+                            api_result = await curl_post(task.get("endpoint", ""), external_token, task.get("params", {}))
+
+                        # Add API result to context only if there's actual data
+                        if api_result.get("success") and api_result.get("data"):
+                            api_data = json.dumps(api_result['data'])
+                            if api_data and api_data.strip() not in ["{}", "[]", "null"]:
+                                context_text += api_data
+
+                    except Exception as e:
+                        execution_failed = True
+                        break  # Stop execution if API call fails
+
+                elif task.get("action") == "llm_response":
+                    try:
+                        # Check if we have any context at all
+                        if not context_text or context_text.strip() == "":
+                            # No context available - return predefined message
+                            yield {
+                                "type": "chunk",
+                                "content": NO_CONTEXT_MESSAGE
+                            }
+                            break
+
+                        # Prepare the query, checking for format requirements
+                        query_to_use = user_query
+                        task_format = task.get("format")
+                        if task_format:
+                            if task_format.lower() == "list":
+                                query_to_use = f"{user_query}. IMPORTANT: Format your response as a clean markdown list. Do NOT return JSON. Present each item in a natural, readable way with its key information. Show ALL items from the data."
+                            elif task_format.lower() == "table":
+                                query_to_use = f"{user_query}. IMPORTANT: Format your response as a markdown table. Do NOT return JSON. Show ALL rows and ALL columns from the data in a table with proper columns. Do not omit any entries or fields."
+
+                        # Build prompt with context (we know context_text exists here)
+                        prompt = self._build_rag_prompt(query_to_use, context_text)
+
+                        # Use provided parameters or fall back to environment defaults
+                        llm_temperature = temperature if temperature is not None else settings.llm_temperature
+                        llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+
+                        # Stream response directly from LLM provider (same as process_rag_query_stream)
+                        async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
+                            # Yield each chunk for streaming (same format as process_rag_query_stream)
+                            yield {
+                                "type": "chunk",
+                                "content": chunk
+                            }
+
+                    except Exception as e:
+                        execution_failed = True
+                        break  # Stop execution if LLM response fails
+
+            # Send completion signal
+            yield {
+                "type": "complete",
+                "status": "success"
+            }
 
         except Exception as e:
-            logger.error(f"Error in query analysis: {e}")
-            # Return fallback analysis
-            fallback_analysis = {
-                "needs_context": False,
-                "context_messages": 0,
-                "needs_system_data": False,
-                "system_calls": [],
-                "needs_external_knowledge": True,
-                "semantic_query": user_query,
-                "format": None,
-                "query_clean": user_query
+            logger.error(f"Error in agent_orchestrator_stream: {e}")
+            yield {
+                "type": "error",
+                "content": f"An error occurred: {str(e)}"
             }
-            # Generate tasks from fallback analysis
-            from app.infrastructure.task_decomposition.task_generator import TaskGenerator
-            fallback_tasks = TaskGenerator.generate_tasks_from_analysis(fallback_analysis, available_apis, user_query)
-
-            return fallback_tasks
-
-    async def analyze_query_with_agent_orchestrator_stream(self, user_id: str, message: str, company_id: str, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
-        """
-        Analyze user query using the agent orchestrator model to determine workflow requirements.
-        Enhanced version that accepts all process_rag_query_stream parameters for complete context.
-        """
-        # Get orchestrator analyzer from container first
-        from app.core.container import container
-        orchestrator = container.get_orchestrator_analyzer()
-
-        user_query = message.strip()
-        quote_chars = ['"', '“', '”', "'"]
-
-        while True:
-            original_query = user_query
-
-            # Handle special " and " pattern first
-            if user_query.startswith('" and "') and user_query.endswith('" and "'):
-                user_query = user_query[6:-6].strip()
-            elif user_query.startswith('" and "'):
-                user_query = user_query[6:].strip()
-            elif user_query.endswith('" and "'):
-                user_query = user_query[:-6].strip()
-            else:
-                # Remove single quotes from start and end
-                for quote in quote_chars:
-                    if user_query.startswith(quote):
-                        user_query = user_query[1:].strip()
-                        break
-                for quote in quote_chars:
-                    if user_query.endswith(quote):
-                        user_query = user_query[:-1].strip()
-                        break
-
-            # If no change was made, break the loop
-            if user_query == original_query:
-                break
-
-        # Define available APIs (this could be loaded from config)
-        available_apis = [
-            {
-                "method": "GET",
-                "endpoint": "/bdt/talent/list",
-                "description": "Table: talents, Columns: idTalento, nombres, apellidoPaterno, apellidoMaterno, imagen, puesto, pais, ciudad, idModalidadFacturacion, montoInicialPlanilla, montoFinalPlanilla, montoInicialRxH, montoFinalRxH, moneda, estrellas, esFavorito, idMonedaPlan, idMonedaRxh",
-                "params": {
-                    "nPag": { "type": "integer", "required": True },
-                    "search": { "type": "string", "required": False },
-                    "techAbilities": { "type": "string", "required": False },
-                    "idEnglishLevel": { "type": "integer", "required": False },
-                    "idTalentCollection": { "type": "integer", "required": False }
-                }
-            }
-        ]
-
-        # Call orchestrator to analyze the query
-        analysis = await orchestrator.analyze_query(user_query, available_apis)
-
-        # Generate tasks from analysis
-        from app.infrastructure.task_decomposition.task_generator import TaskGenerator
-        tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
-
-        # Execute tasks sequentially
-        query_embedding = None
-        context_text = ""
-        execution_failed = False
-
-        for task in tasks:
-            if execution_failed:
-                break
-            if task.get("action") == "embedding":
-                try:
-                    query_text = task.get("input", user_query)
-                    query_embedding = await self.generate_embedding(query_text)
-                except Exception as e:
-                    execution_failed = True
-                    break  # Stop execution if embedding fails
-
-            elif task.get("action") == "retrieval":
-                try:
-                    if query_embedding is None:
-                        # Generate embedding if not already done
-                        query_embedding = await self.generate_embedding(user_query)
-
-                    search_results = await self.search_by_embedding(
-                        query_embedding=query_embedding,
-                        company_id=company_id,
-                        area=area,
-                        collection=collection,
-                        top_k=top_k,
-                        similarity_threshold=similarity_threshold
-                    )
-                    # Build context from retrieved documents
-                    if search_results["documents"]:
-                        context_parts = []
-                        for doc in search_results["documents"]:
-                            if doc["content"]:
-                                context_parts.append(doc["content"])
-                        context_text = "\n\n".join(context_parts)
-                except Exception as e:
-                    execution_failed = True
-                    break  # Stop execution if retrieval fails
-
-            elif task.get("action") == "api_call":
-                try:
-                    from app.infrastructure.api_clients.api_client import curl_get, curl_post
-                    method = task.get("method", "GET").upper()
-                    if method == "GET":
-                        api_result = await curl_get(task.get("endpoint", ""), external_token, task.get("params", {}))
-                    else:
-                        api_result = await curl_post(task.get("endpoint", ""), external_token, task.get("params", {}))
-
-                    # Add API result to context only if there's actual data
-                    if api_result.get("success") and api_result.get("data"):
-                        import json
-                        api_data = json.dumps(api_result['data'])
-                        if api_data and api_data.strip() not in ["{}", "[]", "null"]:
-                            context_text += api_data
-
-                except Exception as e:
-                    execution_failed = True
-                    break  # Stop execution if API call fails
-
-            elif task.get("action") == "llm_response":
-                try:
-                    # Check if we have any context at all
-                    if not context_text or context_text.strip() == "":
-                        # No context available - return predefined message
-                        yield {
-                            "type": "chunk",
-                            "content": NO_CONTEXT_MESSAGE
-                        }
-                        break
-
-                    # Prepare the query, checking for format requirements
-                    query_to_use = user_query
-                    task_format = task.get("format")
-                    if task_format:
-                        if task_format.lower() == "list":
-                            query_to_use = f"{user_query}. Please provide your response as a markdown list showing ALL items from the data."
-                        elif task_format.lower() == "table":
-                            query_to_use = f"{user_query}. Please provide your response as a markdown table showing ALL rows from the data. Do not omit any entries."
-
-                    # Build prompt with context (we know context_text exists here)
-                    prompt = self._build_rag_prompt(query_to_use, context_text)
-
-                    # Use provided parameters or fall back to environment defaults
-                    from app.core.config import settings
-                    llm_temperature = temperature if temperature is not None else settings.llm_temperature
-                    llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
-
-                    # Stream response directly from LLM provider (same as process_rag_query_stream)
-                    async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
-                        # Yield each chunk for streaming (same format as process_rag_query_stream)
-                        yield {
-                            "type": "chunk",
-                            "content": chunk
-                        }
-
-                except Exception as e:
-                    execution_failed = True
-                    break  # Stop execution if LLM response fails
-
-        # Send completion signal
-        yield {
-            "type": "complete",
-            "status": "success"
-        }
-
-    def _build_rag_prompt(self, message: str, context_text: str) -> str:
-        """
-        Build the RAG prompt with context and user message.
-        Uses different prompt styles optimized for different model types.
-        """
-        from app.core.config import settings
-        
-        # Check if using Claude model
-        model_id_lower = settings.llm_model_id.lower()
-        is_claude = "claude" in model_id_lower or "anthropic" in model_id_lower
-        
-        if is_claude:
-            # Claude-optimized prompt: use all provided context
-            return f"""You are provided with data below. Present this data exactly as it appears. Do not make assumptions, calculations, or infer additional information beyond what is explicitly provided.
-
-Data:
-{context_text}
-
-Question: {message}
-
-Provide a complete answer showing ALL the data provided above. Do not summarize or omit any entries. Answer in the same language as the question."""
-        else:
-            # Llama-optimized prompt: use all provided context
-            return f"""Present the data provided below. Show ALL entries exactly as provided. Do not make assumptions or add information not in the data.
-
-Data:
-{context_text}
-
-Question: {message}
-
-Answer showing ALL the data in the same language as the question:"""
 
 
-
-    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -326,9 +243,12 @@ Answer showing ALL the data in the same language as the question:"""
         except Exception as e:
             logger.error(f"Initialization error in process_rag_query_stream: {e}")
             raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
-        
+
+        # Clean the user message
+        cleaned_message = self.clean_user_query(message)
+
         # Step 1: Generate embedding for the query
-        query_embedding = await self.generate_embedding(message)
+        query_embedding = await self.generate_embedding(cleaned_message)
 
         # Step 2: Search vector database using the embedding
         # Use provided parameters or fall back to environment defaults
@@ -339,13 +259,12 @@ Answer showing ALL the data in the same language as the question:"""
             query_embedding=query_embedding,
             company_id=company_id,
             area=area,
-            collection=collection,
             top_k=search_top_k,
             similarity_threshold=search_threshold
         )
 
         # Add query to result for compatibility
-        search_result["query"] = message
+        search_result["query"] = cleaned_message
         
         # Check if no documents found at database level
         if search_result["total_found"] == 0:
@@ -383,7 +302,7 @@ Answer showing ALL the data in the same language as the question:"""
         # Step 4: Generate LLM answer
         
         # Normal RAG flow with context
-        rag_prompt = self._build_rag_prompt(message, context_text)
+        rag_prompt = self._build_rag_prompt(cleaned_message, context_text)
         
         # Step 4: Generate streaming response using LLM
         # Use provided parameters or fall back to environment defaults
@@ -428,18 +347,15 @@ Answer showing ALL the data in the same language as the question:"""
             logger.error(f"Unexpected error during embedding generation: {e}")
             raise ConnectionError(f"Embedding generation failed: {str(e)}")
 
-    async def search_by_embedding(self, query_embedding: List[float], company_id: str = None, area: str = None, collection: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
+    async def search_by_embedding(self, query_embedding: List[float], company_id: str = None, area: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
         """
         Search vector database using pre-generated embedding.
         """
         from app.core.config import settings
 
-        # Use provided values or fall back to config defaults
-        # If company_id is provided and no collection specified, use company_id as collection name
-        if collection is not None:
-            search_collection = collection
-        elif company_id is not None:
-            search_collection = company_id  # Use company_id as collection name
+        # Use company_id as collection name, fallback to default
+        if company_id is not None:
+            search_collection = company_id
         else:
             search_collection = settings.weaviate_class_name
 

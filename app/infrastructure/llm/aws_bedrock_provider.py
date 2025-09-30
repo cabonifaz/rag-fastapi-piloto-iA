@@ -56,6 +56,10 @@ class AWSBedrockLLMProvider(LLMPort):
         logger.info(f"AWS Bedrock LLM provider initialized with model: {model_id} "
                    f"(Provider: {ModelConfigFactory.get_model_provider(model_id)})")
 
+    def get_model_config(self):
+        """Get the model configuration object for accessing model-specific methods."""
+        return self.model_config
+
     async def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
         """
         Genera texto usando un modelo de AWS Bedrock.

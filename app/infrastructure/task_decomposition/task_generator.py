@@ -53,13 +53,24 @@ class TaskGenerator:
                 allowed_params = set(params_def.keys())
 
                 # Check if actually required params are missing
-                # Ignore orchestrator's missing_required_params - check actual values in params
+                # Only ignore orchestrator missing params that actually have values
                 provided_params = call.get("params", {})
+                orchestrator_missing = call.get("missing_required_params", [])
+
+                # Filter out from orchestrator's missing list any params that actually have values
+                corrected_missing = [
+                    p for p in orchestrator_missing
+                    if p not in provided_params or provided_params[p] in [None, "", []]
+                ]
+
+                # Also check for any required params not flagged by orchestrator but actually missing
                 actually_missing_required = [
                     p for p in required_params
                     if p not in provided_params or provided_params[p] in [None, "", []]
                 ]
-                if actually_missing_required:
+
+                # Combine both checks - skip if any required params are truly missing
+                if corrected_missing or actually_missing_required:
                     continue
 
                 # Sanitize parameters
@@ -122,7 +133,7 @@ class TaskGenerator:
         """Clean invalid or empty parameters from call params."""
         return {
             k: v for k, v in call_params.items()
-            if k in allowed_params and v != ""
+            if k in allowed_params and v not in [None, "", []]
         }
 
     @staticmethod
