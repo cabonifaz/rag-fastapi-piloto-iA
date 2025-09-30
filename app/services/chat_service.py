@@ -187,7 +187,7 @@ class ChatService:
                             if task_format.lower() == "list":
                                 query_to_use = f"{user_query}. IMPORTANT: Format your response as a clean markdown list. Do NOT return JSON. Present each item in a natural, readable way with its key information. Show ALL items from the data."
                             elif task_format.lower() == "table":
-                                query_to_use = f"{user_query}. IMPORTANT: Format your response as a markdown table. Do NOT return JSON. Show ALL rows and ALL columns from the data in a table with proper columns. Do not omit any entries or fields."
+                                query_to_use = f"{user_query}. IMPORTANT: Format your response as a markdown table. Do NOT return JSON. Show ALL rows and ALL columns from the data in a table with proper columns. Do not omit any entries or fields. Format the headers to natural language."
 
                         # Build prompt with context (we know context_text exists here)
                         prompt = self._build_rag_prompt(query_to_use, context_text)
