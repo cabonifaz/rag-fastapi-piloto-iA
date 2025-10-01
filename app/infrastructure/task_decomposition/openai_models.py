@@ -57,48 +57,31 @@ Grammatical Precision Rules:
 Decision Hierarchy: 1) Quantified references 2) Singular/Plural indicators 3) Reference type categories. Default: 2 for ambiguous cases.
 
 System Data Rules
-needs_system_data → true only if the query requires internal data and mentions one or more columns that exist in an endpoint's "Columns" list from the API list.
+- needs_system_data → true only if the query requires internal data AND mentions one or more columns from the API list.
+- system_calls → must ONLY include endpoints from the API list, never fabricate.
+- Always respect the ENTITY-PARAMETER MATCHING FRAMEWORK:
+  1. Entity alignment first
+  2. Domain integrity: params must belong to the endpoint’s domain
+  3. Semantic coherence required
+  4. Reject superficial keyword matches
+- If no system data is required, system_calls MUST be an empty array [].
 
-ENTITY-PARAMETER MATCHING FRAMEWORK:
-1. Entity Precedence: Endpoint matching must begin with entity alignment
-2. Domain Integrity: Parameters operate within their endpoint's entity domain
-3. Semantic Coherence: All matches must maintain logical consistency
-
-system_calls → include endpoints ONLY when:
-
-MATCHING VALIDATION SEQUENCE:
-1. Identify the query's primary subject and intent
-2. Match to endpoints where the entity domain aligns with query subject
-3. Only after entity alignment, evaluate parameter applicability
-4. Reject matches that violate domain boundaries or logical coherence
-
-ENTITY = descriptive name of the entity from endpoint description
-endpoint = API endpoint path (ONLY use relative paths from API list, NEVER full URLs)
-method = GET or POST
-params = object containing only parameters explicitly provided in the query OR the special value "my_user_id" for user context references
-missing_required_params = array of required parameters that are missing from the query
-
-CORE PRINCIPLES:
-- Entity alignment precedes parameter consideration
-- Parameters serve their endpoint's domain, cannot bridge unrelated domains
-- All components must maintain semantic coherence
-- Reject matches that rely on superficial keyword associations
-
-PARAMETER RESOLUTION RULES:
-1. Explicit Parameters: Use values explicitly provided in the query
-2. User Context Parameters: Use "my_user_id" for possessive user references
-3. Missing Parameters: List required parameters not provided
-4. Semantic Validation: Values must align with parameter purpose and endpoint domain
-
-CRITICAL CONSTRAINTS:
-- Parameter presence in 'params' and 'missing_required_params' is mutually exclusive
-- Only include explicitly provided parameter values
-- No inference of real user identifiers
-- No inclusion of undefined parameters
+Parameter Rules
+1. Include only explicitly provided values.
+2. For user references, use "my_user_id".
+3. Missing required parameters must be listed under "missing_required_params".
+4. Do NOT infer values.
+5. Do NOT include undefined parameters.
 
 External Knowledge Rules
 needs_external_knowledge → true if query requires external knowledge retrieval
-semantic_query → preserve the original language and wording
+
+Semantic Query Rules
+- semantic_query must always preserve the language of the original query.
+- semantic_query must capture only the core semantic intent (what to retrieve or analyze).
+- Remove all formatting, ordering, presentation, or style instructions.
+- Keep filters, conditions, and entities that are essential to the meaning.
+- If no extra formatting instructions exist, semantic_query = query_clean.
 
 Combined Source Detection Rules
 Set BOTH needs_system_data AND needs_external_knowledge to true for:
@@ -108,11 +91,11 @@ Set BOTH needs_system_data AND needs_external_knowledge to true for:
 - Hybrid Research Queries (internal metrics + external benchmarking)
 Query Analysis Priority: 1) Detect system data needs 2) Detect external knowledge needs 3) Set both if query requires both
 
-Format Detection Rules
-format → "table" if query contains "table" or "tabla"
-format → "list" if query contains "list", "lista" OR ordering words
-format → null in other cases
-Table Word Disambiguation: If "table"/"tabla" appears in context-related query → format indicator only. If with system data terms → potential system data reference. Default: assume format indicator unless clear system entity mentioned.
+Format Rules
+- format = "list" if "list", "lista", or ordering words appear.
+- format = "table" if "table" or "tabla" mentioned.
+- If needs_system_data = true and no explicit "list"/"lista" or ordering, set format = "table".
+- format = null in all other cases.
 
 Other Rules
 query_clean → always include original query text
@@ -154,14 +137,13 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
 
     @staticmethod
     def extract_response(response_body: Dict[str, Any]) -> str:
-        """Extract text from OpenAI GPT-OSS response."""
+        """Extract and clean text from OpenAI GPT-OSS response."""
         # OpenAI GPT-OSS format: choices[0].message.content
         if "choices" in response_body and len(response_body["choices"]) > 0:
             message = response_body["choices"][0].get("message", {})
             content = message.get("content", "")
 
             # OpenAI sometimes includes <reasoning> tags, extract just the JSON
-            # Look for JSON object in the content
             if "<reasoning>" in content:
                 # Find the JSON part after reasoning
                 json_start = content.find("{", content.find("</reasoning>"))
@@ -174,11 +156,25 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
                         elif content[i] == "}":
                             brace_count -= 1
                             if brace_count == 0:
-                                return content[json_start:i+1]
-                # If we can't find proper JSON after reasoning, try from first {
-                json_start = content.find("{")
-                if json_start != -1:
-                    return content[json_start:]
+                                content = content[json_start:i+1]
+                                break
+                else:
+                    # If we can't find proper JSON after reasoning, try from first {
+                    json_start = content.find("{")
+                    if json_start != -1:
+                        content = content[json_start:]
+
+            # Clean smart quotes and special characters
+            content = content.replace('"', '"').replace('"', '"').replace(''', "'").replace(''', "'")
+
+            # Remove markdown code blocks if present
+            if content.strip().startswith("```"):
+                lines = content.strip().split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                content = '\n'.join(lines).strip()
 
             return content
 

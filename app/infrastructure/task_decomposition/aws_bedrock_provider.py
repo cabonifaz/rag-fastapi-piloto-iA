@@ -52,9 +52,10 @@ class OrchestratorQueryAnalyzer:
     ) -> Dict[str, Any]:
         """Analyze user query using orchestrator model and return structured analysis."""
         try:
-            # Use model-specific configuration to build request
+            # Build request body
             request_body = self.model_config.get_request_body(user_query, available_apis)
 
+            # Invoke model
             response = self.bedrock_client.invoke_model(
                 modelId=self.model_id,
                 body=json.dumps(request_body),
@@ -62,29 +63,18 @@ class OrchestratorQueryAnalyzer:
                 accept="application/json"
             )
 
+            # Parse response
             response_body = json.loads(response["body"].read())
 
-            # Use model-specific extraction
-            generated_text = self.model_config.extract_response(response_body)
+            # Extract and clean using model-specific method
+            json_response = self.model_config.extract_response(response_body)
 
-            logger.info(f"Orchestrator response: {generated_text}")
+            logger.info(f"Orchestrator response: {json_response[:200] if len(json_response) > 200 else json_response}")
 
-            if not generated_text.strip():
+            if not json_response.strip():
                 raise ValueError("Empty response from model")
 
-            # Clean the generated text to remove smart quotes and other problematic characters
-            cleaned_text = generated_text.replace('"', '"').replace('"', '"').replace(''', "'").replace(''', "'")
-
-            # Remove potential markdown code blocks if present (common in OpenAI responses)
-            if cleaned_text.strip().startswith("```"):
-                lines = cleaned_text.strip().split('\n')
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                cleaned_text = '\n'.join(lines).strip()
-
-            analysis = json.loads(cleaned_text)
+            analysis = json.loads(json_response)
             return analysis
 
         except (ClientError, json.JSONDecodeError) as e:

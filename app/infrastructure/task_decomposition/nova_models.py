@@ -153,17 +153,34 @@ Respond with JSON object only. No additional text or explanations."""
 
     @staticmethod
     def extract_response(response_body: Dict[str, Any]) -> str:
-        """Extract text from Amazon Nova response."""
+        """Extract and clean text from Amazon Nova response."""
+        content = ""
+
         # Amazon Nova format: output.message.content[0].text
         if "output" in response_body and "message" in response_body["output"]:
-            content = response_body["output"]["message"].get("content", [])
-            return content[0].get("text", "") if content else ""
-
+            content_array = response_body["output"]["message"].get("content", [])
+            content = content_array[0].get("text", "") if content_array else ""
         # Fallback to generic content format
-        if "content" in response_body:
-            content = response_body["content"]
-            if isinstance(content, list) and len(content) > 0:
-                return content[0].get("text", "")
-            return str(content)
+        elif "content" in response_body:
+            content_data = response_body["content"]
+            if isinstance(content_data, list) and len(content_data) > 0:
+                content = content_data[0].get("text", "")
+            else:
+                content = str(content_data)
 
-        return ""
+        if not content:
+            return ""
+
+        # Clean smart quotes and special characters
+        content = content.replace('"', '"').replace('"', '"').replace(''', "'").replace(''', "'")
+
+        # Remove markdown code blocks if present
+        if content.strip().startswith("```"):
+            lines = content.strip().split('\n')
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            content = '\n'.join(lines).strip()
+
+        return content

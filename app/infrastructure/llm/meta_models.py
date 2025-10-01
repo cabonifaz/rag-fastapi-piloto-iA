@@ -53,7 +53,7 @@ class MetaModelConfig:
         """Build RAG prompt optimized for Llama models."""
         return f"""IMPORTANT: Respond in the SAME LANGUAGE as the question.
 
-Present the data provided below. Show ALL entries exactly as provided. Do not make assumptions or add information not in the data.
+Present the data provided below. Show ALL entries exactly as provided. Do not make assumptions or add information not in the data. If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted table.
 
 Data:
 {context_text}

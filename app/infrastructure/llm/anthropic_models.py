@@ -70,7 +70,7 @@ class AnthropicModelConfig:
 
     def build_rag_prompt(self, message: str, context_text: str) -> str:
         """Build RAG prompt optimized for Claude models."""
-        return f"""Based on the following context, please answer the user's question. Include relevant source references with document ID and page numbers. Do not search on internet. Answer in the same language as the question.
+        return f"""Based on the following context, please answer the user's question. Include relevant source references with document ID and page numbers. Do not search on internet. Answer in the same language as the question. If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted table.
 
 Data:
 {context_text}
@@ -81,36 +81,111 @@ Please provide a clear, accurate response based solely on the provided context."
 
 
 class Claude3HaikuConfig(AnthropicModelConfig):
-    """Specific configuration for Claude 3 Haiku - focused on request/response formatting."""
+    """Specific configuration for Claude 3 Haiku."""
 
     def __init__(self):
         super().__init__("us.anthropic.claude-3-haiku-20240307-v1:0")
 
 
+class Claude35HaikuConfig(AnthropicModelConfig):
+    """Specific configuration for Claude 3.5 Haiku."""
+
+    def __init__(self):
+        super().__init__("anthropic.claude-3-5-haiku-20241022-v1:0")
+
+
 class Claude3SonnetConfig(AnthropicModelConfig):
-    """Specific configuration for Claude 3 Sonnet - focused on request/response formatting."""
+    """Specific configuration for Claude 3 Sonnet."""
 
     def __init__(self):
         super().__init__("anthropic.claude-3-sonnet-20240229-v1:0")
 
 
 class Claude35SonnetConfig(AnthropicModelConfig):
-    """Specific configuration for Claude 3.5 Sonnet - focused on request/response formatting."""
+    """Specific configuration for Claude 3.5 Sonnet."""
 
     def __init__(self):
         super().__init__("anthropic.claude-3-5-sonnet-20241022-v2:0")
+
+
+class Claude37SonnetConfig(AnthropicModelConfig):
+    """Specific configuration for Claude 3.7 Sonnet."""
+
+    def __init__(self):
+        super().__init__("anthropic.claude-3-7-sonnet-20250219-v1:0")
+
+
+class Claude4SonnetConfig(AnthropicModelConfig):
+    """Specific configuration for Claude 4 Sonnet."""
+
+    def __init__(self):
+        super().__init__("anthropic.claude-sonnet-4-20250514-v1:0")
+
+
+class Claude45SonnetConfig(AnthropicModelConfig):
+    """Specific configuration for Claude 4.5 Sonnet."""
+
+    def __init__(self):
+        super().__init__("anthropic.claude-sonnet-4-5-20250929-v1:0")
+
+
+class Claude3OpusConfig(AnthropicModelConfig):
+    """Specific configuration for Claude 3 Opus."""
+
+    def __init__(self):
+        super().__init__("anthropic.claude-3-opus-20240229-v1:0")
+
+
+class Claude4OpusConfig(AnthropicModelConfig):
+    """Specific configuration for Claude 4 Opus."""
+
+    def __init__(self):
+        super().__init__("anthropic.claude-opus-4-20250514-v1:0")
+
+
+class Claude41OpusConfig(AnthropicModelConfig):
+    """Specific configuration for Claude 4.1 Opus."""
+
+    def __init__(self):
+        super().__init__("anthropic.claude-opus-4-1-20250805-v1:0")
 
 
 def get_anthropic_config(model_id: str) -> AnthropicModelConfig:
     """Factory function to get the appropriate Anthropic model configuration."""
     model_id_lower = model_id.lower()
 
-    if "claude-3-haiku" in model_id_lower:
-        return Claude3HaikuConfig()
+    # Claude 4.5 models
+    if "claude-sonnet-4-5" in model_id_lower or "sonnet-4-5" in model_id_lower:
+        return Claude45SonnetConfig()
+
+    # Claude 4.1 models
+    elif "claude-opus-4-1" in model_id_lower or "opus-4-1" in model_id_lower:
+        return Claude41OpusConfig()
+
+    # Claude 4 models
+    elif "claude-opus-4" in model_id_lower or "opus-4-20250514" in model_id_lower:
+        return Claude4OpusConfig()
+    elif "claude-sonnet-4" in model_id_lower or "sonnet-4-20250514" in model_id_lower:
+        return Claude4SonnetConfig()
+
+    # Claude 3.7 models
+    elif "claude-3-7-sonnet" in model_id_lower:
+        return Claude37SonnetConfig()
+
+    # Claude 3.5 models
+    elif "claude-3-5-haiku" in model_id_lower:
+        return Claude35HaikuConfig()
     elif "claude-3-5-sonnet" in model_id_lower:
         return Claude35SonnetConfig()
+
+    # Claude 3 models
+    elif "claude-3-opus" in model_id_lower:
+        return Claude3OpusConfig()
+    elif "claude-3-haiku" in model_id_lower:
+        return Claude3HaikuConfig()
     elif "claude-3-sonnet" in model_id_lower:
         return Claude3SonnetConfig()
+
     else:
         # Default to generic Claude config for unknown models
         return AnthropicModelConfig(model_id)
