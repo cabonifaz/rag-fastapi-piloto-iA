@@ -52,24 +52,13 @@ class OrchestratorQueryAnalyzer:
     ) -> Dict[str, Any]:
         """Analyze user query using orchestrator model and return structured analysis."""
         try:
-            # Build request body
-            request_body = self.model_config.get_request_body(user_query, available_apis)
-
-            # Invoke model
-            response = self.bedrock_client.invoke_model(
-                modelId=self.model_id,
-                body=json.dumps(request_body),
-                contentType="application/json",
-                accept="application/json"
+            # Use model-specific analyze method (handles invoke internally)
+            json_response = self.model_config.analyze(
+                bedrock_client=self.bedrock_client,
+                model_id=self.model_id,
+                user_query=user_query,
+                available_apis=available_apis
             )
-
-            # Parse response
-            response_body = json.loads(response["body"].read())
-
-            # Extract and clean using model-specific method
-            json_response = self.model_config.extract_response(response_body)
-
-            logger.info(f"Orchestrator response: {json_response[:200] if len(json_response) > 200 else json_response}")
 
             if not json_response.strip():
                 raise ValueError("Empty response from model")

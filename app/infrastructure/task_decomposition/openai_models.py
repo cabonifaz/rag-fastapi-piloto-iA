@@ -2,8 +2,11 @@
 
 import json
 import os
+import logging
 from typing import Dict, Any
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIConfig:
@@ -179,3 +182,38 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
             return content
 
         return ""
+
+    @staticmethod
+    def analyze(bedrock_client, model_id: str, user_query: str, available_apis: Dict[str, Any]) -> str:
+        """
+        Analyze query using OpenAI model with single invocation.
+
+        Args:
+            bedrock_client: AWS Bedrock client instance
+            model_id: Model identifier
+            user_query: User's query text
+            available_apis: Dictionary of available API endpoints
+
+        Returns:
+            Cleaned JSON string ready for parsing
+        """
+        # Build request body
+        request_body = OpenAIConfig.get_request_body(user_query, available_apis)
+
+        # Invoke bedrock
+        response = bedrock_client.invoke_model(
+            modelId=model_id,
+            body=json.dumps(request_body),
+            contentType="application/json",
+            accept="application/json"
+        )
+
+        # Parse response
+        response_body = json.loads(response["body"].read())
+
+        # Extract and clean
+        json_response = OpenAIConfig.extract_response(response_body)
+
+        logger.info(f"OpenAI - Response length: {len(json_response)}")
+
+        return json_response
