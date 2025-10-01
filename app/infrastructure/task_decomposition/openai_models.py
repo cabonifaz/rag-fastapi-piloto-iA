@@ -1,4 +1,4 @@
-"""Amazon Nova orchestrator model configuration for query analysis."""
+"""OpenAI orchestrator model configuration for query analysis."""
 
 import json
 import os
@@ -6,8 +6,8 @@ from typing import Dict, Any
 from app.core.config import settings
 
 
-class NovaConfig:
-    """Configuration for Amazon Nova orchestrator models."""
+class OpenAIConfig:
+    """Configuration for OpenAI orchestrator models (gpt-oss-20b-1 and gpt-oss-120b-1)."""
 
     MODEL_ID = settings.orchestrator_model_id
     MAX_TOKENS = settings.orchestrator_max_tokens
@@ -30,13 +30,13 @@ class NovaConfig:
     @staticmethod
     def build_analysis_prompt(available_apis: Dict[str, Any]) -> str:
         """Build system prompt with Task Summary rules and APIs."""
-        json_structure = NovaConfig._load_json_structure()
+        json_structure = OpenAIConfig._load_json_structure()
 
         system_prompt = """Task Summary
 You are a workflow action planner. Analyze user queries and generate a structured JSON object describing the workflow requirements.
 
 Model Instructions
-You MUST respond in valid JSON format only. DO NOT provide any preamble, explanation, or markdown. Always include all fields in the JSON object. Use empty arrays or null values when appropriate.
+You MUST respond in valid JSON format only. DO NOT provide any preamble, explanation, or markdown code blocks. Always include all fields in the JSON object. Use empty arrays or null values when appropriate.
 
 Required JSON Structure
 """ + json_structure + """
@@ -125,45 +125,61 @@ Validation Rules
 Ensure JSON is valid and complete. Verify endpoints exist in available list. Confirm parameter handling follows "no inference" rule. Check semantic_query preserves original language. Validate combined source detection when query requires both system data and external knowledge.
 
 Response Protocol
-Respond with JSON object only. No additional text or explanations."""
+Respond with JSON object only. No markdown code blocks, no additional text or explanations. Return pure JSON."""
 
 
         return system_prompt
 
     @staticmethod
     def get_request_body(user_query: str, available_apis: Dict[str, Any]) -> Dict[str, Any]:
-        """Get the request body for Amazon Nova API calls."""
+        """Get the request body for OpenAI models (gpt-oss) on AWS Bedrock."""
 
-        system_prompt = NovaConfig.build_analysis_prompt(available_apis)
+        system_prompt = OpenAIConfig.build_analysis_prompt(available_apis)
 
         return {
             "messages": [
                 {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
                     "role": "user",
-                    "content": [{"text": f"Process this query: \"{user_query}\""}]
+                    "content": f"Process this query: \"{user_query}\""
                 }
             ],
-            "system": [{"text": system_prompt}],
-            "inferenceConfig": {
-                "maxTokens": NovaConfig.MAX_TOKENS,
-                "temperature": NovaConfig.TEMPERATURE,
-                "topP": NovaConfig.TOP_P
-            }
+            "max_tokens": OpenAIConfig.MAX_TOKENS,
+            "temperature": OpenAIConfig.TEMPERATURE,
+            "top_p": OpenAIConfig.TOP_P
         }
 
     @staticmethod
     def extract_response(response_body: Dict[str, Any]) -> str:
-        """Extract text from Amazon Nova response."""
-        # Amazon Nova format: output.message.content[0].text
-        if "output" in response_body and "message" in response_body["output"]:
-            content = response_body["output"]["message"].get("content", [])
-            return content[0].get("text", "") if content else ""
+        """Extract text from OpenAI GPT-OSS response."""
+        # OpenAI GPT-OSS format: choices[0].message.content
+        if "choices" in response_body and len(response_body["choices"]) > 0:
+            message = response_body["choices"][0].get("message", {})
+            content = message.get("content", "")
 
-        # Fallback to generic content format
-        if "content" in response_body:
-            content = response_body["content"]
-            if isinstance(content, list) and len(content) > 0:
-                return content[0].get("text", "")
-            return str(content)
+            # OpenAI sometimes includes <reasoning> tags, extract just the JSON
+            # Look for JSON object in the content
+            if "<reasoning>" in content:
+                # Find the JSON part after reasoning
+                json_start = content.find("{", content.find("</reasoning>"))
+                if json_start != -1:
+                    # Find the matching closing brace
+                    brace_count = 0
+                    for i in range(json_start, len(content)):
+                        if content[i] == "{":
+                            brace_count += 1
+                        elif content[i] == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                return content[json_start:i+1]
+                # If we can't find proper JSON after reasoning, try from first {
+                json_start = content.find("{")
+                if json_start != -1:
+                    return content[json_start:]
+
+            return content
 
         return ""

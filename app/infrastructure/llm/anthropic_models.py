@@ -70,16 +70,14 @@ class AnthropicModelConfig:
 
     def build_rag_prompt(self, message: str, context_text: str) -> str:
         """Build RAG prompt optimized for Claude models."""
-        return f"""IMPORTANT: You must respond in the SAME LANGUAGE as the question below.
-
-You are provided with data below. Present this data exactly as it appears. Do not make assumptions, calculations, or infer additional information beyond what is explicitly provided.
+        return f"""Based on the following context, please answer the user's question. Include relevant source references with document ID and page numbers. Do not search on internet. Answer in the same language as the question.
 
 Data:
 {context_text}
 
 Question: {message}
 
-Provide a complete answer showing ALL the data provided above. Do not summarize or omit any entries. Respond in the same language as the question."""
+Please provide a clear, accurate response based solely on the provided context."""
 
 
 class Claude3HaikuConfig(AnthropicModelConfig):

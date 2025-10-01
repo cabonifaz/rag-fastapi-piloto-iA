@@ -312,14 +312,14 @@ class WeaviateRepository(VectorStorePort):
             raise ConnectionError(f"Vector search service error: {str(e)}")
 
         # Debug: Print raw search results before filtering
-        print(f"\n=== RAW SEARCH RESULTS (before filtering) ===")
-        print(f"Total results: {len(results)}")
-        for i, r in enumerate(results):
-            print(f"\nResult {i+1}:")
-            print(f"  ID: {r.get('id')}")
-            print(f"  Distance: {r.get('distance')}")
-            print(f"  Properties: {r.get('properties')}")
-        print(f"=== END RAW RESULTS ===\n")
+        #print(f"\n=== RAW SEARCH RESULTS (before filtering) ===")
+        #print(f"Total results: {len(results)}")
+        #for i, r in enumerate(results):
+        #    print(f"\nResult {i+1}:")
+        #    print(f"  ID: {r.get('id')}")
+        #    print(f"  Distance: {r.get('distance')}")
+        #    print(f"  Properties: {r.get('properties')}")
+        #print(f"=== END RAW RESULTS ===\n")
 
         if actual_similarity_threshold is not None:
             for i, r in enumerate(results):

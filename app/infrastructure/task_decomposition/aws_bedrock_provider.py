@@ -4,18 +4,27 @@ from typing import List, Dict, Any, Optional
 import boto3
 from botocore.exceptions import ClientError
 
-from app.infrastructure.task_decomposition.nova_models import OrchestratorConfig
+from app.infrastructure.task_decomposition.orchestrator_factory import OrchestratorConfigFactory
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class OrchestratorQueryAnalyzer:
-    """Orchestrator implementation for query analysis and task generation."""
+    """
+    Orchestrator implementation for query analysis and task generation.
+
+    Supports multiple model families via factory pattern:
+    - OpenAI: openai.gpt-oss-20b-1:0, openai.gpt-oss-120b-1:0
+    - Amazon Nova: us.amazon.nova-micro-v1:0, us.amazon.nova-lite-v1:0, etc.
+    """
 
     def __init__(self):
-        self.model_id = OrchestratorConfig.MODEL_ID
+        self.model_id = settings.orchestrator_model_id
         self.region = settings.aws_region
+
+        # Get model-specific configuration using factory pattern
+        self.model_config = OrchestratorConfigFactory.get_config(self.model_id)
 
         try:
             session = boto3.Session(
@@ -29,7 +38,8 @@ class OrchestratorQueryAnalyzer:
                 region_name=self.region
             )
 
-            logger.info(f"Orchestrator query analyzer initialized with model: {self.model_id}")
+            logger.info(f"Orchestrator query analyzer initialized with model: {self.model_id} "
+                       f"(Provider: {OrchestratorConfigFactory.get_model_provider(self.model_id)})")
 
         except Exception as e:
             logger.error(f"Failed to initialize orchestrator provider: {e}")
@@ -42,7 +52,8 @@ class OrchestratorQueryAnalyzer:
     ) -> Dict[str, Any]:
         """Analyze user query using orchestrator model and return structured analysis."""
         try:
-            request_body = OrchestratorConfig.get_request_body(user_query, available_apis)
+            # Use model-specific configuration to build request
+            request_body = self.model_config.get_request_body(user_query, available_apis)
 
             response = self.bedrock_client.invoke_model(
                 modelId=self.model_id,
@@ -53,14 +64,8 @@ class OrchestratorQueryAnalyzer:
 
             response_body = json.loads(response["body"].read())
 
-            # Handle Nova Micro response format: output.message.content[0].text
-            if "output" in response_body and "message" in response_body["output"]:
-                content = response_body["output"]["message"].get("content", [])
-                generated_text = content[0].get("text", "") if content else ""
-            else:
-                # Fallback to old format
-                generated_text = response_body.get("content", [{}])[0].get("text", "")
-
+            # Use model-specific extraction
+            generated_text = self.model_config.extract_response(response_body)
 
             logger.info(f"Orchestrator response: {generated_text}")
 
@@ -69,6 +74,15 @@ class OrchestratorQueryAnalyzer:
 
             # Clean the generated text to remove smart quotes and other problematic characters
             cleaned_text = generated_text.replace('"', '"').replace('"', '"').replace(''', "'").replace(''', "'")
+
+            # Remove potential markdown code blocks if present (common in OpenAI responses)
+            if cleaned_text.strip().startswith("```"):
+                lines = cleaned_text.strip().split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                cleaned_text = '\n'.join(lines).strip()
 
             analysis = json.loads(cleaned_text)
             return analysis
