@@ -8,7 +8,7 @@ from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.core.config import settings
 from app.infrastructure.task_decomposition.task_generator import TaskGenerator
-from app.infrastructure.api_clients.api_client import curl_get, curl_post
+from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -106,12 +106,8 @@ class ChatService:
             # Call orchestrator to analyze the query
             analysis = await orchestrator.analyze_query(user_query, available_apis)
 
-            print(analysis)
-
             # Generate tasks from analysis
             tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
-
-            print(tasks)
 
             # Execute tasks sequentially
             query_embedding = None
@@ -162,9 +158,9 @@ class ChatService:
                     try:
                         method = task.get("method", "GET").upper()
                         if method == "GET":
-                            api_result = await curl_get(task.get("endpoint", ""), external_token, task.get("params", {}))
+                            api_result = await httpx_get(task.get("endpoint", ""), external_token, task.get("params", {}))
                         else:
-                            api_result = await curl_post(task.get("endpoint", ""), external_token, task.get("params", {}))
+                            api_result = await httpx_post(task.get("endpoint", ""), external_token, task.get("params", {}))
 
                         # Add API result to context only if there's actual data
                         if api_result.get("success") and api_result.get("data"):

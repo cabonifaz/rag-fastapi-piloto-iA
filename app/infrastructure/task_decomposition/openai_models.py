@@ -147,9 +147,11 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
             content = message.get("content", "")
 
             # OpenAI sometimes includes <reasoning> tags, extract just the JSON
-            if "<reasoning>" in content:
-                # Find the JSON part after reasoning
-                json_start = content.find("{", content.find("</reasoning>"))
+            if "</reasoning>" in content:
+                # Find where </reasoning> ends
+                reasoning_end = content.find("</reasoning>") + len("</reasoning>")
+                # Find the first { after </reasoning>
+                json_start = content.find("{", reasoning_end)
                 if json_start != -1:
                     # Find the matching closing brace
                     brace_count = 0
@@ -161,11 +163,19 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
                             if brace_count == 0:
                                 content = content[json_start:i+1]
                                 break
-                else:
-                    # If we can't find proper JSON after reasoning, try from first {
-                    json_start = content.find("{")
-                    if json_start != -1:
-                        content = content[json_start:]
+            else:
+                # No reasoning tags, find first {
+                json_start = content.find("{")
+                if json_start != -1:
+                    brace_count = 0
+                    for i in range(json_start, len(content)):
+                        if content[i] == "{":
+                            brace_count += 1
+                        elif content[i] == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                content = content[json_start:i+1]
+                                break
 
             # Clean smart quotes and special characters
             content = content.replace('"', '"').replace('"', '"').replace(''', "'").replace(''', "'")

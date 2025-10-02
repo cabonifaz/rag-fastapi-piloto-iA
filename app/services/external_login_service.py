@@ -11,14 +11,14 @@ class ExternalLoginService:
 
     async def login(self, username: str, password: str) -> Dict[str, Any]:
         """
-        Login to external system using curl client.
+        Login to external system using httpx client.
         Returns raw response from external API.
         """
         try:
-            from app.infrastructure.api_clients.api_client import curl_test_login
+            from app.infrastructure.api_clients.api_client import httpx_test_login
 
             # Call external login API and return raw response
-            result = await curl_test_login(username, password)
+            result = await httpx_test_login(username, password)
 
             if result.get("success"):
                 # Return the actual login response data

@@ -77,7 +77,7 @@ Data:
 
 Question: {message}
 
-Please provide a clear, accurate response based solely on the provided context."""
+Please provide a clear, accurate response based solely on the provided context. Only what the user ask."""
 
 
 class Claude3HaikuConfig(AnthropicModelConfig):
