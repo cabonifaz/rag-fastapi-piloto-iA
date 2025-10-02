@@ -41,8 +41,9 @@ class Settings(BaseSettings):
     
     rag_top_k_results: int
     rag_similarity_threshold: float
-    
-    
+    rag_hybrid_alpha: float = 0.5
+
+
     log_level: str
     log_format: str
     
@@ -117,7 +118,13 @@ class Settings(BaseSettings):
         if not (0.0 <= v <= 1.0):
             raise ValueError("RAG similarity threshold must be between 0.0 and 1.0")
         return v
-    
+
+    @validator('rag_hybrid_alpha')
+    def validate_rag_hybrid_alpha(cls, v):
+        if not (0.0 <= v <= 1.0):
+            raise ValueError("RAG hybrid alpha must be between 0.0 and 1.0")
+        return v
+
     @validator('jwt_secret_key')
     def validate_jwt_secret_key(cls, v):
         if not v or len(v) < 32:

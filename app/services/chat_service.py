@@ -72,7 +72,7 @@ class ChatService:
         return model_config.build_rag_prompt(message, context_text)
 
 
-    async def agent_orchestrator_stream(self, user_id: str, message: str, company_id: str, area: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
+    async def agent_orchestrator_stream(self, user_id: str, message: str, company_id: str, area: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
         """
         Analyze user query using the agent orchestrator model to determine workflow requirements.
         Enhanced version that accepts all process_rag_query_stream parameters for complete context.
@@ -109,8 +109,6 @@ class ChatService:
             # Generate tasks from analysis
             tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
 
-            print(tasks)
-
             # Execute tasks sequentially
             query_embedding = None
             context_text = ""
@@ -133,12 +131,17 @@ class ChatService:
                             # Generate embedding if not already done
                             query_embedding = await self.generate_embedding(user_query)
 
-                        search_results = await self.search_by_embedding(
+                        # Use semantic_query from analysis if available, otherwise use user_query
+                        semantic_query = analysis.get("semantic_query", "").strip() if analysis.get("semantic_query") else user_query
+
+                        search_results = await self.search_by_embedding_hybrid(
+                            query_text=semantic_query,
                             query_embedding=query_embedding,
                             company_id=company_id,
                             area=area,
                             top_k=top_k,
-                            similarity_threshold=similarity_threshold
+                            similarity_threshold=similarity_threshold,
+                            alpha=alpha
                         )
                         # Build context from retrieved documents
                         if search_results["documents"]:
@@ -415,6 +418,83 @@ class ChatService:
                 "collection": search_collection,
                 "company_id": company_id,
                 "area": area
+            },
+            "embedding_dimensions": len(query_embedding),
+            "status": "success"
+        }
+
+    async def search_by_embedding_hybrid(self, query_text: str, query_embedding: List[float], company_id: str, area: str, top_k: int = None, similarity_threshold: float = None, alpha: float = None) -> Dict[str, Any]:
+        """
+        Hybrid search (vector + BM25) using pre-generated embedding and query text.
+        """
+        from app.core.config import settings
+
+        # Use company_id as collection name, fallback to default
+        if company_id is not None:
+            search_collection = company_id
+        else:
+            search_collection = settings.weaviate_class_name
+
+        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
+        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
+
+        try:
+            # Hybrid search (vector + BM25) in specified collection with company and area filtering
+            search_results = await self.vectorstore.search_in_collection_hybrid(
+                collection_name=search_collection,
+                query_text=query_text,
+                query_vector=query_embedding,
+                company_id=company_id,
+                area=area,
+                top_k=search_top_k,
+                similarity_threshold=search_threshold,
+                alpha=alpha
+            )
+        except ConnectionError as e:
+            logger.error(f"Connection error during hybrid search: {e}")
+            raise ConnectionError(f"Vector database unavailable: {str(e)}")
+        except ValueError as e:
+            logger.error(f"Invalid search parameters: {e}")
+            raise ValueError(f"Invalid search parameters: {str(e)}")
+        except TimeoutError as e:
+            logger.error(f"Timeout error during hybrid search: {e}")
+            raise TimeoutError(f"Hybrid search timeout: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during hybrid search: {e}")
+            raise ConnectionError(f"Hybrid search failed: {str(e)}")
+
+        # Format results
+        documents = []
+        for result in search_results:
+            metadata = result.get("metadata", {})
+            documents.append({
+                "content": result.get("content", ""),
+                # All database parameters (matching CargaConocimiento_iA schema)
+                "company_id": metadata.get("company_id", ""),
+                "doc_id": metadata.get("doc_id", ""),
+                "chunk_id": metadata.get("chunk_id", ""),
+                "page_start": metadata.get("page_start"),
+                "page_end": metadata.get("page_end"),
+                "char_start": metadata.get("char_start"),
+                "char_end": metadata.get("char_end"),
+                "token_count": metadata.get("token_count"),
+                # Search metadata
+                "distance": metadata.get("distance", 0.0),
+                "relevance_score": metadata.get("relevance_score", 1.0 - metadata.get("distance", 0.0))
+            })
+
+        return {
+            "documents": documents,
+            "total_found": len(documents),
+            "search_parameters": {
+                "top_k": search_top_k,
+                "similarity_threshold": search_threshold,
+                "alpha": alpha if alpha is not None else settings.rag_hybrid_alpha,
+                "embedding_model": settings.embeddings_model_id,
+                "collection": search_collection,
+                "company_id": company_id,
+                "area": area,
+                "search_type": "hybrid"
             },
             "embedding_dimensions": len(query_embedding),
             "status": "success"

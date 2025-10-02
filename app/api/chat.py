@@ -51,6 +51,7 @@ class AgentStreamingRequest(BaseModel):
     area: str                               # Required, for area-specific filtering and user role validation
     top_k: Optional[int] = None             # Optional, defaults to env config
     similarity_threshold: Optional[float] = None  # Optional, defaults to env config
+    alpha: Optional[float] = None           # Optional, hybrid search alpha (0.0=keyword, 1.0=vector), defaults to env config
     temperature: Optional[float] = None      # Optional, defaults to env config
     max_tokens: Optional[int] = None         # Optional, defaults to env config
     external_token: str                      # Required, external system authentication token
@@ -271,6 +272,7 @@ async def agent_streaming_endpoint(
                     area=request.area,
                     top_k=request.top_k,
                     similarity_threshold=request.similarity_threshold,
+                    alpha=request.alpha,
                     temperature=request.temperature,
                     max_tokens=request.max_tokens,
                     external_token=request.external_token
