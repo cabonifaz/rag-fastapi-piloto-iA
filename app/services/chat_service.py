@@ -106,8 +106,12 @@ class ChatService:
             # Call orchestrator to analyze the query
             analysis = await orchestrator.analyze_query(user_query, available_apis)
 
+            print(analysis)
+
             # Generate tasks from analysis
             tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
+
+            print(tasks)
 
             # Execute tasks sequentially
             query_embedding = None
@@ -394,8 +398,7 @@ class ChatService:
             metadata = result.get("metadata", {})
             documents.append({
                 "content": result.get("content", ""),
-                # All database parameters (matching CargaConocimiento_iA schema)
-                "company_id": metadata.get("company_id", ""),
+                # Document metadata
                 "doc_id": metadata.get("doc_id", ""),
                 "chunk_id": metadata.get("chunk_id", ""),
                 "page_start": metadata.get("page_start"),
@@ -404,8 +407,8 @@ class ChatService:
                 "char_end": metadata.get("char_end"),
                 "token_count": metadata.get("token_count"),
                 # Search metadata
-                "distance": metadata.get("distance", 0.0),
-                "relevance_score": metadata.get("relevance_score", 1.0 - metadata.get("distance", 0.0))
+                "distance": metadata.get("distance"),
+                "relevance_score": metadata.get("relevance_score")
             })
 
         return {
@@ -414,10 +417,7 @@ class ChatService:
             "search_parameters": {
                 "top_k": search_top_k,
                 "similarity_threshold": search_threshold,
-                "embedding_model": settings.embeddings_model_id,
-                "collection": search_collection,
-                "company_id": company_id,
-                "area": area
+                "embedding_model": settings.embeddings_model_id
             },
             "embedding_dimensions": len(query_embedding),
             "status": "success"
@@ -469,18 +469,20 @@ class ChatService:
             metadata = result.get("metadata", {})
             documents.append({
                 "content": result.get("content", ""),
-                # All database parameters (matching CargaConocimiento_iA schema)
-                "company_id": metadata.get("company_id", ""),
+                # Document metadata
                 "doc_id": metadata.get("doc_id", ""),
+                "doc_title": metadata.get("doc_title", ""),
                 "chunk_id": metadata.get("chunk_id", ""),
                 "page_start": metadata.get("page_start"),
                 "page_end": metadata.get("page_end"),
                 "char_start": metadata.get("char_start"),
                 "char_end": metadata.get("char_end"),
                 "token_count": metadata.get("token_count"),
-                # Search metadata
-                "distance": metadata.get("distance", 0.0),
-                "relevance_score": metadata.get("relevance_score", 1.0 - metadata.get("distance", 0.0))
+                # Search metadata (hybrid returns score, not distance)
+                "score": metadata.get("score"),
+                "distance": metadata.get("distance"),
+                "relevance_score": metadata.get("relevance_score"),
+                "search_type": metadata.get("search_type", "hybrid")
             })
 
         return {
@@ -491,9 +493,6 @@ class ChatService:
                 "similarity_threshold": search_threshold,
                 "alpha": alpha if alpha is not None else settings.rag_hybrid_alpha,
                 "embedding_model": settings.embeddings_model_id,
-                "collection": search_collection,
-                "company_id": company_id,
-                "area": area,
                 "search_type": "hybrid"
             },
             "embedding_dimensions": len(query_embedding),

@@ -286,8 +286,10 @@ class WeaviateRepository(VectorStorePort):
                         "properties": dict(obj.properties) if obj.properties else {},
                     }
                     if include_distance and obj.metadata and hasattr(obj.metadata, 'score'):
-                        # Hybrid search returns 'score' instead of 'distance'
-                        item["distance"] = 1.0 - obj.metadata.score if obj.metadata.score is not None else None
+                        # Hybrid search returns 'score' (higher = better), not 'distance'
+                        # Store score as-is without conversion
+                        item["score"] = obj.metadata.score if obj.metadata.score is not None else None
+                        item["distance"] = None  # Not applicable for hybrid search
                     results.append(item)
 
                 return results
@@ -373,53 +375,46 @@ class WeaviateRepository(VectorStorePort):
     async def search_in_collection(
         self,
         collection_name: str,
-        query_vector: List[float], 
+        query_vector: List[float],
+        company_id: str,
+        area: str,
         top_k: Optional[int] = None,
-        similarity_threshold: Optional[float] = None,
-        company_id: Optional[str] = None,
-        area: Optional[str] = None
+        similarity_threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
-        """Search for similar vectors in a specific collection with optional company filtering."""
-        
+        """Search for similar vectors in a specific collection with required company and area filtering."""
+
         try:
             from app.core.config import settings
-            
+
             # Use environment defaults if not provided
             actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
             actual_similarity_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
-            
+
             # Validate inputs
             if not collection_name:
                 raise ValueError("Collection name cannot be empty")
             if not query_vector:
                 raise ValueError("Query vector cannot be empty")
+            if not company_id:
+                raise ValueError("Company ID is required")
+            if not area:
+                raise ValueError("Area is required")
             if actual_top_k <= 0:
                 raise ValueError("top_k must be greater than 0")
             if similarity_threshold is not None and not (0.0 <= similarity_threshold <= 1.0):
                 raise ValueError("Similarity threshold must be between 0.0 and 1.0")
-            
+
             # Build filters for company_id and area using v4 Filter class
-            filters = None
-            filter_conditions = []
-            
-            if company_id:
-                filter_conditions.append(Filter.by_property("company_id").equal(company_id))
-            
-            if area:
-                # Include both the specific area AND Default area documents
-                area_filter = (
-                    Filter.by_property("area").equal(area) |
-                    Filter.by_property("area").equal("Default")
-                )
-                filter_conditions.append(area_filter)
-            
-            # Combine multiple conditions with & operator
-            if len(filter_conditions) == 1:
-                filters = filter_conditions[0]
-            elif len(filter_conditions) > 1:
-                filters = filter_conditions[0]
-                for condition in filter_conditions[1:]:
-                    filters = filters & condition
+            company_filter = Filter.by_property("company_id").equal(company_id)
+
+            # Include both the specific area AND Default area documents
+            area_filter = (
+                Filter.by_property("area").equal(area) |
+                Filter.by_property("area").equal("Default")
+            )
+
+            # Combine filters with & operator
+            filters = company_filter & area_filter
             
             # Vector similarity search
             results = await self.search_by_vector(
@@ -455,9 +450,7 @@ class WeaviateRepository(VectorStorePort):
                 "id": r["id"],
                 "content": r["properties"].get("text", ""),
                 "metadata": {
-                    # All stored database parameters (based on actual CargaConocimiento_iA schema)
-                    "company_id": r["properties"].get("company_id", ""),
-                    "area": r["properties"].get("area", ""),
+                    # Document metadata
                     "doc_id": r["properties"].get("doc_id", ""),
                     "chunk_id": r["properties"].get("chunk_id", ""),
                     "page_start": r["properties"].get("page_start"),
@@ -471,7 +464,7 @@ class WeaviateRepository(VectorStorePort):
                 }
             }
             formatted_results.append(formatted_result)
-        
+
         return formatted_results
 
     async def search_in_collection_hybrid(
@@ -528,7 +521,7 @@ class WeaviateRepository(VectorStorePort):
                 query_text=query_text,
                 vector=query_vector,
                 top_k=actual_top_k,
-                return_properties=["text", "company_id", "doc_id", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
+                return_properties=["text", "doc_id", "doc_title", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
                 filters=filters,
                 alpha=alpha,
                 include_distance=True
@@ -545,32 +538,34 @@ class WeaviateRepository(VectorStorePort):
             raise ConnectionError(f"Hybrid search service error: {str(e)}")
 
         if actual_similarity_threshold is not None:
-            for i, r in enumerate(results):
-                distance = r.get('distance', 1.0)
-                similarity = 1.0 - distance if distance is not None else 0.0
-            # Convert similarity_threshold to distance_threshold and filter
-            distance_threshold = 1.0 - actual_similarity_threshold
-            results = [r for r in results if r.get("distance", 1.0) <= distance_threshold]
+            # For hybrid search, filter by score (higher = better)
+            # Score is already normalized 0-1, so use threshold directly
+            results = [r for r in results if r.get("score", 0.0) >= actual_similarity_threshold]
 
         formatted_results = []
         for r in results:
+            # For hybrid search, use score directly (higher = better)
+            score = r.get("score")
+            distance = r.get("distance")
+
             formatted_result = {
                 "id": r["id"],
                 "content": r["properties"].get("text", ""),
                 "metadata": {
-                    # All stored database parameters
-                    "company_id": r["properties"].get("company_id", ""),
-                    "area": r["properties"].get("area", ""),
+                    # Document metadata
                     "doc_id": r["properties"].get("doc_id", ""),
+                    "doc_title": r["properties"].get("doc_title", ""),
                     "chunk_id": r["properties"].get("chunk_id", ""),
                     "page_start": r["properties"].get("page_start"),
                     "page_end": r["properties"].get("page_end"),
                     "char_start": r["properties"].get("char_start"),
                     "char_end": r["properties"].get("char_end"),
                     "token_count": r["properties"].get("token_count"),
-                    # Search metadata
-                    "distance": r.get("distance"),
-                    "relevance_score": 1.0 - r.get("distance", 0.0) if r.get("distance") is not None else None
+                    # Search metadata for hybrid search
+                    "score": score,  # Hybrid score (higher = better)
+                    "distance": distance,  # None for hybrid search
+                    "relevance_score": score if score is not None else 0.0,  # Use score directly
+                    "search_type": "hybrid"
                 }
             }
             formatted_results.append(formatted_result)
