@@ -148,7 +148,31 @@ class ChatService:
                             context_parts = []
                             for doc in search_results["documents"]:
                                 if doc["content"]:
-                                    context_parts.append(doc["content"])
+                                    # Formato de referencia de páginas
+                                    if doc.get("page_start") is not None and doc.get("page_end") is not None:
+                                        if doc["page_start"] == doc["page_end"]:
+                                            page_ref = f"Page {doc['page_start']}"
+                                        else:
+                                            page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
+                                    else:
+                                        page_ref = "Page N/A"
+                                    # Armar metadata extra
+                                    source_info = []
+                                    if doc.get("doc_id"): 
+                                        source_info.append(f"ID: {doc['doc_id']}")
+                                    if doc.get("doc_title"): 
+                                        source_info.append(f"Title: {doc['doc_title']}")
+                                    if doc.get("section_title"): 
+                                        source_info.append(f"Section: {doc['section_title']}")
+                                    if doc.get("section_path"): 
+                                        source_info.append(f"Path: {doc['section_path']}")
+                                    if doc.get("score"): 
+                                        source_info.append(f"Score: {doc['score']}")
+                                    # Construcción del bloque final
+                                    context_parts.append(
+                                        f"Source: {'\n'.join(source_info)}, {page_ref}\nContent:\n{doc['content']}"
+                                    )
+
                             context_text = "\n\n".join(context_parts)
                     except Exception as e:
                         execution_failed = True
@@ -194,6 +218,7 @@ class ChatService:
 
                         # Build prompt with context (we know context_text exists here)
                         prompt = self._build_rag_prompt(query_to_use, context_text)
+                        print(prompt)
 
                         # Use provided parameters or fall back to environment defaults
                         llm_temperature = temperature if temperature is not None else settings.llm_temperature
@@ -468,6 +493,8 @@ class ChatService:
                 # Document metadata
                 "doc_id": metadata.get("doc_id", ""),
                 "doc_title": metadata.get("doc_title", ""),
+                "section_title": metadata.get("section_title", ""),
+                "section_path": metadata.get("section_path", ""),
                 "chunk_id": metadata.get("chunk_id", ""),
                 "page_start": metadata.get("page_start"),
                 "page_end": metadata.get("page_end"),
@@ -476,7 +503,6 @@ class ChatService:
                 "token_count": metadata.get("token_count"),
                 # Search metadata (hybrid returns score, not distance)
                 "score": metadata.get("score"),
-                "distance": metadata.get("distance"),
                 "relevance_score": metadata.get("relevance_score"),
                 "search_type": metadata.get("search_type", "hybrid")
             })
@@ -518,6 +544,7 @@ class ChatService:
         try:
             async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
                 yield chunk
+
         except ConnectionError as e:
             logger.error(f"Connection error during LLM generation: {e}")
             raise ConnectionError(f"LLM service unavailable: {str(e)}")

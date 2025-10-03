@@ -521,7 +521,7 @@ class WeaviateRepository(VectorStorePort):
                 query_text=query_text,
                 vector=query_vector,
                 top_k=actual_top_k,
-                return_properties=["text", "doc_id", "doc_title", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
+                return_properties=["text", "doc_id", "doc_title", "section_title", "section_path", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
                 filters=filters,
                 alpha=alpha,
                 include_distance=True
@@ -555,6 +555,8 @@ class WeaviateRepository(VectorStorePort):
                     # Document metadata
                     "doc_id": r["properties"].get("doc_id", ""),
                     "doc_title": r["properties"].get("doc_title", ""),
+                    "section_title": r["properties"].get("section_title", ""),
+                    "section_path": r["properties"].get("section_path", ""),
                     "chunk_id": r["properties"].get("chunk_id", ""),
                     "page_start": r["properties"].get("page_start"),
                     "page_end": r["properties"].get("page_end"),
@@ -563,7 +565,6 @@ class WeaviateRepository(VectorStorePort):
                     "token_count": r["properties"].get("token_count"),
                     # Search metadata for hybrid search
                     "score": score,  # Hybrid score (higher = better)
-                    "distance": distance,  # None for hybrid search
                     "relevance_score": score if score is not None else 0.0,  # Use score directly
                     "search_type": "hybrid"
                 }

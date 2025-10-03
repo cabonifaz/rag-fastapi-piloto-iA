@@ -70,12 +70,12 @@ class AnthropicModelConfig:
 
     def build_rag_prompt(self, message: str, context_text: str) -> str:
         """Build RAG prompt optimized for Claude models."""
-        return f"""Based on the following context, please answer the user's question. Include relevant source references with document title and page numbers. Do not search on internet. Answer in the same language as the question. If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted table.
-
-Data:
-{context_text}
+        return f"""Please answer the user's question based on the following context. Include all source references used in the answer with document title and page numbers. Do not search on internet. Answer in the same language as the question. If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted table.
 
 Question: {message}
+
+Context:
+{context_text}
 
 Please provide a clear, accurate response based solely on the provided context. Only what the user ask."""
 
