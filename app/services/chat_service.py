@@ -190,7 +190,19 @@ class ChatService:
                         if api_result.get("success") and api_result.get("data"):
                             api_data = json.dumps(api_result['data'])
                             if api_data and api_data.strip() not in ["{}", "[]", "null"]:
-                                context_text += api_data
+                                # Format API call result with metadata
+                                api_context_parts = []
+                                api_context_parts.append(f"API Call:")
+                                api_context_parts.append(f"Endpoint: {task.get('endpoint', 'N/A')}")
+                                api_context_parts.append(f"Params: {json.dumps(task.get('params', {}))}")
+                                api_context_parts.append(f"Response:\n{api_data}")
+
+                                formatted_api_context = "\n".join(api_context_parts)
+
+                                # Add separator if context already has content
+                                if context_text:
+                                    context_text += "\n\n"
+                                context_text += formatted_api_context
 
                     except Exception as e:
                         execution_failed = True
@@ -218,7 +230,6 @@ class ChatService:
 
                         # Build prompt with context (we know context_text exists here)
                         prompt = self._build_rag_prompt(query_to_use, context_text)
-                        print(prompt)
 
                         # Use provided parameters or fall back to environment defaults
                         llm_temperature = temperature if temperature is not None else settings.llm_temperature

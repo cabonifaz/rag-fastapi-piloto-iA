@@ -60,24 +60,48 @@ Grammatical Precision Rules:
 Decision Hierarchy: 1) Quantified references 2) Singular/Plural indicators 3) Reference type categories. Default: 2 for ambiguous cases.
 
 System Data Rules
-- needs_system_data → true only if the query requires internal data AND mentions one or more columns from the API list.
-- system_calls → must ONLY include endpoints from the API list, never fabricate.
-- Always respect the ENTITY-PARAMETER MATCHING FRAMEWORK:
-  1. Entity alignment first
-  2. Domain integrity: params must belong to the endpoint’s domain
-  3. Semantic coherence required
-  4. Reject superficial keyword matches
-- If no system data is required, system_calls MUST be an empty array [].
+needs_system_data → true ONLY if the query explicitly mentions an entity that exactly matches an endpoint description.
+needs_system_data → false for all other queries.
+
+Entity Matching Rule: 
+1. Exact String Match
+- Entities must match endpoint names exactly (case-insensitive).
+- Do not rely on partial matches or substring overlaps.
+2. Lemmatization Normalization
+- Normalize plural/singular or basic inflections via lemmatization.
+- Ensures "entities" → "entity" without overgeneralizing.
+3. No Semantic Expansion
+- Do NOT infer matches based on conceptual similarity.
+- If similarity is below a strict threshold (e.g., cosine < 0.8), reject rather than accept.
+4. Controlled Regex Filters
+- If variants must be grouped, use tight regex rules limited to approved suffixes/prefixes.
+- Avoid open regex like .* that could capture unrelated terms.
+5. Contextual Validation
+- Evaluate the entire sentence/query context before matching.
+- Ensure that the entity reference is domain-consistent and not accidental overlap.
+
+System Calls
+- system_calls must ONLY include endpoints from the API list.
+- Endpoints are included only after exact entity matching is confirmed.
+- If no entity match, system_calls = [].
+
+Safeguards Against False Positives
+- Replace stemming with lemmatization to prevent over-grouping.
+- Use strict suffix control to avoid false matches.
+- Apply sentence-level embeddings as a safeguard (reject, never accept, when below threshold).
 
 Parameter Rules
-1. Include only explicitly provided values.
-2. For user references, use "my_user_id".
-3. Missing required parameters must be listed under "missing_required_params".
-4. Do NOT infer values.
-5. Do NOT include undefined parameters.
+1. Include only explicitly provided values from the query.
+2. For user references, always use "my_user_id".
+3. Any missing required parameters must be listed in missing_required_params.
+4. Do NOT infer values under any circumstances.
+5. Do NOT include undefined parameters or parameters outside the endpoint’s domain.
 
 External Knowledge Rules
-needs_external_knowledge → true if query requires external knowledge retrieval
+- needs_external_knowledge → true if the query requires information that cannot be answered exclusively from the available system data.
+- Always set to true when the query requests comparisons, definitions, explanations, or general knowledge unrelated to explicit API columns.
+- Default to false only when the query can be fully answered with system data retrieved from the defined API endpoints.
+- For ambiguous cases where no API columns are mentioned but the query still expects an answer, set to true.
 
 Semantic Query Rules
 - semantic_query must always preserve the language of the original query.
@@ -117,86 +141,46 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
         return system_prompt
 
     @staticmethod
-    def get_request_body(user_query: str, available_apis: Dict[str, Any]) -> Dict[str, Any]:
-        """Get the request body for OpenAI models (gpt-oss) on AWS Bedrock."""
+    def get_converse_request(user_query: str, available_apis: Dict[str, Any]) -> Dict[str, Any]:
+        """Get the request parameters for Converse API."""
 
         system_prompt = OpenAIConfig.build_analysis_prompt(available_apis)
 
         return {
+            "modelId": OpenAIConfig.MODEL_ID,
             "messages": [
                 {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
                     "role": "user",
-                    "content": f"Process this query: \"{user_query}\""
+                    "content": [{"text": f"Process this query: \"{user_query}\""}]
                 }
             ],
-            "max_tokens": OpenAIConfig.MAX_TOKENS,
-            "temperature": OpenAIConfig.TEMPERATURE,
-            "top_p": OpenAIConfig.TOP_P
+            "system": [{"text": system_prompt}],
+            "inferenceConfig": {
+                "maxTokens": OpenAIConfig.MAX_TOKENS,
+                "temperature": OpenAIConfig.TEMPERATURE,
+                "topP": OpenAIConfig.TOP_P
+            }
         }
 
     @staticmethod
     def extract_response(response_body: Dict[str, Any]) -> str:
-        """Extract and clean text from OpenAI GPT-OSS response."""
-        # OpenAI GPT-OSS format: choices[0].message.content
-        if "choices" in response_body and len(response_body["choices"]) > 0:
-            message = response_body["choices"][0].get("message", {})
-            content = message.get("content", "")
+        """Extract text from Converse API response."""
+        # Converse API format: output.message.content
+        output_message = response_body.get("output", {}).get("message", {})
+        content_blocks = output_message.get("content", [])
 
-            # OpenAI sometimes includes <reasoning> tags, extract just the JSON
-            if "</reasoning>" in content:
-                # Find where </reasoning> ends
-                reasoning_end = content.find("</reasoning>") + len("</reasoning>")
-                # Find the first { after </reasoning>
-                json_start = content.find("{", reasoning_end)
-                if json_start != -1:
-                    # Find the matching closing brace
-                    brace_count = 0
-                    for i in range(json_start, len(content)):
-                        if content[i] == "{":
-                            brace_count += 1
-                        elif content[i] == "}":
-                            brace_count -= 1
-                            if brace_count == 0:
-                                content = content[json_start:i+1]
-                                break
-            else:
-                # No reasoning tags, find first {
-                json_start = content.find("{")
-                if json_start != -1:
-                    brace_count = 0
-                    for i in range(json_start, len(content)):
-                        if content[i] == "{":
-                            brace_count += 1
-                        elif content[i] == "}":
-                            brace_count -= 1
-                            if brace_count == 0:
-                                content = content[json_start:i+1]
-                                break
-
-            # Clean smart quotes and special characters
-            content = content.replace('"', '"').replace('"', '"').replace(''', "'").replace(''', "'")
-
-            # Remove markdown code blocks if present
-            if content.strip().startswith("```"):
-                lines = content.strip().split('\n')
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                content = '\n'.join(lines).strip()
-
-            return content
+        # OpenAI models may return multiple content blocks (reasoning + text)
+        # Find the block with "text" field (not "reasoningContent")
+        for block in content_blocks:
+            if "text" in block:
+                return block.get("text", "").strip()
 
         return ""
 
     @staticmethod
     def analyze(bedrock_client, model_id: str, user_query: str, available_apis: Dict[str, Any]) -> str:
         """
-        Analyze query using OpenAI model with single invocation.
+        Analyze query using OpenAI model with Converse API.
 
         Args:
             bedrock_client: AWS Bedrock client instance
@@ -207,22 +191,26 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
         Returns:
             Cleaned JSON string ready for parsing
         """
-        # Build request body
-        request_body = OpenAIConfig.get_request_body(user_query, available_apis)
+        # Build converse request parameters
+        request_params = OpenAIConfig.get_converse_request(user_query, available_apis)
 
-        # Invoke bedrock
-        response = bedrock_client.invoke_model(
-            modelId=model_id,
-            body=json.dumps(request_body),
-            contentType="application/json",
-            accept="application/json"
-        )
+        print(f"=== OPENAI ANALYZE ===")
+        print(f"Model: {model_id}")
+        print(f"Temperature: {OpenAIConfig.TEMPERATURE}")
+        print(f"Query: {user_query}")
 
-        # Parse response
-        response_body = json.loads(response["body"].read())
+        # Call Converse API
+        response = bedrock_client.converse(**request_params)
+
+        print(f"=== RESPONSE ===")
+        print(f"Full response: {response}")
 
         # Extract and clean
-        json_response = OpenAIConfig.extract_response(response_body)
+        json_response = OpenAIConfig.extract_response(response)
+
+        print(f"=== EXTRACTED ===")
+        print(f"JSON: {json_response}")
+        print(f"Length: {len(json_response)}")
 
         logger.info(f"OpenAI - Response length: {len(json_response)}")
 

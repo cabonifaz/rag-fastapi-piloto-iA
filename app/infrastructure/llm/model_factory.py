@@ -5,13 +5,14 @@ Factory for creating model-specific configurations for AWS Bedrock LLM provider.
 from typing import Union
 from app.infrastructure.llm.anthropic_models import AnthropicModelConfig, get_anthropic_config
 from app.infrastructure.llm.meta_models import MetaModelConfig, get_meta_config
+from app.infrastructure.llm.openai_models import OpenAIModelConfig, get_openai_config
 
 
 class ModelConfigFactory:
     """Factory to get the appropriate model configuration for a given model ID."""
 
     @staticmethod
-    def get_model_config(model_id: str) -> Union[AnthropicModelConfig, MetaModelConfig]:
+    def get_model_config(model_id: str) -> Union[AnthropicModelConfig, MetaModelConfig, OpenAIModelConfig]:
         """
         Return the appropriate model configuration based on model ID.
 
@@ -31,6 +32,10 @@ class ModelConfigFactory:
         elif "llama" in model_id_lower or "meta." in model_id:
             return get_meta_config(model_id)
 
+        # Check for OpenAI models
+        elif "gpt" in model_id_lower or "openai." in model_id:
+            return get_openai_config(model_id)
+
         else:
             # Default to Claude format for unknown models
             return get_anthropic_config(model_id)
@@ -48,11 +53,19 @@ class ModelConfigFactory:
         return "llama" in model_id_lower or "meta." in model_id
 
     @staticmethod
+    def is_openai_model(model_id: str) -> bool:
+        """Check if the model is an OpenAI model."""
+        model_id_lower = model_id.lower()
+        return "gpt" in model_id_lower or "openai." in model_id
+
+    @staticmethod
     def get_model_provider(model_id: str) -> str:
         """Get the provider name for a given model ID."""
         if ModelConfigFactory.is_anthropic_model(model_id):
             return "anthropic"
         elif ModelConfigFactory.is_meta_model(model_id):
             return "meta"
+        elif ModelConfigFactory.is_openai_model(model_id):
+            return "openai"
         else:
             return "unknown"

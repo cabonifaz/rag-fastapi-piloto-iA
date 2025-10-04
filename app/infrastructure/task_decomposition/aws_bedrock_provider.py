@@ -64,6 +64,7 @@ class OrchestratorQueryAnalyzer:
                 raise ValueError("Empty response from model")
 
             analysis = json.loads(json_response)
+            print(analysis)
             return analysis
 
         except (ClientError, json.JSONDecodeError) as e:

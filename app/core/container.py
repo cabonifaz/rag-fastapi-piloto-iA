@@ -10,7 +10,7 @@ from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
 from app.infrastructure.vectorstores.weaviate_repository import WeaviateRepository
-from app.infrastructure.llm.aws_bedrock_provider import AWSBedrockLLMProvider
+from app.infrastructure.llm.aws_bedrock_converse_provider import AWSBedrockConverseProvider
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 
 
@@ -77,19 +77,22 @@ class DIContainer:
                         raise ValueError("LLM region is required for AWS provider")
                     if not settings.llm_model_id:
                         raise ValueError("LLM model ID is required for AWS provider")
-                    
-                    self._llm_provider = AWSBedrockLLMProvider(
+
+                    # Using Converse API - stateless (no message history)
+                    # Each request is independent with only current user prompt
+                    self._llm_provider = AWSBedrockConverseProvider(
                         region=settings.llm_region,
                         model_id=settings.llm_model_id,
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
-                        aws_secret_access_key=settings.aws_secret_access_key
+                        aws_secret_access_key=settings.aws_secret_access_key,
+                        system_prompt=getattr(settings, 'llm_system_prompt', None)
                     )
                 else:
                     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
             except Exception as e:
                 raise ConnectionError(f"Failed to initialize LLM provider: {str(e)}")
-        
+
         return self._llm_provider
 
     def get_full_rag_chat_service(self) -> tuple[ChatService, LLMPort]:
