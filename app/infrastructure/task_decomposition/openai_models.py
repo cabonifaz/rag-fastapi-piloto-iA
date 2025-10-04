@@ -63,32 +63,43 @@ System Data Rules
 needs_system_data → true ONLY if the query explicitly mentions an entity that exactly matches an endpoint description.
 needs_system_data → false for all other queries.
 
-Entity Matching Rule: 
-1. Exact String Match
-- Entities must match endpoint names exactly (case-insensitive).
-- Do not rely on partial matches or substring overlaps.
-2. Lemmatization Normalization
-- Normalize plural/singular or basic inflections via lemmatization.
-- Ensures "entities" → "entity" without overgeneralizing.
+Entity Matching Rules:
+
+1. Cross-Language Normalization
+   - Use explicit translation dictionary for Spanish/English equivalents
+   - Apply lemmatization only for plural/singular within same language
+   - CRITICAL: Different concepts must never match
+
+2. Exact Normalized Match
+   - After normalization, entities must match endpoint components EXACTLY
+   - Match against: table names, endpoint path segments, column names
+   - Do NOT use substring matching
+   - Case-insensitive comparison after normalization
+
 3. No Semantic Expansion
-- Do NOT infer matches based on conceptual similarity.
-- If similarity is below a strict threshold (e.g., cosine < 0.8), reject rather than accept.
-4. Controlled Regex Filters
-- If variants must be grouped, use tight regex rules limited to approved suffixes/prefixes.
-- Avoid open regex like .* that could capture unrelated terms.
+   - Do NOT infer matches based on conceptual similarity
+   - Only use explicitly defined translations from the normalization dictionary
+   - Reject any matches not in the approved translation list
+
+4. No Partial or Substring Matching
+   - Column names must match the normalized entity EXACTLY
+   - Substring overlaps are always rejected
+   - Full normalized word comparison only
+
 5. Contextual Validation
-- Evaluate the entire sentence/query context before matching.
-- Ensure that the entity reference is domain-consistent and not accidental overlap.
+   - Evaluate the entire sentence/query context before matching
+   - Ensure that the entity reference is domain-consistent and not accidental overlap
 
 System Calls
-- system_calls must ONLY include endpoints from the API list.
-- Endpoints are included only after exact entity matching is confirmed.
-- If no entity match, system_calls = [].
+- system_calls must ONLY include endpoints from the API list
+- Endpoints are included only after exact normalized entity matching is confirmed
+- If no entity match, system_calls = []
 
 Safeguards Against False Positives
-- Replace stemming with lemmatization to prevent over-grouping.
-- Use strict suffix control to avoid false matches.
-- Apply sentence-level embeddings as a safeguard (reject, never accept, when below threshold).
+- Use explicit translation dictionary instead of automatic stemming
+- Apply lemmatization only for plural/singular, not for word transformation
+- Strict normalization: only approved translations allowed
+- Reject substring matches entirely
 
 Parameter Rules
 1. Include only explicitly provided values from the query.
@@ -98,10 +109,11 @@ Parameter Rules
 5. Do NOT include undefined parameters or parameters outside the endpoint’s domain.
 
 External Knowledge Rules
-- needs_external_knowledge → true if the query requires information that cannot be answered exclusively from the available system data.
-- Always set to true when the query requests comparisons, definitions, explanations, or general knowledge unrelated to explicit API columns.
-- Default to false only when the query can be fully answered with system data retrieved from the defined API endpoints.
-- For ambiguous cases where no API columns are mentioned but the query still expects an answer, set to true.
+- needs_external_knowledge → true if the query requires information that cannot be answered exclusively from the available system data
+- Always set to true when the query requests comparisons, definitions, explanations, or general knowledge unrelated to explicit API columns
+- If system_calls = [] (no API match found), set to true
+- Default to false only when the query can be fully answered with system data retrieved from the defined API endpoints
+- For ambiguous cases where no API columns are mentioned but the query still expects an answer, set to true
 
 Semantic Query Rules
 - semantic_query must always preserve the language of the original query.
@@ -194,23 +206,11 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
         # Build converse request parameters
         request_params = OpenAIConfig.get_converse_request(user_query, available_apis)
 
-        print(f"=== OPENAI ANALYZE ===")
-        print(f"Model: {model_id}")
-        print(f"Temperature: {OpenAIConfig.TEMPERATURE}")
-        print(f"Query: {user_query}")
-
         # Call Converse API
         response = bedrock_client.converse(**request_params)
 
-        print(f"=== RESPONSE ===")
-        print(f"Full response: {response}")
-
         # Extract and clean
         json_response = OpenAIConfig.extract_response(response)
-
-        print(f"=== EXTRACTED ===")
-        print(f"JSON: {json_response}")
-        print(f"Length: {len(json_response)}")
 
         logger.info(f"OpenAI - Response length: {len(json_response)}")
 
