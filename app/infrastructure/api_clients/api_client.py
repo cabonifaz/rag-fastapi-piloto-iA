@@ -119,7 +119,7 @@ def filter_response_data(data: Any, max_field_length: int = 250) -> Any:
 async def httpx_get(url: str, token: str, params: Dict[str, Any] = None, headers: Dict[str, str] = None) -> Dict[str, Any]:
     """GET request using httpx with async support."""
     try:
-        BASE_URL = "https://bancotalentobackendpreprod-awdecbbsgrh4d8bn.canadacentral-01.azurewebsites.net"
+        BASE_URL = "https://urlmock"
 
         # Add base URL if not already present
         if not url.startswith("http"):
@@ -168,7 +168,7 @@ async def httpx_get(url: str, token: str, params: Dict[str, Any] = None, headers
 async def httpx_post(url: str, token: str, data: Dict[str, Any] = None, headers: Dict[str, str] = None) -> Dict[str, Any]:
     """POST request using httpx with async support."""
     try:
-        BASE_URL = "https://bancotalentobackendpreprod-awdecbbsgrh4d8bn.canadacentral-01.azurewebsites.net"
+        BASE_URL = "https://urlmock"
 
         # Add base URL if not already present
         if not url.startswith("http"):
@@ -245,7 +245,7 @@ async def httpx_login(url: str, username: str, password: str) -> Dict[str, Any]:
 async def httpx_test_login(username: str, password: str) -> Dict[str, Any]:
     """Test login function using httpx for specific endpoint."""
     try:
-        URL = "https://bancotalentobackendpreprod-awdecbbsgrh4d8bn.canadacentral-01.azurewebsites.net/bdt/auth/login"
+        URL = "https://urlmock"
         login_data = {"username": username, "password": password}
 
         async with httpx.AsyncClient(timeout=30.0) as client:
