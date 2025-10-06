@@ -76,8 +76,8 @@ class AWSBedrockConverseProvider(LLMPort):
     async def generate(
         self,
         prompt: str,
-        max_tokens: int = 512,
-        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        temperature: float = 0.3,
         system_prompt: Optional[str] = None
     ) -> str:
         """
@@ -162,8 +162,8 @@ class AWSBedrockConverseProvider(LLMPort):
     async def generate_stream(
         self,
         prompt: str,
-        max_tokens: int = 512,
-        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        temperature: float = 0.3,
         system_prompt: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
