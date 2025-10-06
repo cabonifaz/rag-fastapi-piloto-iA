@@ -31,17 +31,9 @@ class UnifiedRequest(BaseModel):
     area: str                               # Required, for area-specific filtering and user role validation
     top_k: Optional[int] = None             # Optional, defaults to env config
     similarity_threshold: Optional[float] = None  # Optional, defaults to env config
+    alpha: Optional[float] = None           # Optional, hybrid search alpha (0.0=keyword, 1.0=vector), defaults to env config
     temperature: Optional[float] = None      # Optional, defaults to env config
     max_tokens: Optional[int] = None         # Optional, defaults to env config
-
-# Request Schema for embedding-only endpoints
-class EmbeddingTestRequest(BaseModel):
-    user_id: str
-    message: str
-
-# Request Schema for orchestrator analysis
-class OrchestratorRequest(BaseModel):
-    message: str
 
 # Request Schema for agent streaming endpoint with external token
 class AgentStreamingRequest(BaseModel):
@@ -55,84 +47,6 @@ class AgentStreamingRequest(BaseModel):
     temperature: Optional[float] = None      # Optional, defaults to env config
     max_tokens: Optional[int] = None         # Optional, defaults to env config
     external_token: str                      # Required, external system authentication token
-
-
-# Response Models
-class ChatResponse(BaseModel):
-    user_id: str
-    message: str
-    answer: str
-    llm_model_used: Optional[str] = None
-    status: str
-    result: MensajeResponse
-
-
-class EmbeddingTestResponse(BaseModel):
-    user_id: str
-    message: str
-    embedding_model: str
-    embedding_dimensions: int
-    embedding: List[float]
-    status: str
-    result: MensajeResponse
-
-
-class ContextDocument(BaseModel):
-    content: str
-    # Database parameters (matching CargaConocimiento_iA schema)
-    company_id: str
-    doc_id: str
-    chunk_id: str
-    page_start: int
-    page_end: int
-    char_start: int
-    char_end: int
-    token_count: int
-    # Search metadata
-    distance: float
-    relevance_score: float
-
-
-class RAGResponse(BaseModel):
-    user_id: str
-    message: str
-    answer: str
-    context_documents: List[ContextDocument]
-    context_text: str
-    total_documents_found: int
-    embedding_dimensions: int
-    collection_searched: str
-    llm_model_used: str
-    search_parameters: Dict[str, Any]
-    status: str
-    result: MensajeResponse
-
-
-class SearchDocument(BaseModel):
-    content: str
-    # Database parameters (matching CargaConocimiento_iA schema)
-    company_id: str
-    doc_id: str
-    chunk_id: str
-    page_start: int
-    page_end: int
-    char_start: int
-    char_end: int
-    token_count: int
-    # Search metadata
-    distance: float
-    relevance_score: float
-
-
-class SearchResponse(BaseModel):
-    user_id: str
-    message: str
-    documents: List[SearchDocument]
-    total_found: int
-    search_parameters: Dict[str, Any]
-    embedding_dimensions: int
-    status: str
-    result: MensajeResponse
 
 
 def get_full_rag_dependencies():
@@ -170,6 +84,7 @@ async def chat_streaming_endpoint(
                     area=request.area,
                     top_k=request.top_k,
                     similarity_threshold=request.similarity_threshold,
+                    alpha=request.alpha,
                     temperature=request.temperature,
                     max_tokens=request.max_tokens
                 ):

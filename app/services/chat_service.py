@@ -261,7 +261,7 @@ class ChatService:
             }
 
 
-    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, top_k: int = None, similarity_threshold: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -289,17 +289,19 @@ class ChatService:
         # Step 1: Generate embedding for the query
         query_embedding = await self.generate_embedding(cleaned_message)
 
-        # Step 2: Search vector database using the embedding
+        # Step 2: Search vector database using the embedding (hybrid search)
         # Use provided parameters or fall back to environment defaults
         search_top_k = top_k if top_k is not None else settings.rag_top_k_results
         search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
 
-        search_result = await self.search_by_embedding(
+        search_result = await self.search_by_embedding_hybrid(
+            query_text=cleaned_message,
             query_embedding=query_embedding,
             company_id=company_id,
             area=area,
             top_k=search_top_k,
-            similarity_threshold=search_threshold
+            similarity_threshold=search_threshold,
+            alpha=alpha
         )
 
         # Add query to result for compatibility
@@ -328,13 +330,30 @@ class ChatService:
         context_with_sources = []
         for doc in search_result["documents"]:
             if doc["content"]:
-                # Format page reference more accurately
-                if doc['page_start'] == doc['page_end']:
-                    page_ref = f"Page {doc['page_start']}"
+                # Formato de referencia de páginas
+                if doc.get("page_start") is not None and doc.get("page_end") is not None:
+                    if doc["page_start"] == doc["page_end"]:
+                        page_ref = f"Page {doc['page_start']}"
+                    else:
+                        page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
                 else:
-                    page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
-                source_info = f"[Source: Document {doc['doc_id']}, {page_ref}]"
-                context_with_sources.append(f"{doc['content']}\n{source_info}")
+                    page_ref = "Page N/A"
+                # Armar metadata extra
+                source_info = []
+                if doc.get("doc_id"):
+                    source_info.append(f"ID: {doc['doc_id']}")
+                if doc.get("doc_title"):
+                    source_info.append(f"Title: {doc['doc_title']}")
+                if doc.get("section_title"):
+                    source_info.append(f"Section: {doc['section_title']}")
+                if doc.get("section_path"):
+                    source_info.append(f"Path: {doc['section_path']}")
+                if doc.get("score"):
+                    source_info.append(f"Score: {doc['score']}")
+                # Construcción del bloque final
+                context_with_sources.append(
+                    f"Source: {'\n'.join(source_info)}, {page_ref}\nContent:\n{doc['content']}"
+                )
         
         context_text = "\n\n".join(context_with_sources)
         
@@ -385,75 +404,6 @@ class ChatService:
         except Exception as e:
             logger.error(f"Unexpected error during embedding generation: {e}")
             raise ConnectionError(f"Embedding generation failed: {str(e)}")
-
-    async def search_by_embedding(self, query_embedding: List[float], company_id: str = None, area: str = None, top_k: int = None, similarity_threshold: float = None) -> Dict[str, Any]:
-        """
-        Search vector database using pre-generated embedding.
-        """
-        from app.core.config import settings
-
-        # Use company_id as collection name, fallback to default
-        if company_id is not None:
-            search_collection = company_id
-        else:
-            search_collection = settings.weaviate_class_name
-
-        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
-        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
-
-        try:
-            # Search vector database in specified collection with company and area filtering
-            search_results = await self.vectorstore.search_in_collection(
-                collection_name=search_collection,
-                query_vector=query_embedding,
-                top_k=search_top_k,
-                similarity_threshold=search_threshold,
-                company_id=company_id,
-                area=area
-            )
-        except ConnectionError as e:
-            logger.error(f"Connection error during vector search: {e}")
-            raise ConnectionError(f"Vector database unavailable: {str(e)}")
-        except ValueError as e:
-            logger.error(f"Invalid search parameters: {e}")
-            raise ValueError(f"Invalid search parameters: {str(e)}")
-        except TimeoutError as e:
-            logger.error(f"Timeout error during vector search: {e}")
-            raise TimeoutError(f"Vector search timeout: {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error during vector search: {e}")
-            raise ConnectionError(f"Vector search failed: {str(e)}")
-
-        # Format results
-        documents = []
-        for result in search_results:
-            metadata = result.get("metadata", {})
-            documents.append({
-                "content": result.get("content", ""),
-                # Document metadata
-                "doc_id": metadata.get("doc_id", ""),
-                "chunk_id": metadata.get("chunk_id", ""),
-                "page_start": metadata.get("page_start"),
-                "page_end": metadata.get("page_end"),
-                "char_start": metadata.get("char_start"),
-                "char_end": metadata.get("char_end"),
-                "token_count": metadata.get("token_count"),
-                # Search metadata
-                "distance": metadata.get("distance"),
-                "relevance_score": metadata.get("relevance_score")
-            })
-
-        return {
-            "documents": documents,
-            "total_found": len(documents),
-            "search_parameters": {
-                "top_k": search_top_k,
-                "similarity_threshold": search_threshold,
-                "embedding_model": settings.embeddings_model_id
-            },
-            "embedding_dimensions": len(query_embedding),
-            "status": "success"
-        }
 
     async def search_by_embedding_hybrid(self, query_text: str, query_embedding: List[float], company_id: str, area: str, top_k: int = None, similarity_threshold: float = None, alpha: float = None) -> Dict[str, Any]:
         """
