@@ -169,8 +169,9 @@ class ChatService:
                                     if doc.get("score"): 
                                         source_info.append(f"Score: {doc['score']}")
                                     # Construcción del bloque final
+                                    joined_sources = '\n'.join(source_info)
                                     context_parts.append(
-                                        f"Source: {'\n'.join(source_info)}, {page_ref}\nContent:\n{doc['content']}"
+                                        f"Source: {joined_sources}, {page_ref}\nContent:\n{doc['content']}"
                                     )
 
                             context_text = "\n\n".join(context_parts)
@@ -351,8 +352,9 @@ class ChatService:
                 if doc.get("score"):
                     source_info.append(f"Score: {doc['score']}")
                 # Construcción del bloque final
+                joined_sources = '\n'.join(source_info)
                 context_with_sources.append(
-                    f"Source: {'\n'.join(source_info)}, {page_ref}\nContent:\n{doc['content']}"
+                    f"Source: {joined_sources}, {page_ref}\nContent:\n{doc['content']}"
                 )
         
         context_text = "\n\n".join(context_with_sources)
