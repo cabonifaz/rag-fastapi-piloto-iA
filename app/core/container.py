@@ -5,11 +5,13 @@ from app.services.chat_service import ChatService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
+from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
 from app.infrastructure.vectorstores.weaviate_repository import WeaviateRepository
-from app.infrastructure.llm.aws_provider import AWSLLMProvider
+from app.infrastructure.llm.aws_bedrock_converse_provider import AWSBedrockConverseProvider
+from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 
 
 class DIContainer:
@@ -22,7 +24,7 @@ class DIContainer:
         self._embeddings_provider = None
         self._vectorstore = None
         self._llm_provider = None
-        self._chat_service = None
+        self._orchestrator_analyzer = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -75,57 +77,49 @@ class DIContainer:
                         raise ValueError("LLM region is required for AWS provider")
                     if not settings.llm_model_id:
                         raise ValueError("LLM model ID is required for AWS provider")
-                    
-                    self._llm_provider = AWSLLMProvider(
+
+                    # Using Converse API - stateless (no message history)
+                    # Each request is independent with only current user prompt
+                    self._llm_provider = AWSBedrockConverseProvider(
                         region=settings.llm_region,
                         model_id=settings.llm_model_id,
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
-                        aws_secret_access_key=settings.aws_secret_access_key
+                        aws_secret_access_key=settings.aws_secret_access_key,
+                        system_prompt=getattr(settings, 'llm_system_prompt', None)
                     )
                 else:
                     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
             except Exception as e:
                 raise ConnectionError(f"Failed to initialize LLM provider: {str(e)}")
-        
+
         return self._llm_provider
-
-    def get_chat_service(self) -> ChatService:
-        """Get chat service instance (singleton)."""
-        if self._chat_service is None:
-            embeddings_provider = self.get_embeddings_provider()
-            # Don't initialize vectorstore unless needed to avoid connection errors
-            vectorstore = None
-            
-            self._chat_service = ChatService(
-                embeddings_provider=embeddings_provider,
-                vectorstore=vectorstore
-            )
-        
-        return self._chat_service
-
-    def get_chat_service_with_vectorstore(self) -> ChatService:
-        """Get chat service with vectorstore for full RAG functionality."""
-        embeddings_provider = self.get_embeddings_provider()
-        vectorstore = self.get_vectorstore()
-        
-        return ChatService(
-            embeddings_provider=embeddings_provider,
-            vectorstore=vectorstore
-        )
 
     def get_full_rag_chat_service(self) -> tuple[ChatService, LLMPort]:
         """Get chat service with vectorstore AND LLM provider for complete RAG with answer generation."""
         embeddings_provider = self.get_embeddings_provider()
         vectorstore = self.get_vectorstore()
         llm_provider = self.get_llm_provider()
-        
+        orchestrator = self.get_orchestrator_analyzer()
+
         chat_service = ChatService(
             embeddings_provider=embeddings_provider,
-            vectorstore=vectorstore
+            vectorstore=vectorstore,
+            llm_provider=llm_provider,
+            orchestrator=orchestrator
         )
-        
+
         return chat_service, llm_provider
+
+    def get_orchestrator_analyzer(self) -> OrchestratorQueryAnalyzer:
+        """Get orchestrator query analyzer instance (singleton)."""
+        if self._orchestrator_analyzer is None:
+            try:
+                self._orchestrator_analyzer = OrchestratorQueryAnalyzer()
+            except Exception as e:
+                raise ConnectionError(f"Failed to initialize orchestrator analyzer: {str(e)}")
+
+        return self._orchestrator_analyzer
 
 
 # Global container instance

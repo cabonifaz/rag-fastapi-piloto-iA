@@ -61,7 +61,7 @@ class WeaviateRepository(VectorStorePort):
         # Use proper HTTPS URL format
         if not url.startswith('https://'):
             url = f"https://{url}"
-            
+
         # Check what weaviate version is available and use appropriate connection
         try:
             # Try v4 connection (weaviate-client >= 4.0)
@@ -82,6 +82,69 @@ class WeaviateRepository(VectorStorePort):
                 additional_headers=extra_headers or {},
                 timeout_config=(5, 15)
             )
+
+    def _search_vector(self, collection, vector: List[float], actual_top_k: int,
+                       return_properties: Optional[List[str]], filters: Optional[Any],
+                       include_distance: bool):
+        """Vector similarity search using collection's configured distance metric."""
+        query_kwargs = {
+            "near_vector": list(vector),
+            "limit": actual_top_k,
+            "return_metadata": ["distance"] if include_distance else [],
+        }
+
+        if return_properties:
+            query_kwargs["return_properties"] = list(return_properties)
+
+        if filters:
+            return collection.query.near_vector(
+                near_vector=list(vector),
+                limit=actual_top_k,
+                return_metadata=["distance"] if include_distance else [],
+                return_properties=list(return_properties) if return_properties else None,
+                filters=filters
+            )
+        else:
+            return collection.query.near_vector(**query_kwargs)
+
+    def _search_hybrid(self, collection, query_text: str, vector: List[float],
+                       actual_top_k: int, return_properties: Optional[List[str]],
+                       filters: Optional[Any], include_distance: bool, alpha: float = 0.5):
+        """Hybrid search combining vector similarity and BM25 keyword search.
+
+        Args:
+            collection: Weaviate collection object
+            query_text: Text query for BM25 keyword search
+            vector: Query embedding for vector similarity
+            actual_top_k: Number of results to return
+            return_properties: Properties to return in results
+            filters: Optional filters to apply
+            include_distance: Whether to include distance scores
+            alpha: Balance between vector (1.0) and keyword (0.0) search. Default 0.5 for balanced hybrid.
+        """
+        query_kwargs = {
+            "query": query_text,
+            "vector": list(vector),
+            "alpha": alpha,
+            "limit": actual_top_k,
+            "return_metadata": ["score"] if include_distance else [],
+        }
+
+        if return_properties:
+            query_kwargs["return_properties"] = list(return_properties)
+
+        if filters:
+            return collection.query.hybrid(
+                query=query_text,
+                vector=list(vector),
+                alpha=alpha,
+                limit=actual_top_k,
+                return_metadata=["score"] if include_distance else [],
+                return_properties=list(return_properties) if return_properties else None,
+                filters=filters
+            )
+        else:
+            return collection.query.hybrid(**query_kwargs)
 
     async def search_by_vector(
         self,
@@ -122,30 +185,10 @@ class WeaviateRepository(VectorStorePort):
                 
                 # First try a simple get to see if collection has any data
                 simple_response = collection.query.fetch_objects(limit=1)
-                
-                # Build query with optional filters
-                query_kwargs = {
-                    "near_vector": list(vector),
-                    "limit": actual_top_k,
-                    "return_metadata": ["distance"] if include_distance else [],
-                }
-                
-                # Only specify properties if they're provided
-                if return_properties:
-                    query_kwargs["return_properties"] = list(return_properties)
-                
-                # Build the query with filters if provided
-                if filters:
-                    response = collection.query.near_vector(
-                        near_vector=list(vector),
-                        limit=actual_top_k,
-                        return_metadata=["distance"] if include_distance else [],
-                        return_properties=list(return_properties) if return_properties else None,
-                        filters=filters
-                    )
-                else:
-                    response = collection.query.near_vector(**query_kwargs)
-                
+
+                # Perform vector search
+                response = self._search_vector(collection, vector, actual_top_k, return_properties, filters, include_distance)
+
                 results: List[VectorSearchResult] = []
                 for obj in response.objects:
                     item: VectorSearchResult = {
@@ -187,6 +230,99 @@ class WeaviateRepository(VectorStorePort):
             except Exception as e:
                 logger.error(f"Unexpected error in search_by_vector: {e}")
                 raise ConnectionError(f"Vector search service error: {str(e)}")
+
+        return await asyncio.to_thread(_query_sync)
+
+    async def search_hybrid(
+        self,
+        class_name: str,
+        query_text: str,
+        vector: Sequence[float],
+        top_k: Optional[int] = None,
+        return_properties: Optional[Sequence[str]] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        alpha: Optional[float] = None,
+        target_vector: Optional[str] = None,
+        tenant: Optional[str] = None,
+        include_distance: bool = True,
+    ) -> List[VectorSearchResult]:
+        """
+        Hybrid search combining vector similarity and BM25 keyword search.
+
+        Args:
+            class_name: nombre de la colección en Weaviate.
+            query_text: texto de consulta para BM25.
+            vector: embedding de consulta para búsqueda vectorial.
+            top_k: máximo de objetos a recuperar.
+            return_properties: lista de propiedades a devolver.
+            filters: filtro opcional.
+            alpha: balance entre vector (1.0) y keyword (0.0). None = usar settings.rag_hybrid_alpha.
+            target_vector: si usas 'named vectors', especifica cuál buscar.
+            tenant: identificador del tenant si la colección es multi-tenant.
+            include_distance: si True, pide score en metadatos.
+
+        Returns:
+            Lista de dicts con: id (uuid), properties (dict) y score (float|None).
+        """
+
+        from app.core.config import settings
+        actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
+        actual_alpha = alpha if alpha is not None else settings.rag_hybrid_alpha
+
+        def _query_sync() -> List[VectorSearchResult]:
+            try:
+                collection = self._client.collections.get(class_name)
+
+                # Perform hybrid search
+                response = self._search_hybrid(
+                    collection, query_text, vector, actual_top_k,
+                    return_properties, filters, include_distance, actual_alpha
+                )
+
+                results: List[VectorSearchResult] = []
+                for obj in response.objects:
+                    item: VectorSearchResult = {
+                        "id": str(obj.uuid),
+                        "properties": dict(obj.properties) if obj.properties else {},
+                    }
+                    if include_distance and obj.metadata and hasattr(obj.metadata, 'score'):
+                        # Hybrid search returns 'score' (higher = better), not 'distance'
+                        # Store score as-is without conversion
+                        item["score"] = obj.metadata.score if obj.metadata.score is not None else None
+                        item["distance"] = None  # Not applicable for hybrid search
+                    results.append(item)
+
+                return results
+
+            except WeaviateBaseError as e:
+                logger.error(f"Weaviate error in search_hybrid: {e}")
+                error_msg = str(e).lower()
+                if "unauthorized" in error_msg or "authentication" in error_msg:
+                    raise ConnectionError("Weaviate authentication failed")
+                elif "not found" in error_msg or "does not exist" in error_msg:
+                    raise ValueError(f"Collection '{class_name}' not found in Weaviate")
+                elif "timeout" in error_msg or "timed out" in error_msg:
+                    raise TimeoutError("Weaviate query timeout")
+                elif "connection" in error_msg or "network" in error_msg:
+                    raise ConnectionError("Cannot connect to Weaviate service")
+                else:
+                    raise ConnectionError(f"Weaviate service error: {str(e)}")
+
+            except ConnectionError:
+                raise
+
+            except TimeoutError:
+                raise
+
+            except ValueError as e:
+                logger.error(f"Value error in search_hybrid: {e}")
+                if "collection" not in str(e).lower():
+                    raise ValueError(f"Invalid search parameters: {str(e)}")
+                raise
+
+            except Exception as e:
+                logger.error(f"Unexpected error in search_hybrid: {e}")
+                raise ConnectionError(f"Hybrid search service error: {str(e)}")
 
         return await asyncio.to_thread(_query_sync)
 
@@ -239,50 +375,48 @@ class WeaviateRepository(VectorStorePort):
     async def search_in_collection(
         self,
         collection_name: str,
-        query_vector: List[float], 
+        query_vector: List[float],
+        company_id: str,
+        area: str,
         top_k: Optional[int] = None,
-        similarity_threshold: Optional[float] = None,
-        company_id: Optional[str] = None,
-        area: Optional[str] = None
+        similarity_threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
-        """Search for similar vectors in a specific collection with optional company filtering."""
-        
+        """Search for similar vectors in a specific collection with required company and area filtering."""
+
         try:
             from app.core.config import settings
-            
+
             # Use environment defaults if not provided
             actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
             actual_similarity_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
-            
+
             # Validate inputs
             if not collection_name:
                 raise ValueError("Collection name cannot be empty")
             if not query_vector:
                 raise ValueError("Query vector cannot be empty")
+            if not company_id:
+                raise ValueError("Company ID is required")
+            if not area:
+                raise ValueError("Area is required")
             if actual_top_k <= 0:
                 raise ValueError("top_k must be greater than 0")
             if similarity_threshold is not None and not (0.0 <= similarity_threshold <= 1.0):
                 raise ValueError("Similarity threshold must be between 0.0 and 1.0")
-            
+
             # Build filters for company_id and area using v4 Filter class
-            filters = None
-            filter_conditions = []
+            company_filter = Filter.by_property("company_id").equal(company_id)
+
+            # Include both the specific area AND Default area documents
+            area_filter = (
+                Filter.by_property("area").equal(area) |
+                Filter.by_property("area").equal("Default")
+            )
+
+            # Combine filters with & operator
+            filters = company_filter & area_filter
             
-            if company_id:
-                filter_conditions.append(Filter.by_property("company_id").equal(company_id))
-            
-            if area:
-                filter_conditions.append(Filter.by_property("area").equal(area))
-            
-            # Combine multiple conditions with & operator
-            if len(filter_conditions) == 1:
-                filters = filter_conditions[0]
-            elif len(filter_conditions) > 1:
-                filters = filter_conditions[0]
-                for condition in filter_conditions[1:]:
-                    filters = filters & condition
-            
-            # Return all actual properties from the database
+            # Vector similarity search
             results = await self.search_by_vector(
                 class_name=collection_name,
                 vector=query_vector,
@@ -301,8 +435,7 @@ class WeaviateRepository(VectorStorePort):
         except Exception as e:
             logger.error(f"Unexpected error in search_in_collection: {e}")
             raise ConnectionError(f"Vector search service error: {str(e)}")
-        
-        
+
         if actual_similarity_threshold is not None:
             for i, r in enumerate(results):
                 distance = r.get('distance', 1.0)
@@ -317,9 +450,7 @@ class WeaviateRepository(VectorStorePort):
                 "id": r["id"],
                 "content": r["properties"].get("text", ""),
                 "metadata": {
-                    # All stored database parameters (based on actual CargaConocimiento_iA schema)
-                    "company_id": r["properties"].get("company_id", ""),
-                    "area": r["properties"].get("area", ""),
+                    # Document metadata
                     "doc_id": r["properties"].get("doc_id", ""),
                     "chunk_id": r["properties"].get("chunk_id", ""),
                     "page_start": r["properties"].get("page_start"),
@@ -333,7 +464,113 @@ class WeaviateRepository(VectorStorePort):
                 }
             }
             formatted_results.append(formatted_result)
-        
+
+        return formatted_results
+
+    async def search_in_collection_hybrid(
+        self,
+        collection_name: str,
+        query_text: str,
+        query_vector: List[float],
+        company_id: str,
+        area: str,
+        top_k: Optional[int] = None,
+        similarity_threshold: Optional[float] = None,
+        alpha: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """Hybrid search (vector + BM25) in a specific collection with required company and area filtering."""
+
+        try:
+            from app.core.config import settings
+
+            # Use environment defaults if not provided
+            actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
+            actual_similarity_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
+
+            # Validate inputs
+            if not collection_name:
+                raise ValueError("Collection name cannot be empty")
+            if not query_text:
+                raise ValueError("Query text cannot be empty")
+            if not query_vector:
+                raise ValueError("Query vector cannot be empty")
+            if not company_id:
+                raise ValueError("Company ID is required")
+            if not area:
+                raise ValueError("Area is required")
+            if actual_top_k <= 0:
+                raise ValueError("top_k must be greater than 0")
+            if similarity_threshold is not None and not (0.0 <= similarity_threshold <= 1.0):
+                raise ValueError("Similarity threshold must be between 0.0 and 1.0")
+
+            # Build filters for company_id and area using v4 Filter class
+            company_filter = Filter.by_property("company_id").equal(company_id)
+
+            # Include both the specific area AND Default area documents
+            area_filter = (
+                Filter.by_property("area").equal(area) |
+                Filter.by_property("area").equal("Default")
+            )
+
+            # Combine filters with & operator
+            filters = company_filter & area_filter
+
+            # HYBRID SEARCH (vector + BM25 keyword)
+            results = await self.search_hybrid(
+                class_name=collection_name,
+                query_text=query_text,
+                vector=query_vector,
+                top_k=actual_top_k,
+                return_properties=["text", "doc_id", "doc_title", "section_title", "section_path", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
+                filters=filters,
+                alpha=alpha,
+                include_distance=True
+            )
+
+        except ValueError:
+            raise  # Re-raise validation errors
+        except ConnectionError:
+            raise  # Re-raise connection errors from search_hybrid
+        except TimeoutError:
+            raise  # Re-raise timeout errors from search_hybrid
+        except Exception as e:
+            logger.error(f"Unexpected error in search_in_collection_hybrid: {e}")
+            raise ConnectionError(f"Hybrid search service error: {str(e)}")
+
+        if actual_similarity_threshold is not None:
+            # For hybrid search, filter by score (higher = better)
+            # Score is already normalized 0-1, so use threshold directly
+            results = [r for r in results if r.get("score", 0.0) >= actual_similarity_threshold]
+
+        formatted_results = []
+        for r in results:
+            # For hybrid search, use score directly (higher = better)
+            score = r.get("score")
+            distance = r.get("distance")
+
+            formatted_result = {
+                "id": r["id"],
+                "content": r["properties"].get("text", ""),
+                "metadata": {
+                    # Document metadata
+                    "doc_id": r["properties"].get("doc_id", ""),
+                    "doc_title": r["properties"].get("doc_title", ""),
+                    "section_title": r["properties"].get("section_title", ""),
+                    "section_path": r["properties"].get("section_path", ""),
+                    "chunk_id": r["properties"].get("chunk_id", ""),
+                    "page_start": r["properties"].get("page_start"),
+                    "page_end": r["properties"].get("page_end"),
+                    "char_start": r["properties"].get("char_start"),
+                    "char_end": r["properties"].get("char_end"),
+                    "token_count": r["properties"].get("token_count"),
+                    # Search metadata for hybrid search
+                    "score": score,  # Hybrid score (higher = better)
+                    "relevance_score": score if score is not None else 0.0,  # Use score directly
+                    "search_type": "hybrid"
+                }
+            }
+            formatted_results.append(formatted_result)
+
         return formatted_results
 
     async def health_check(self) -> bool:

@@ -5,15 +5,31 @@ import os
 from typing import List, Optional
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.domain.ports.embeddings_port import EmbeddingsPort
+from app.infrastructure.embeddings.titan_embeddings import TitanEmbedConfig
+from app.infrastructure.embeddings.cohere_embeddings import CohereEmbedConfig
 # from app.utils.token_counter import TokenCounter, TokenUsage
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
+def get_embedding_config(model_id: str):
+    """Factory function to get the appropriate embedding model configuration."""
+    model_id_lower = model_id.lower()
+
+    if "titan-embed" in model_id_lower or "amazon.titan" in model_id_lower:
+        return TitanEmbedConfig(model_id)
+    elif "cohere.embed" in model_id_lower:
+        return CohereEmbedConfig(model_id)
+    else:
+        # Default to Titan format for unknown models
+        logger.warning(f"Unknown embedding model {model_id}, using Titan format as default")
+        return TitanEmbedConfig(model_id)
+
+
 class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
     """
-    Adaptador para usar embeddings desde AWS Bedrock (ej. Titan Embeddings).
+    Adaptador para usar embeddings desde AWS Bedrock (ej. Titan Embeddings, Cohere).
     Implementa EmbeddingsPort.
     """
 
@@ -29,13 +45,13 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
         Inicializa el cliente de AWS Bedrock.
 
         :param region: región de AWS (ej. "us-east-1")
-        :param model_id: ID del modelo de embeddings (ej. "amazon.titan-embed-text-v1")
+        :param model_id: ID del modelo de embeddings (ej. "amazon.titan-embed-text-v1" o "cohere.embed-english-v3")
         :param profile_name: AWS profile name (opcional si usas IAM Role)
         :param aws_access_key_id: AWS access key ID (opcional, usado si no hay profile)
         :param aws_secret_access_key: AWS secret access key (opcional, usado si no hay profile)
         """
         session_params = {"region_name": region}
-        
+
         # Solo usar profile en desarrollo local, no en producción con IAM Role
         if profile_name and os.getenv('ENVIRONMENT', '').lower() != 'production':
             session_params["profile_name"] = profile_name
@@ -47,6 +63,7 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
         session = boto3.Session(**session_params)
         self.client = session.client("bedrock-runtime")
         self.model_id = model_id
+        self.model_config = get_embedding_config(model_id)
 
     async def embed(self, text: str) -> List[float]:
         """
@@ -56,14 +73,13 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
         try:
             if not text or not text.strip():
                 raise ValueError("Input text cannot be empty")
-            
+
             # Costs calculation (deactivated)
             # Count input tokens
             # input_tokens = TokenCounter.estimate_tokens(text, self.model_id)
-                
-            body = json.dumps({
-                "inputText": text
-            })
+
+            # Use model-specific configuration to format request
+            body = self.model_config.format_request(text)
 
             response = self.client.invoke_model(
                 modelId=self.model_id,
@@ -73,11 +89,11 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
             )
 
             response_body = json.loads(response["body"].read())
-            
+
             # Costs calculation (deactivated)
             # Extract token usage from response (if available)
             # token_usage = TokenCounter.extract_token_usage_from_response(response_body, self.model_id)
-            # 
+            #
             # # If no usage data from AWS, use our estimation
             # if token_usage.input_tokens == 0:
             #     token_usage = TokenUsage(
@@ -86,18 +102,18 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
             #         total_tokens=input_tokens,
             #         model_id=self.model_id
             #     )
-            # 
+            #
             # # Calculate and log costs
             # cost_calc = TokenCounter.calculate_cost(token_usage)
             # TokenCounter.log_usage_and_cost(token_usage, cost_calc, f"EMBEDDING - {self.model_id}")
             # # Costs calculation (deactivated)
-            
-            # Titan embeddings devuelve "embedding"
-            embedding = response_body.get("embedding", [])
-            
+
+            # Use model-specific configuration to extract embedding
+            embedding = self.model_config.extract_embedding(response_body)
+
             if not embedding:
                 raise ValueError("Empty embedding returned from service")
-                
+
             return embedding
             
         except ClientError as e:

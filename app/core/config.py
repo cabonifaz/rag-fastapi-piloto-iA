@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     llm_max_tokens: int
     llm_temperature: float
     llm_top_p: float
+
+    orchestrator_model_id: str
+    orchestrator_max_tokens: int
+    orchestrator_temperature: float
+    orchestrator_top_p: float
     
     weaviate_url: Optional[str] = None
     weaviate_api_key: Optional[str] = None
@@ -36,8 +41,9 @@ class Settings(BaseSettings):
     
     rag_top_k_results: int
     rag_similarity_threshold: float
-    
-    
+    rag_hybrid_alpha: float = 0.5
+
+
     log_level: str
     log_format: str
     
@@ -47,7 +53,7 @@ class Settings(BaseSettings):
     
     # JWT Configuration
     jwt_secret_key: str
-    jwt_expiration_hours: int = 8
+    jwt_expiration_minutes: int = 2880
     
     # CORS Configuration
     cors_origins: str
@@ -112,17 +118,23 @@ class Settings(BaseSettings):
         if not (0.0 <= v <= 1.0):
             raise ValueError("RAG similarity threshold must be between 0.0 and 1.0")
         return v
-    
+
+    @validator('rag_hybrid_alpha')
+    def validate_rag_hybrid_alpha(cls, v):
+        if not (0.0 <= v <= 1.0):
+            raise ValueError("RAG hybrid alpha must be between 0.0 and 1.0")
+        return v
+
     @validator('jwt_secret_key')
     def validate_jwt_secret_key(cls, v):
         if not v or len(v) < 32:
             raise ValueError("JWT secret key must be at least 32 characters long")
         return v
     
-    @validator('jwt_expiration_hours')
-    def validate_jwt_expiration_hours(cls, v):
-        if v <= 0 or v > 24:
-            raise ValueError("JWT expiration hours must be between 1 and 24")
+    @validator('jwt_expiration_minutes')
+    def validate_jwt_expiration_minutes(cls, v):
+        if v <= 0 or v > 2880:
+            raise ValueError("JWT expiration minutes must be between 1 and 1440")
         return v
     
     

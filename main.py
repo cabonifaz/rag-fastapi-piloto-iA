@@ -20,8 +20,11 @@ class HealthCheckFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
 
 from app.core.config import settings
+# Initialize database FIRST, before heavy imports
 from app.core.database import init_database, close_database
-from app.api import chat, auth#, processing
+
+# Then import the heavy modules
+from app.api import chat, auth, processing, external_login
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +71,8 @@ app.add_middleware(
 
 app.include_router(chat.router, prefix="/api/v1/rag", tags=["rag"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
-#app.include_router(processing.router, prefix="/api/v1/processing", tags=["document-processing"])
+app.include_router(processing.router, prefix="/api/v1/processing", tags=["document-processing"])
+app.include_router(external_login.router, prefix="/api/v1", tags=["external-login"])
 
 
 @app.exception_handler(HTTPException)
