@@ -210,7 +210,6 @@ class AWSBedrockConverseProvider(LLMPort):
                 request_params["additionalModelRequestFields"] = {
                     "reasoning_effort": "medium"
                 }
-                print(f"✅ Reasoning effort set to medium for OpenAI model")
 
             # Add system prompt if configured
             system_config = self._build_system_config(system_prompt)
