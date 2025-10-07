@@ -31,12 +31,12 @@ class AWSBedrockConverseProvider(LLMPort):
         Initialize AWS Bedrock Converse client.
 
         Args:
-            region: AWS region (e.g., "us-east-1")
-            model_id: Bedrock model ID (e.g., "anthropic.claude-3-5-sonnet-20241022-v2:0")
-            profile_name: AWS profile name (optional, for local development)
-            aws_access_key_id: AWS access key ID (optional)
-            aws_secret_access_key: AWS secret access key (optional)
-            system_prompt: System prompt to use for all conversations (optional)
+            region: AWS region
+            model_id: Bedrock model ID
+            profile_name: AWS profile name
+            aws_access_key_id: AWS access key ID
+            aws_secret_access_key: AWS secret access key
+            system_prompt: System prompt to use for all conversations
         """
         session_params = {"region_name": region}
 
@@ -51,7 +51,14 @@ class AWSBedrockConverseProvider(LLMPort):
         session = boto3.Session(**session_params)
         self.client = session.client("bedrock-runtime")
         self.model_id = model_id
-        self.system_prompt = system_prompt
+        self.system_prompt = """You are a friendly, concise, and technically precise assistant specialized in civil engineering.
+Your role is to help users understand and solve questions related to civil, structural, geotechnical, hydraulic, and construction engineering topics.
+Communicate in a clear, approachable, and professional tone — knowledgeable yet easy to follow, like an experienced engineer explaining to someone with no background in civil engineering.
+Respond naturally and friendly, adapting to the user’s tone, while gently keeping the focus on civil engineering topics.
+Answer directly and briefly, without unnecessary elaboration.
+Do not overthink, speculate, or explain your internal reasoning.
+Always respond in the same language as the question.
+Format responses in Markdown when relevant."""
 
         # Get model-specific configuration for optimized prompts
         self.model_config = ModelConfigFactory.get_model_config(model_id)
@@ -72,99 +79,6 @@ class AWSBedrockConverseProvider(LLMPort):
         if system_text:
             return [{"text": system_text}]
         return None
-
-    async def generate(
-        self,
-        prompt: str,
-        max_tokens: int = 2048,
-        temperature: float = 0.3,
-        system_prompt: Optional[str] = None
-    ) -> str:
-        """
-        Generate text using AWS Bedrock Converse API.
-
-        Args:
-            prompt: User prompt
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for sampling
-            system_prompt: Optional system prompt (overrides instance system_prompt)
-
-        Returns:
-            Generated text
-        """
-        try:
-            from app.core.config import settings
-
-            # Build request parameters
-            request_params = {
-                "modelId": self.model_id,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [{"text": prompt}]
-                    }
-                ],
-                "inferenceConfig": {
-                    "maxTokens": max_tokens,
-                    "temperature": temperature,
-                    "topP": getattr(settings, 'llm_top_p', 0.4)
-                }
-            }
-
-            # Configure reasoning for OpenAI models only
-            is_openai = "openai" in self.model_id.lower() or "gpt" in self.model_id.lower()
-            if is_openai:
-                request_params["additionalModelRequestFields"] = {
-                    "reasoning_effort": "medium"
-                }
-
-            # Add system prompt if configured
-            system_config = self._build_system_config(system_prompt)
-            if system_config:
-                request_params["system"] = system_config
-
-            response = self.client.converse(**request_params)
-
-            # Extract text from unified response format
-            output_message = response.get("output", {}).get("message", {})
-            content_blocks = output_message.get("content", [])
-
-            if content_blocks and len(content_blocks) > 0:
-                return content_blocks[0].get("text", "").strip()
-
-            return ""
-
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            logger.error(f"AWS ClientError in generate: {error_code} - {e}")
-            if error_code == 'ValidationException':
-                raise ValueError(f"Invalid parameters for model {self.model_id}: {str(e)}")
-            elif error_code == 'ThrottlingException':
-                raise ConnectionError(f"Rate limit exceeded for model {self.model_id}")
-            elif error_code == 'ServiceQuotaExceededException':
-                raise ConnectionError(f"Service quota exceeded for model {self.model_id}")
-            elif error_code == 'ModelNotReadyException':
-                raise ValueError(f"Model {self.model_id} is not ready")
-            elif error_code == 'ResourceNotFoundException':
-                raise ValueError(f"Model {self.model_id} not found or not accessible")
-            else:
-                raise ConnectionError(f"AWS Bedrock error: {error_code}")
-
-        except NoCredentialsError as e:
-            logger.error(f"AWS credentials error in generate: {e}")
-            raise ConnectionError("AWS credentials not configured or invalid")
-
-        except EndpointConnectionError as e:
-            logger.error(f"AWS endpoint connection error in generate: {e}")
-            raise ConnectionError("Unable to connect to AWS Bedrock service")
-
-        except KeyError as e:
-            logger.error(f"Missing key in response: {e}")
-            raise ValueError("Unexpected response format from LLM service")
-
-        except Exception as e:
-            logger.error(f"Unexpected error in generate: {e}")
-            raise ConnectionError(f"LLM service error: {str(e)}")
 
     async def generate_stream(
         self,
@@ -204,17 +118,13 @@ class AWSBedrockConverseProvider(LLMPort):
                 }
             }
 
-            # Configure reasoning for OpenAI models only
-            is_openai = "openai" in self.model_id.lower() or "gpt" in self.model_id.lower()
-            if is_openai:
-                request_params["additionalModelRequestFields"] = {
-                    "reasoning_effort": "medium"
-                }
+            # Configure model-specific additional parameters (e.g., OpenAI reasoning)
+            if hasattr(self.model_config, 'get_converse_additional_fields'):
+                additional_fields = self.model_config.get_converse_additional_fields()
+                request_params["additionalModelRequestFields"] = additional_fields
 
-            # Add system prompt if configured
-            system_config = self._build_system_config(system_prompt)
-            if system_config:
-                request_params["system"] = system_config
+            # Add system prompt
+            request_params["system"] = self._build_system_config(system_prompt)
 
             response = self.client.converse_stream(**request_params)
 

@@ -11,17 +11,19 @@ class OpenAIModelConfig:
 
     def __init__(self, model_id: str):
         self.model_id = model_id
+        # OpenAI-specific configuration to reduce token consumption
+        self.reasoning_effort = "medium"           # reduce internal reasoning tokens
 
-    def format_request(self, prompt: str, max_tokens: int, temperature: float, top_p: float) -> str:
-        """Format request body for OpenAI models."""
-        return json.dumps({
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p
-        })
+    def get_converse_additional_fields(self) -> Dict[str, Any]:
+        """
+        Get additionalModelRequestFields for AWS Bedrock Converse API.
+
+        Returns OpenAI-specific parameters:
+        - reasoning_effort: "medium" to reduce internal token consumption
+        """
+        return {
+            "reasoning_effort": self.reasoning_effort
+        }
 
     def extract_response(self, response_body: Dict[str, Any]) -> str:
         """Extract text from OpenAI response."""
@@ -50,18 +52,23 @@ class OpenAIModelConfig:
 
     def build_rag_prompt(self, message: str, context_text: str) -> str:
         """Build RAG prompt optimized for OpenAI models."""
-        return f"""Answer the user's question based on the following context. Do not search on the internet. Answer in the same language as the question. Present the answer on markdown format.
+        return f"""Answer the user's question based **only** on the following context.
+Do not search online or make assumptions beyond it.
 
-If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted Markdown table. Include all source references used in the answer with document title and page numbers. 
+# Output rules
+- Answer **directly and briefly**, focusing only on the question.
+- If the context includes JSON with "table", "headers", and "rows", render it as a Markdown table.
+- If the context comes from an API call, render it as a Markdown table and **omit** references.
+- If the context includes document excerpts, cite the document title and page numbers concisely.
+- **Do not repeat content** or restate the reasoning.
 
-If the data comes from an API call, the context will include an "API Call". In this case, interpret the response JSON (usually an array of objects) as a table. Present that data in Markdown format, but do not include document or page references for API data.
-
-Question: {message}
+Question:
+{message}
 
 Context:
 {context_text}
 
-Provide a clear, accurate response based solely on the provided context. Only answer what the user asked."""
+Return only the final answer that directly addresses the question."""
 
 
 class GPTOss20BConfig(OpenAIModelConfig):
