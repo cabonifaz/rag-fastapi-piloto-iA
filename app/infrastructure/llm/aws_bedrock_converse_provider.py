@@ -111,6 +111,13 @@ class AWSBedrockConverseProvider(LLMPort):
                 }
             }
 
+            # Configure reasoning for OpenAI models only
+            is_openai = "openai" in self.model_id.lower() or "gpt" in self.model_id.lower()
+            if is_openai:
+                request_params["additionalModelRequestFields"] = {
+                    "reasoning_effort": "medium"
+                }
+
             # Add system prompt if configured
             system_config = self._build_system_config(system_prompt)
             if system_config:
@@ -197,6 +204,14 @@ class AWSBedrockConverseProvider(LLMPort):
                 }
             }
 
+            # Configure reasoning for OpenAI models only
+            is_openai = "openai" in self.model_id.lower() or "gpt" in self.model_id.lower()
+            if is_openai:
+                request_params["additionalModelRequestFields"] = {
+                    "reasoning_effort": "medium"
+                }
+                print(f"✅ Reasoning effort set to medium for OpenAI model")
+
             # Add system prompt if configured
             system_config = self._build_system_config(system_prompt)
             if system_config:
@@ -210,12 +225,17 @@ class AWSBedrockConverseProvider(LLMPort):
                 return
 
             try:
+                yielded_count = 0
                 for event in stream:
                     # Handle content block delta (text chunks)
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"].get("delta", {})
                         if "text" in delta:
-                            yield delta["text"]
+                            text = delta["text"]
+                            # Filter out empty chunks from AWS Bedrock streaming protocol
+                            if text:
+                                yielded_count += 1
+                                yield text
 
                     # Handle metadata events (optional logging)
                     elif "metadata" in event:
@@ -226,6 +246,9 @@ class AWSBedrockConverseProvider(LLMPort):
                     elif "messageStop" in event:
                         stop_reason = event["messageStop"].get("stopReason")
                         logger.debug(f"Stream stopped: {stop_reason}")
+                        # Yield stop reason info if no content was generated
+                        if yielded_count == 0 and stop_reason == "max_tokens":
+                            yield f"__STOP_REASON__:{stop_reason}"
                         break
             finally:
                 # Ensure stream is properly closed to avoid resource leaks

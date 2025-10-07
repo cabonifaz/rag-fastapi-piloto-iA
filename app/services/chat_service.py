@@ -358,10 +358,10 @@ class ChatService:
         context_text = "\n\n".join(context_with_sources)
         
         # Step 4: Generate LLM answer
-        
+
         # Normal RAG flow with context
         rag_prompt = self._build_rag_prompt(cleaned_message, context_text)
-        
+
         # Step 4: Generate streaming response using LLM
         # Use provided parameters or fall back to environment defaults
         llm_temperature = temperature if temperature is not None else settings.llm_temperature
@@ -503,8 +503,23 @@ class ChatService:
             raise ValueError("temperature must be between 0.0 and 2.0")
 
         try:
+            has_content = False
+
             async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
+                # Detect stop reason signal
+                if chunk.startswith("__STOP_REASON__:"):
+                    stop_reason = chunk.split(":")[1]
+                    if stop_reason == "max_tokens":
+                        # Yield the error as a regular message instead of throwing exception
+                        yield "⚠️ El modelo agotó los tokens disponibles durante el análisis de la consulta. Por favor, intenta con una pregunta más específica o reduce la complejidad de tu solicitud."
+                        has_content = True
+                    continue
+
+                has_content = True
                 yield chunk
+
+            if not has_content:
+                raise ValueError("El modelo no generó una respuesta. Por favor, intenta reformular tu pregunta.")
 
         except ConnectionError as e:
             logger.error(f"Connection error during LLM generation: {e}")

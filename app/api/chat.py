@@ -91,7 +91,6 @@ async def chat_streaming_endpoint(
                     if chunk_data["type"] == "chunk":
                         # Concatenate content
                         answer += chunk_data["content"]
-                        # Send concatenated answer
                         yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
                     else:
                         # Send metadata and complete as-is
@@ -117,7 +116,13 @@ async def chat_streaming_endpoint(
                 logger.error(f"Timeout error in streaming: {e}")
                 error_response = create_error_response("Tiempo de espera de la solicitud agotado")
                 yield f"data: {json.dumps({'type': 'error', 'message': 'Tiempo de espera de la solicitud agotado', 'result': error_response.model_dump()})}\n\n"
-                
+
+            except ValueError as e:
+                logger.error(f"Invalid input for LLM: {e}")
+                error_msg = str(e)
+                error_response = create_error_response(error_msg)
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'result': error_response.model_dump()})}\n\n"
+
             except Exception as e:
                 logger.error(f"Unexpected error in streaming: {e}")
                 error_response = create_error_response("Error interno del servidor")
