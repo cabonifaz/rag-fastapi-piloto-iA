@@ -1,7 +1,8 @@
-from typing import Tuple, List, Dict, Any, AsyncGenerator
+from typing import Tuple, List, Dict, Any, AsyncGenerator, Optional
 import logging
 import json
 import re
+from sqlalchemy.orm import Session
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -26,11 +27,59 @@ class ChatService:
     4. Returns response
     """
 
-    def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort, llm_provider: LLMPort, orchestrator: QueryAnalysisPort = None):
+    def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort, llm_provider: LLMPort, orchestrator: QueryAnalysisPort = None, db: Session = None):
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
         self.llm_provider = llm_provider
         self.orchestrator = orchestrator
+        self.db = db
+
+    def load_ia_area_config(self, id_ia_area: int) -> str:
+        """
+        Load IA area configuration from database using stored procedure.
+        Falls back to LLM_ROLE_BEHAVIOR from env if SP returns no value or fails.
+
+        Args:
+            id_ia_area: ID of the IA area
+
+        Returns:
+            Configuration string (max 1000 characters) from SP or LLM_ROLE_BEHAVIOR from env
+        """
+        try:
+            if not self.db:
+                logger.warning("Database session not available in ChatService, using llm_role_behavior from env")
+                return settings.llm_role_behavior
+
+            # Get raw connection for cursor operations
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                # Execute stored procedure
+                cursor.execute("EXEC SP_IA_AREA_CONFIG_LOAD @ID_IA_AREA = ?", id_ia_area)
+
+                # Fetch result
+                result = cursor.fetchone()
+                cursor.close()
+
+                if result and len(result) > 0:
+                    config_text = result[0]
+                    # Ensure max length of 1000 characters
+                    if config_text and str(config_text).strip():
+                        return str(config_text)[:1000]
+
+                # No result from SP, use env fallback
+                logger.info(f"No config found for id_ia_area={id_ia_area}, using llm_role_behavior from env")
+                return settings.llm_role_behavior
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in load_ia_area_config: {cursor_error}, using llm_role_behavior from env")
+                cursor.close()
+                return settings.llm_role_behavior
+
+        except Exception as e:
+            logger.error(f"Error loading IA area config for id_ia_area={id_ia_area}: {e}, using llm_role_behavior from env")
+            return settings.llm_role_behavior
 
     @staticmethod
     def clean_user_query(message: str) -> str:
@@ -72,17 +121,34 @@ class ChatService:
         return model_config.build_rag_prompt(message, context_text)
 
 
-    async def agent_orchestrator_stream(self, user_id: str, message: str, company_id: str, area: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
+    async def agent_orchestrator_stream(self, user_id: str, message: str, company_id: str, area: str = None, id_ia_area: int = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
         """
         Analyze user query using the agent orchestrator model to determine workflow requirements.
         Enhanced version that accepts all process_rag_query_stream parameters for complete context.
         """
         try:
+            # Validate inputs
+            if not message or not message.strip():
+                raise ValueError("Message cannot be empty")
+            if not user_id:
+                raise ValueError("User ID is required")
+            if not company_id or not company_id.strip():
+                raise ValueError("Company ID is required and cannot be empty")
+            if not area or not area.strip():
+                raise ValueError("Area is required and cannot be empty")
+            if id_ia_area is None:
+                raise ValueError("ID IA Area is required and cannot be empty")
+            if not external_token or not external_token.strip():
+                raise ValueError("External token is required and cannot be empty")
+
             # Use injected orchestrator
             if not self.orchestrator:
                 raise ValueError("Orchestrator not configured for this service instance")
 
             orchestrator = self.orchestrator
+
+            # Load IA area role behavior configuration
+            role_behavior = self.load_ia_area_config(id_ia_area)
 
             # Clean user query
             user_query = self.clean_user_query(message)
@@ -237,7 +303,7 @@ class ChatService:
                         llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
 
                         # Stream response directly from LLM provider (same as process_rag_query_stream)
-                        async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
+                        async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
                             # Yield each chunk for streaming (same format as process_rag_query_stream)
                             yield {
                                 "type": "chunk",
@@ -262,7 +328,7 @@ class ChatService:
             }
 
 
-    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, id_ia_area: int = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -276,13 +342,18 @@ class ChatService:
                 raise ValueError("Company ID is required and cannot be empty")
             if not area or not area.strip():
                 raise ValueError("Area is required and cannot be empty")
-                
+            if id_ia_area is None:
+                raise ValueError("ID IA Area is required and cannot be empty")
+
         except ValueError as e:
             logger.error(f"Validation error in process_rag_query_stream: {e}")
             raise
         except Exception as e:
             logger.error(f"Initialization error in process_rag_query_stream: {e}")
             raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
+
+        # Load IA area role behavior configuration
+        role_behavior = self.load_ia_area_config(id_ia_area)
 
         # Clean the user message
         cleaned_message = self.clean_user_query(message)
@@ -377,8 +448,8 @@ class ChatService:
             "llm_model_used": settings.llm_model_id,
         }
         
-        # Stream the LLM response
-        async for chunk in self.generate_text_stream(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
+        # Stream the LLM response with role behavior
+        async for chunk in self.generate_text_stream(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
             yield {
                 "type": "chunk",
                 "content": chunk
@@ -484,9 +555,15 @@ class ChatService:
             "status": "success"
         }
 
-    async def generate_text_stream(self, prompt: str, max_tokens: int = None, temperature: float = None) -> AsyncGenerator[str, None]:
+    async def generate_text_stream(self, prompt: str, max_tokens: int = None, temperature: float = None, role_behavior: str = None) -> AsyncGenerator[str, None]:
         """
         Generate streaming text response using LLM.
+
+        Args:
+            prompt: The user prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Temperature for sampling
+            role_behavior: Optional role behavior (system prompt)
         """
         from app.core.config import settings
 
@@ -507,7 +584,7 @@ class ChatService:
         try:
             has_content = False
 
-            async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature):
+            async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
                 # Detect stop reason signal
                 if chunk.startswith("__STOP_REASON__:"):
                     stop_reason = chunk.split(":")[1]

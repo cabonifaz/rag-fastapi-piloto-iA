@@ -5,45 +5,22 @@ import os
 import shutil
 from pathlib import Path
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import Field
 from app.utils.jwt_auth import get_current_user, get_current_user_with_company_validation
 from app.core.config import settings
 from app.services.document_processing_service import document_processing_service
+from app.models.processing_models import TaskStatus, UploadResponse, ProcessingRequest
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-from pydantic import Field
 
 def validate_non_empty_string(value: str) -> str:
     """Validator function for non-empty strings"""
     if not value or not value.strip():
         raise ValueError("Field cannot be empty or whitespace only")
     return value.strip()
-
-# Models
-class TaskStatus(BaseModel):
-    task_id: str
-    status: str  # pending, running, completed, failed
-    company_name: str
-    area_name: str
-    created_at: datetime
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    error_message: Optional[str] = None
-    files_processed: int = 0
-    total_files: int = 0
-
-class UploadResponse(BaseModel):
-    task_id: str
-    message: str
-    files_uploaded: int
-    status: str
-
-class ProcessingRequest(BaseModel):
-    company_name: str
-    area_name: str
 
 @router.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):

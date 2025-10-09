@@ -22,10 +22,10 @@ class AWSBedrockConverseProvider(LLMPort):
         self,
         region: str,
         model_id: str,
+        role_behavior: str,
         profile_name: Optional[str] = None,
         aws_access_key_id: Optional[str] = None,
         aws_secret_access_key: Optional[str] = None,
-        system_prompt: Optional[str] = None,
     ):
         """
         Initialize AWS Bedrock Converse client.
@@ -51,34 +51,31 @@ class AWSBedrockConverseProvider(LLMPort):
         session = boto3.Session(**session_params)
         self.client = session.client("bedrock-runtime")
         self.model_id = model_id
-        self.system_prompt = """You are a friendly, concise, and technically precise assistant specialized in civil engineering. 
-Help users understand and solve questions about civil, structural, geotechnical, hydraulic, and construction engineering. 
-Communicate clearly and professionally — knowledgeable yet easy to follow, like an experienced engineer explaining with patience, warmth, and a touch of personality to someone with no background in the field.
+        self.default_role_behavior = role_behavior
+
+        # Get model-specific configuration for optimized prompts
+        self.model_config = ModelConfigFactory.get_model_config(model_id)
+
+    def set_system_prompt(self, system_prompt: str):
+        """Update the system prompt for this provider instance."""
+        self.system_prompt = system_prompt
+
+    def _build_system_config(self, custom_system: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
+        """Build system configuration for Converse API."""
+        # Use custom role behavior or default
+        role_behavior = custom_system or self.default_role_behavior
+
+        # Concatenate role behavior with formatting instructions
+        system_text = f"""{role_behavior}
 Start responses with a short, friendly phrase that engages the user naturally before the main answer.
 When providing data or structured information, prioritize technical accuracy and formatting:
 - Always render JSON with "table", "headers", and "rows" as a **Markdown table**.
 - If the context comes from an API call, render it as a Markdown table and omit references.
 Answer directly and briefly. You may include short natural phrases **before or after** the main answer, but not inside technical tables or structured data.
 Do not overthink, speculate, or explain your internal reasoning.
-Always mirror the user’s language exactly in your response. If the input language is unclear, mixed,
+Always mirror the user's language exactly in your response. If the input language is unclear, mixed,
 or contains spelling errors, default to Spanish. Format responses in Markdown when relevant."""
 
-        # Get model-specific configuration for optimized prompts
-        self.model_config = ModelConfigFactory.get_model_config(model_id)
-
-        logger.info(f"AWS Bedrock Converse provider initialized with model: {model_id}")
-        logger.info(f"Model provider: {ModelConfigFactory.get_model_provider(model_id)}")
-        if system_prompt:
-            logger.info(f"System prompt configured: {system_prompt[:100]}...")
-
-    def set_system_prompt(self, system_prompt: str):
-        """Update the system prompt for this provider instance."""
-        self.system_prompt = system_prompt
-        logger.info(f"System prompt updated: {system_prompt[:100]}...")
-
-    def _build_system_config(self, custom_system: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
-        """Build system configuration for Converse API."""
-        system_text = custom_system or self.system_prompt
         if system_text:
             return [{"text": system_text}]
         return None
@@ -88,7 +85,7 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         prompt: str,
         max_tokens: int = 2048,
         temperature: float = 0.3,
-        system_prompt: Optional[str] = None
+        role_behavior: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         Generate text using AWS Bedrock Converse Stream API.
@@ -97,7 +94,7 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             prompt: User prompt
             max_tokens: Maximum tokens to generate
             temperature: Temperature for sampling
-            system_prompt: Optional system prompt (overrides instance system_prompt)
+            role_behavior: Optional role behavior (overrides instance system_prompt)
 
         Yields:
             Text chunks as they are generated
@@ -127,7 +124,7 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
                 request_params["additionalModelRequestFields"] = additional_fields
 
             # Add system prompt
-            request_params["system"] = self._build_system_config(system_prompt)
+            request_params["system"] = self._build_system_config(role_behavior)
 
             response = self.client.converse_stream(**request_params)
 
@@ -152,12 +149,10 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
                     # Handle metadata events (optional logging)
                     elif "metadata" in event:
                         metadata = event["metadata"]
-                        logger.debug(f"Stream metadata: {metadata}")
 
                     # Handle message stop event
                     elif "messageStop" in event:
                         stop_reason = event["messageStop"].get("stopReason")
-                        logger.debug(f"Stream stopped: {stop_reason}")
                         # Yield stop reason info if no content was generated
                         if yielded_count == 0 and stop_reason == "max_tokens":
                             yield f"__STOP_REASON__:{stop_reason}"

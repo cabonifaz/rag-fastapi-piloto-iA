@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     llm_max_tokens: int
     llm_temperature: float
     llm_top_p: float
+    llm_role_behavior: str
 
     orchestrator_model_id: str
     orchestrator_max_tokens: int

@@ -83,10 +83,10 @@ class DIContainer:
                     self._llm_provider = AWSBedrockConverseProvider(
                         region=settings.llm_region,
                         model_id=settings.llm_model_id,
+                        role_behavior=settings.llm_role_behavior,
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
-                        aws_secret_access_key=settings.aws_secret_access_key,
-                        system_prompt=getattr(settings, 'llm_system_prompt', None)
+                        aws_secret_access_key=settings.aws_secret_access_key
                     )
                 else:
                     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
