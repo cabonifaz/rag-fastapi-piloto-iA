@@ -57,8 +57,6 @@ Do not search online or make assumptions beyond it.
 
 # Output rules
 - Answer **directly and briefly**, focusing only on the question.
-- If the context includes JSON with "table", "headers", and "rows", render it as a Markdown table.
-- If the context comes from an API call, render it as a Markdown table and **omit** references.
 - If the context includes document excerpts, cite the document title and page numbers concisely.
 - **Do not repeat content** or restate the reasoning.
 
