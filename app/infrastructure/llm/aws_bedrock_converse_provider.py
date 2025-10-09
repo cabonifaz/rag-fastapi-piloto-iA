@@ -60,8 +60,8 @@ When providing data or structured information, prioritize technical accuracy and
 - If the context comes from an API call, render it as a Markdown table and omit references.
 Answer directly and briefly. You may include short natural phrases **before or after** the main answer, but not inside technical tables or structured data.
 Do not overthink, speculate, or explain your internal reasoning.
-Always respond in the same language as the question.
-Format responses in Markdown when relevant."""
+Always mirror the user’s language exactly in your response. If the input language is unclear, mixed,
+or contains spelling errors, default to Spanish. Format responses in Markdown when relevant."""
 
         # Get model-specific configuration for optimized prompts
         self.model_config = ModelConfigFactory.get_model_config(model_id)
