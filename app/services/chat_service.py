@@ -121,7 +121,7 @@ class ChatService:
         return model_config.build_rag_prompt(message, context_text)
 
 
-    async def agent_orchestrator_stream(self, user_id: str, message: str, company_id: str, area: str = None, id_ia_area: int = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
+    async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
         """
         Analyze user query using the agent orchestrator model to determine workflow requirements.
         Enhanced version that accepts all process_rag_query_stream parameters for complete context.
@@ -132,7 +132,7 @@ class ChatService:
                 raise ValueError("Message cannot be empty")
             if not user_id:
                 raise ValueError("User ID is required")
-            if not company_id or not company_id.strip():
+            if not company or not company.strip():
                 raise ValueError("Company ID is required and cannot be empty")
             if not area or not area.strip():
                 raise ValueError("Area is required and cannot be empty")
@@ -203,7 +203,7 @@ class ChatService:
                         search_results = await self.search_by_embedding_hybrid(
                             query_text=semantic_query,
                             query_embedding=query_embedding,
-                            company_id=company_id,
+                            company=company,
                             area=area,
                             top_k=top_k,
                             similarity_threshold=similarity_threshold,
@@ -328,7 +328,7 @@ class ChatService:
             }
 
 
-    async def process_rag_query_stream(self, user_id: str, message: str, company_id: str, area: str = None, id_ia_area: int = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -338,7 +338,7 @@ class ChatService:
                 raise ValueError("Message cannot be empty")
             if not user_id:
                 raise ValueError("User ID is required")
-            if not company_id or not company_id.strip():
+            if not company or not company.strip():
                 raise ValueError("Company ID is required and cannot be empty")
             if not area or not area.strip():
                 raise ValueError("Area is required and cannot be empty")
@@ -369,7 +369,7 @@ class ChatService:
         search_result = await self.search_by_embedding_hybrid(
             query_text=cleaned_message,
             query_embedding=query_embedding,
-            company_id=company_id,
+            company=company,
             area=area,
             top_k=search_top_k,
             similarity_threshold=search_threshold,
@@ -384,8 +384,6 @@ class ChatService:
             # No documents found - return predefined message without LLM call
             yield {
                 "type": "metadata",
-                "user_id": user_id,
-                "message": message,
                 "llm_model_used": None,
             }
             yield {
@@ -443,8 +441,6 @@ class ChatService:
         # Yield metadata first (matching /chat response format - no context exposed)
         yield {
             "type": "metadata",
-            "user_id": user_id,
-            "message": message,
             "llm_model_used": settings.llm_model_id,
         }
         
@@ -478,28 +474,22 @@ class ChatService:
             logger.error(f"Unexpected error during embedding generation: {e}")
             raise ConnectionError(f"Embedding generation failed: {str(e)}")
 
-    async def search_by_embedding_hybrid(self, query_text: str, query_embedding: List[float], company_id: str, area: str, top_k: int = None, similarity_threshold: float = None, alpha: float = None) -> Dict[str, Any]:
+    async def search_by_embedding_hybrid(self, query_text: str, query_embedding: List[float], company: str, area: str, top_k: int = None, similarity_threshold: float = None, alpha: float = None) -> Dict[str, Any]:
         """
         Hybrid search (vector + BM25) using pre-generated embedding and query text.
+        Company is used as the collection name since each company has its own collection.
         """
         from app.core.config import settings
-
-        # Use company_id as collection name, fallback to default
-        if company_id is not None:
-            search_collection = company_id
-        else:
-            search_collection = settings.weaviate_class_name
 
         search_top_k = top_k if top_k is not None else settings.rag_top_k_results
         search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
 
         try:
-            # Hybrid search (vector + BM25) in specified collection with company and area filtering
+            # Hybrid search (vector + BM25) - company is the collection name
             search_results = await self.vectorstore.search_in_collection_hybrid(
-                collection_name=search_collection,
+                collection_name=company,
                 query_text=query_text,
                 query_vector=query_embedding,
-                company_id=company_id,
                 area=area,
                 top_k=search_top_k,
                 similarity_threshold=search_threshold,

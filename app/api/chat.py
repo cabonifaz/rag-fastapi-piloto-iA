@@ -58,8 +58,11 @@ async def chat_streaming_endpoint(
                 answer = ""
                 async for chunk_data in chat_service.process_rag_query_stream(
                     user_id=request.user_id,
+                    user=request.user,
                     message=request.message,
                     company_id=request.company_id,
+                    company=request.company,
+                    area_id=request.area_id,
                     area=request.area,
                     id_ia_area=request.id_ia_area,
                     top_k=request.top_k,
@@ -166,8 +169,11 @@ async def agent_streaming_endpoint(
                 answer = ""
                 async for chunk_data in chat_service.agent_orchestrator_stream(
                     user_id=request.user_id,
+                    user=request.user,
                     message=request.message,
                     company_id=request.company_id,
+                    company=request.company,
+                    area_id=request.area_id,
                     area=request.area,
                     id_ia_area=request.id_ia_area,
                     top_k=request.top_k,

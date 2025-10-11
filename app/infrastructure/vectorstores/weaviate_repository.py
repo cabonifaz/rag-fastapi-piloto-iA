@@ -376,12 +376,14 @@ class WeaviateRepository(VectorStorePort):
         self,
         collection_name: str,
         query_vector: List[float],
-        company_id: str,
         area: str,
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
-        """Search for similar vectors in a specific collection with required company and area filtering."""
+        """Search for similar vectors in a company-scoped collection with area filtering.
+
+        Note: collection_name is the company identifier - each company has its own collection.
+        """
 
         try:
             from app.core.config import settings
@@ -395,8 +397,6 @@ class WeaviateRepository(VectorStorePort):
                 raise ValueError("Collection name cannot be empty")
             if not query_vector:
                 raise ValueError("Query vector cannot be empty")
-            if not company_id:
-                raise ValueError("Company ID is required")
             if not area:
                 raise ValueError("Area is required")
             if actual_top_k <= 0:
@@ -404,24 +404,22 @@ class WeaviateRepository(VectorStorePort):
             if similarity_threshold is not None and not (0.0 <= similarity_threshold <= 1.0):
                 raise ValueError("Similarity threshold must be between 0.0 and 1.0")
 
-            # Build filters for company_id and area using v4 Filter class
-            company_filter = Filter.by_property("company_id").equal(company_id)
-
+            # Build area filter using v4 Filter class
+            # Note: No company filter needed - collection itself is scoped to company
             # Include both the specific area AND Default area documents
             area_filter = (
                 Filter.by_property("area").equal(area) |
                 Filter.by_property("area").equal("Default")
             )
 
-            # Combine filters with & operator
-            filters = company_filter & area_filter
+            filters = area_filter
             
             # Vector similarity search
             results = await self.search_by_vector(
                 class_name=collection_name,
                 vector=query_vector,
                 top_k=actual_top_k,
-                return_properties=["text", "company_id", "doc_id", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
+                return_properties=["text", "doc_id", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
                 filters=filters,
                 include_distance=True
             )
@@ -472,13 +470,15 @@ class WeaviateRepository(VectorStorePort):
         collection_name: str,
         query_text: str,
         query_vector: List[float],
-        company_id: str,
         area: str,
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
         alpha: Optional[float] = None
     ) -> List[Dict[str, Any]]:
-        """Hybrid search (vector + BM25) in a specific collection with required company and area filtering."""
+        """Hybrid search (vector + BM25) in a company-scoped collection with area filtering.
+
+        Note: collection_name is the company identifier - each company has its own collection.
+        """
 
         try:
             from app.core.config import settings
@@ -494,8 +494,6 @@ class WeaviateRepository(VectorStorePort):
                 raise ValueError("Query text cannot be empty")
             if not query_vector:
                 raise ValueError("Query vector cannot be empty")
-            if not company_id:
-                raise ValueError("Company ID is required")
             if not area:
                 raise ValueError("Area is required")
             if actual_top_k <= 0:
@@ -503,17 +501,15 @@ class WeaviateRepository(VectorStorePort):
             if similarity_threshold is not None and not (0.0 <= similarity_threshold <= 1.0):
                 raise ValueError("Similarity threshold must be between 0.0 and 1.0")
 
-            # Build filters for company_id and area using v4 Filter class
-            company_filter = Filter.by_property("company_id").equal(company_id)
-
+            # Build area filter using v4 Filter class
+            # Note: No company filter needed - collection itself is scoped to company
             # Include both the specific area AND Default area documents
             area_filter = (
                 Filter.by_property("area").equal(area) |
                 Filter.by_property("area").equal("Default")
             )
 
-            # Combine filters with & operator
-            filters = company_filter & area_filter
+            filters = area_filter
 
             # HYBRID SEARCH (vector + BM25 keyword)
             results = await self.search_hybrid(
