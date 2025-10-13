@@ -1,7 +1,7 @@
 # app/core/container.py
 
 from app.core.config import settings
-from app.services.chat_service import ChatService
+from app.services.rag_service import RagService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -95,21 +95,21 @@ class DIContainer:
 
         return self._llm_provider
 
-    def get_full_rag_chat_service(self) -> tuple[ChatService, LLMPort]:
-        """Get chat service with vectorstore AND LLM provider for complete RAG with answer generation."""
+    def get_full_rag_chat_service(self) -> tuple[RagService, LLMPort]:
+        """Get rag service with vectorstore AND LLM provider for complete RAG with answer generation."""
         embeddings_provider = self.get_embeddings_provider()
         vectorstore = self.get_vectorstore()
         llm_provider = self.get_llm_provider()
         orchestrator = self.get_orchestrator_analyzer()
 
-        chat_service = ChatService(
+        rag_service = RagService(
             embeddings_provider=embeddings_provider,
             vectorstore=vectorstore,
             llm_provider=llm_provider,
             orchestrator=orchestrator
         )
 
-        return chat_service, llm_provider
+        return rag_service, llm_provider
 
     def get_orchestrator_analyzer(self) -> OrchestratorQueryAnalyzer:
         """Get orchestrator query analyzer instance (singleton)."""

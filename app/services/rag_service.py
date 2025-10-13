@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 NO_CONTEXT_MESSAGE = "Parece que tu pregunta no es lo suficientemente específica 🤔. ¿Me das un poco más de contexto para ayudarte mejor?"
 
 
-class ChatService:
+class RagService:
     """
     Application service that orchestrates RAG flow following hexagonal architecture:
     1. Generates embeddings using the embeddings port
@@ -47,7 +47,7 @@ class ChatService:
         """
         try:
             if not self.db:
-                logger.warning("Database session not available in ChatService, using llm_role_behavior from env")
+                logger.warning("Database session not available in RagService, using llm_role_behavior from env")
                 return settings.llm_role_behavior
 
             # Get raw connection for cursor operations
@@ -438,7 +438,7 @@ class ChatService:
         llm_temperature = temperature if temperature is not None else settings.llm_temperature
         llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
         
-        # Yield metadata first (matching /chat response format - no context exposed)
+        # Yield metadata first (matching /rag response format - no context exposed)
         yield {
             "type": "metadata",
             "llm_model_used": settings.llm_model_id,

@@ -7,7 +7,7 @@ import logging
 from sqlalchemy.orm import Session
 from app.utils.jwt_auth import get_current_user, get_current_user_with_company_validation
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
-from app.services.chat_service import ChatService
+from app.services.rag_service import RagService
 from app.core.config import settings
 from app.core.container import container
 from app.core.database import get_db
@@ -17,7 +17,7 @@ from app.models.response_models import (
     create_error_response,
     create_warning_response
 )
-from app.models.chat_models import UnifiedRequest, AgentStreamingRequest
+from app.models.rag_models import UnifiedRequest, AgentStreamingRequest
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -28,9 +28,9 @@ router = APIRouter()
 
 def get_full_rag_dependencies(db: Session = Depends(get_db)):
     """Dependency injection for complete RAG with LLM answer generation."""
-    chat_service, llm_provider = container.get_full_rag_chat_service()
-    chat_service.db = db
-    return chat_service, llm_provider
+    rag_service, llm_provider = container.get_full_rag_chat_service()
+    rag_service.db = db
+    return rag_service, llm_provider
 
 
 @router.post("/chat-streaming")
@@ -42,7 +42,6 @@ async def chat_streaming_endpoint(
     """
     Streaming chat endpoint with RAG-powered answer generation.
     
-    Same functionality as /chat but with streaming response.
     Returns Server-Sent Events (SSE) format for real-time streaming.
     
     Response format:
@@ -51,12 +50,12 @@ async def chat_streaming_endpoint(
     - complete: Final completion signal
     """
     try:
-        chat_service, llm_provider = dependencies
+        rag_service, llm_provider = dependencies
         
         async def generate_stream():
             try:
                 answer = ""
-                async for chunk_data in chat_service.process_rag_query_stream(
+                async for chunk_data in rag_service.process_rag_query_stream(
                     user_id=request.user_id,
                     user=request.user,
                     message=request.message,
@@ -145,7 +144,7 @@ async def agent_streaming_endpoint(
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
 ):
     """
-    Agent-powered streaming chat endpoint with orchestrator analysis and RAG.
+    Agent-powered streaming rag endpoint with orchestrator analysis and RAG.
     Uses agent orchestrator to analyze queries and determine workflow requirements
     before processing with RAG-powered answer generation.
     Requires external system authentication token for enhanced capabilities.
@@ -158,7 +157,7 @@ async def agent_streaming_endpoint(
     - complete: Final completion signal
     """
     try:
-        chat_service, llm_provider = dependencies
+        rag_service, llm_provider = dependencies
 
         # Validate external token
         if not request.external_token or not request.external_token.strip():
@@ -167,7 +166,7 @@ async def agent_streaming_endpoint(
         async def generate_stream():
             try:
                 answer = ""
-                async for chunk_data in chat_service.agent_orchestrator_stream(
+                async for chunk_data in rag_service.agent_orchestrator_stream(
                     user_id=request.user_id,
                     user=request.user,
                     message=request.message,
