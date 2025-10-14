@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     processing_venv_path: Optional[str] = None
     processing_timeout_seconds: Optional[int] = None
     upload_directory: Optional[str] = None
+
+    # DynamoDB Configuration
+    dynamodb_table_messages: str
     
     
     @validator('aws_region')
