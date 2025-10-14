@@ -10,6 +10,7 @@ from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.core.config import settings
 from app.infrastructure.task_decomposition.task_generator import TaskGenerator
 from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
+from app.infrastructure.repositories.chat_repository import ChatRepository
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class RagService:
         self.llm_provider = llm_provider
         self.orchestrator = orchestrator
         self.db = db
+        self.chat_repository = ChatRepository(db) if db else None
 
     def load_ia_area_config(self, id_ia_area: int) -> str:
         """
@@ -328,7 +330,7 @@ class RagService:
             }
 
 
-    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, created_at: str, chat_id: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -357,6 +359,31 @@ class RagService:
 
         # Clean the user message
         cleaned_message = self.clean_user_query(message)
+
+        try:
+            if chat_id is None and self.chat_repository:
+                titulo = cleaned_message[:25].strip()
+                if not titulo:
+                    titulo = "Nueva conversación"
+
+
+                # Llamar al método create_chat del repositorio
+                new_chat_id = self.chat_repository.create_chat(
+                    id_empresa=company_id,
+                    id_area=area_id,
+                    titulo=titulo,
+                    id_usuario=user_id
+                )
+
+                if new_chat_id:
+                    chat_id = new_chat_id
+                else:
+                    logger.error("Chat creation failed - no ID returned")
+            elif chat_id is None:
+                logger.warning("Chat repository not available - cannot create chat")
+
+        except Exception as e:
+            logger.error(f"Error creating new chat: {e}")
 
         # Step 1: Generate embedding for the query
         query_embedding = await self.generate_embedding(cleaned_message)

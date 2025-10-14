@@ -34,52 +34,46 @@ class ChatRepository:
 
     def create_chat(
         self,
+        id_usuario: int,
         id_empresa: int,
         id_area: int,
-        titulo: str,
-        usucre: str
+        titulo: str
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new chat using stored procedure
 
         Args:
             id_empresa: Company identifier
-            id_area: Area identifier
+            id_area: Area identifier  
             titulo: Chat title
-            usucre: Username of the user creating the chat
+            id_usuario: User ID 
 
         Returns:
-            Dictionary with created chat data, or None if creation failed
+            ID_CHAT of the created chat, or None if creation failed
         """
         try:
             # TODO: Replace with actual stored procedure name when available
             # query = text("EXEC dbo.SP_CHAT_CREATE @ID_AREA = :id_area, @ID_EMPRESA = :id_empresa, @TITULO = :titulo, @USUCRE = :usucre")
 
             # Temporary direct INSERT until SP is created
-            query = text("""
-                INSERT INTO dbo.CHATS (ID_AREA, ID_EMPRESA, TITULO, USUCRE, FCHCRE, ID_ESTADO_REGISTRO)
-                OUTPUT INSERTED.ID_CHAT, INSERTED.ID_AREA, INSERTED.ID_EMPRESA, INSERTED.TITULO,
-                       INSERTED.ULTIMO_MENSAJE_FECHA, INSERTED.USUCRE, INSERTED.USUMOD,
-                       INSERTED.FCHMOD, INSERTED.FCHCRE, INSERTED.ID_ESTADO_REGISTRO
-                VALUES (:id_area, :id_empresa, :titulo, :usucre, GETDATE(), 1)
-            """)
+            query = text("EXEC SP_CREATE_CHAT @ID_USUARIO = :id_usuario, @ID_AREA = :id_area, @ID_EMPRESA = :id_empresa, @TITULO = :titulo")
 
             result = self.db.execute(query, {
+                'id_usuario': id_usuario,
                 'id_area': id_area,
                 'id_empresa': id_empresa,
-                'titulo': titulo,
-                'usucre': usucre
+                'titulo': titulo
             })
 
             chat_data = result.fetchone()
             self.db.commit()
 
             if chat_data:
-                return dict(chat_data._mapping)
+                return chat_data.ID_CHAT
             return None
 
         except Exception as e:
-            logger.error(f"Error creating chat: {e}")
+            logger.error(f"Error creating chat with SP: {e}")
             self.db.rollback()
             raise
 
