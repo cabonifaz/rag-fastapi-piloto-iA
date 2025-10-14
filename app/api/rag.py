@@ -50,11 +50,8 @@ async def chat_streaming_endpoint(
     - complete: Final completion signal
     """
     try:
-        print("=== FULL REQUEST AS DICT ===")
-        print(request.model_dump())
-        print("============================")
         rag_service, llm_provider = dependencies
-        
+
         async def generate_stream():
             try:
                 answer = ""
@@ -67,8 +64,8 @@ async def chat_streaming_endpoint(
                     area_id=request.area_id,
                     area=request.area,
                     id_ia_area=request.id_ia_area,
-                    created_at=created_at,
-                    chat_id=chat_id,
+                    created_at=request.created_at,
+                    chat_id=request.chat_id,
                     top_k=request.top_k,
                     similarity_threshold=request.similarity_threshold,
                     alpha=request.alpha,

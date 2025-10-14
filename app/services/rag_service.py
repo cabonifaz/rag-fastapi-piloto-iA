@@ -3,6 +3,7 @@ import logging
 import json
 import re
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -10,7 +11,6 @@ from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.core.config import settings
 from app.infrastructure.task_decomposition.task_generator import TaskGenerator
 from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
-from app.infrastructure.repositories.chat_repository import ChatRepository
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -34,9 +34,8 @@ class RagService:
         self.llm_provider = llm_provider
         self.orchestrator = orchestrator
         self.db = db
-        self.chat_repository = ChatRepository(db) if db else None
 
-    def load_ia_area_config(self, id_ia_area: int) -> str:
+    async def load_ia_area_config(self, id_ia_area: int) -> str:
         """
         Load IA area configuration from database using stored procedure.
         Falls back to LLM_ROLE_BEHAVIOR from env if SP returns no value or fails.
@@ -52,36 +51,147 @@ class RagService:
                 logger.warning("Database session not available in RagService, using llm_role_behavior from env")
                 return settings.llm_role_behavior
 
-            # Get raw connection for cursor operations
-            raw_conn = self.db.connection().connection
-            cursor = raw_conn.cursor()
+            query = text("""
+                EXEC SP_IA_AREA_CONFIG_LOAD
+                @ID_IA_AREA = :id_ia_area
+            """)
 
-            try:
-                # Execute stored procedure
-                cursor.execute("EXEC SP_IA_AREA_CONFIG_LOAD @ID_IA_AREA = ?", id_ia_area)
+            result = self.db.execute(query, {
+                'id_ia_area': id_ia_area
+            })
 
-                # Fetch result
-                result = cursor.fetchone()
-                cursor.close()
+            config_data = result.fetchone()
+            result.close()
 
-                if result and len(result) > 0:
-                    config_text = result[0]
-                    # Ensure max length of 1000 characters
-                    if config_text and str(config_text).strip():
-                        return str(config_text)[:1000]
-
-                # No result from SP, use env fallback
+            if not config_data:
                 logger.info(f"No config found for id_ia_area={id_ia_area}, using llm_role_behavior from env")
                 return settings.llm_role_behavior
 
-            except Exception as cursor_error:
-                logger.error(f"Cursor error in load_ia_area_config: {cursor_error}, using llm_role_behavior from env")
-                cursor.close()
-                return settings.llm_role_behavior
+            config_dict = dict(config_data._mapping) if hasattr(config_data, '_mapping') else dict(zip(result.keys(), config_data))
+
+            # Get the first value from the result (config text)
+            config_text = list(config_dict.values())[0] if config_dict else None
+
+            if config_text and str(config_text).strip():
+                return str(config_text)[:1000]
+
+            # No valid config text, use env fallback
+            logger.info(f"No valid config found for id_ia_area={id_ia_area}, using llm_role_behavior from env")
+            return settings.llm_role_behavior
 
         except Exception as e:
             logger.error(f"Error loading IA area config for id_ia_area={id_ia_area}: {e}, using llm_role_behavior from env")
             return settings.llm_role_behavior
+
+    async def create_chat_with_sp(self, id_usuario: int, id_area: int, id_empresa: int, titulo: str) -> Optional[int]:
+        """
+        Create a new chat using stored procedure.
+
+        Args:
+            id_usuario: User ID
+            id_area: Area identifier
+            id_empresa: Company identifier
+            titulo: Chat title
+
+        Returns:
+            ID_CHAT of the created chat, or None if creation failed
+        """
+        try:
+            if not self.db:
+                logger.warning("Database session not available in RagService")
+                return None
+
+            query = text("""
+                EXEC SP_CREATE_CHAT
+                @ID_USUARIO = :id_usuario,
+                @ID_AREA = :id_area,
+                @ID_EMPRESA = :id_empresa,
+                @TITULO = :titulo
+            """)
+
+            result = self.db.execute(query, {
+                'id_usuario': id_usuario,
+                'id_area': id_area,
+                'id_empresa': id_empresa,
+                'titulo': titulo
+            })
+
+            chat_data = result.fetchone()
+            result.close()
+
+            if not chat_data:
+                logger.warning(f"No response from SP_CREATE_CHAT")
+                return None
+
+            chat_dict = dict(chat_data._mapping) if hasattr(chat_data, '_mapping') else dict(zip(result.keys(), chat_data))
+            chat_id = chat_dict.get('ID_CHAT')
+
+            if chat_id:
+                print(f"Chat ID type: {type(chat_id)}, value: {chat_id}")
+                self.db.commit()
+                logger.info(f"Chat created successfully with ID: {chat_id}")
+                return chat_id
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error creating chat with SP: {e}")
+            self.db.rollback()
+            return None
+
+    async def save_message(
+        self,
+        chat_id: int,
+        created_at: str,
+        sender: int,
+        message: str,
+        id_estado_registro: int = 1
+    ) -> None:
+        """
+        Save a message to DynamoDB.
+
+        Args:
+            chat_id: Chat identifier
+            created_at: Timestamp as string (milliseconds since epoch)
+            sender: 0 = user, 1 = assistant
+            message: Message content
+            id_estado_registro: Status (default: 1 = active)
+
+        Raises:
+            Exception: If message save fails
+        """
+        try:
+            import boto3
+            from app.core.config import settings
+
+            # Initialize DynamoDB client
+            session = boto3.Session(
+                profile_name=settings.aws_profile,
+                region_name=settings.aws_region
+            )
+            dynamodb = session.resource('dynamodb')
+            table = dynamodb.Table(settings.dynamodb_table_messages)
+
+            # Convert chat_id to DynamoDB format: "chat-{id}"
+            chat_id_str = f"chat-{chat_id}"
+
+            # Create composite key for GSI
+            chat_id_estado = f"{chat_id_str}#{id_estado_registro}"
+
+            item = {
+                'chat_id': chat_id_str,
+                'created_at': created_at,
+                'id_estado_registro': id_estado_registro,
+                'chat_id#id_estado_registro': chat_id_estado,
+                'sender': sender,
+                'message': message
+            }
+
+            table.put_item(Item=item)
+
+        except Exception as e:
+            logger.error(f"Error saving message for chat_id {chat_id}: {e}")
+            raise
 
     @staticmethod
     def clean_user_query(message: str) -> str:
@@ -150,7 +260,7 @@ class RagService:
             orchestrator = self.orchestrator
 
             # Load IA area role behavior configuration
-            role_behavior = self.load_ia_area_config(id_ia_area)
+            role_behavior = await self.load_ia_area_config(id_ia_area)
 
             # Clean user query
             user_query = self.clean_user_query(message)
@@ -304,8 +414,22 @@ class RagService:
                         llm_temperature = temperature if temperature is not None else settings.llm_temperature
                         llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
 
+                        # Track if assistant metadata has been sent
+                        agent_timestamp_sent = False
+
                         # Stream response directly from LLM provider (same as process_rag_query_stream)
                         async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
+                            # Send agent metadata on first chunk
+                            if not agent_timestamp_sent:
+                                import time
+                                agent_timestamp = str(int(time.time() * 1000))
+                                yield {
+                                    "type": "assistant_metadata",
+                                    "sender": 2,  # 2 = agent
+                                    "created_at": agent_timestamp
+                                }
+                                agent_timestamp_sent = True
+
                             # Yield each chunk for streaming (same format as process_rag_query_stream)
                             yield {
                                 "type": "chunk",
@@ -355,35 +479,60 @@ class RagService:
             raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
 
         # Load IA area role behavior configuration
-        role_behavior = self.load_ia_area_config(id_ia_area)
+        role_behavior = await self.load_ia_area_config(id_ia_area)
 
         # Clean the user message
         cleaned_message = self.clean_user_query(message)
 
-        try:
-            if chat_id is None and self.chat_repository:
-                titulo = cleaned_message[:25].strip()
-                if not titulo:
-                    titulo = "Nueva conversación"
+        # Create chat if chat_id is not provided
+        if chat_id is None:
+            titulo = cleaned_message[:25].strip()
+            if not titulo:
+                titulo = "Nueva conversación"
 
+            # Call stored procedure to create chat
+            new_chat_id = await self.create_chat_with_sp(
+                id_usuario=user_id,
+                id_area=area_id,
+                id_empresa=company_id,
+                titulo=titulo
+            )
 
-                # Llamar al método create_chat del repositorio
-                new_chat_id = self.chat_repository.create_chat(
-                    id_empresa=company_id,
-                    id_area=area_id,
-                    titulo=titulo,
-                    id_usuario=user_id
+            if new_chat_id:
+                chat_id = new_chat_id
+            else:
+                # Chat creation failed - stop execution
+                logger.error("Chat creation failed - no ID returned, stopping execution")
+                yield {
+                    "type": "error",
+                    "message": "Failed to create chat",
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "El chat no pudo crearse correctamente"
+                    }
+                }
+                return
+
+        # Save user message to DynamoDB
+        if chat_id:
+            try:
+                await self.save_message(
+                    chat_id=chat_id,
+                    created_at=created_at,
+                    sender=0,
+                    message=cleaned_message
                 )
-
-                if new_chat_id:
-                    chat_id = new_chat_id
-                else:
-                    logger.error("Chat creation failed - no ID returned")
-            elif chat_id is None:
-                logger.warning("Chat repository not available - cannot create chat")
-
-        except Exception as e:
-            logger.error(f"Error creating new chat: {e}")
+            except Exception as e:
+                logger.error(f"Failed to save user message: {e}")
+                yield {
+                    "type": "error",
+                    "message": "Failed to save user message",
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
+                    }
+                }
+                return
 
         # Step 1: Generate embedding for the query
         query_embedding = await self.generate_embedding(cleaned_message)
@@ -412,6 +561,7 @@ class RagService:
             yield {
                 "type": "metadata",
                 "llm_model_used": None,
+                "chat_id": chat_id
             }
             yield {
                 "type": "chunk",
@@ -469,15 +619,53 @@ class RagService:
         yield {
             "type": "metadata",
             "llm_model_used": settings.llm_model_id,
+            "chat_id": chat_id
         }
-        
+
+        # Accumulate assistant response chunks
+        assistant_response = ""
+        assistant_timestamp = None
+
         # Stream the LLM response with role behavior
         async for chunk in self.generate_text_stream(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
+            # Capture timestamp when first chunk arrives and send assistant metadata
+            if assistant_timestamp is None:
+                import time
+                assistant_timestamp = str(int(time.time() * 1000))
+                # Send assistant message metadata
+                yield {
+                    "type": "assistant_metadata",
+                    "sender": 1,  # 1 = assistant/AI
+                    "created_at": assistant_timestamp
+                }
+
+            assistant_response += chunk
             yield {
                 "type": "chunk",
                 "content": chunk
             }
-        
+
+        # Save assistant message to DynamoDB before completion signal
+        if chat_id and assistant_response and assistant_timestamp:
+            try:
+                await self.save_message(
+                    chat_id=chat_id,
+                    created_at=assistant_timestamp,
+                    sender=1,  # 1 = assistant
+                    message=assistant_response
+                )
+            except Exception as e:
+                logger.error(f"Failed to save assistant message: {e}")
+                yield {
+                    "type": "error",
+                    "message": "Failed to save assistant message",
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "El mensaje de la IA no pudo guardarse correctamente"
+                    }
+                }
+                return
+
         # Final completion signal
         yield {
             "type": "complete",
