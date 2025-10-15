@@ -1,6 +1,7 @@
 """API endpoints for message management."""
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+import json
 from typing import Optional, Dict, Any
 import logging
 
@@ -21,50 +22,6 @@ router = APIRouter()
 def get_message_service() -> MessageService:
     """Dependency injection for MessageService"""
     return MessageService()
-
-
-@router.post("", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
-async def create_message_endpoint(
-    request: MessageCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    message_service: MessageService = Depends(get_message_service)
-):
-    """
-    Create a new message in DynamoDB
-
-    Requires JWT authentication. Creates a message with the provided chat_id, created_at, sender, and message.
-
-    Args:
-        request: MessageCreate with chat_id, created_at (timestamp as string), sender (0=user, 1=assistant), message
-
-    Returns:
-        MessageResponse with created message details
-
-    Raises:
-        HTTPException: 500 if message creation fails
-    """
-    try:
-        message = await message_service.create_message(request=request)
-
-        if not message:
-            error_response = create_error_response("Error al crear el mensaje")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"result": error_response.model_dump()}
-            )
-
-        return message
-
-    except HTTPException:
-        raise
-
-    except Exception as e:
-        logger.error(f"Unexpected error in create_message endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"result": error_response.model_dump()}
-        )
 
 
 @router.get("/chat/{chat_id}", response_model=MessageListResponse)
@@ -96,7 +53,6 @@ async def get_messages_by_chat_endpoint(
         last_key = None
         if last_evaluated_key:
             try:
-                import json
                 last_key = json.loads(last_evaluated_key)
             except:
                 error_response = create_error_response("Invalid last_evaluated_key format")

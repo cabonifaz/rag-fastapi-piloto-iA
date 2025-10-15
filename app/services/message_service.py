@@ -22,36 +22,6 @@ class MessageService:
     def __init__(self):
         self.repository = MessageRepository()
 
-    async def create_message(
-        self,
-        request: MessageCreate
-    ) -> Optional[MessageResponse]:
-        """
-        Create a new message in DynamoDB
-
-        Args:
-            request: MessageCreate with chat_id, created_at, sender, message
-
-        Returns:
-            MessageResponse with created message data
-        """
-        try:
-            message_data = self.repository.create_message(
-                chat_id=request.chat_id,
-                created_at=request.created_at,
-                sender=request.sender,
-                message=request.message,
-                id_estado_registro=1
-            )
-
-            if message_data:
-                return self._map_to_message_response(message_data)
-            return None
-
-        except Exception as e:
-            logger.error(f"Error in create_message service: {e}")
-            raise
-
     async def get_messages_by_chat(
         self,
         chat_id: str,
@@ -59,42 +29,43 @@ class MessageService:
         last_evaluated_key: Optional[Dict[str, Any]] = None
     ) -> MessageListResponse:
         """
-        Get messages for a specific chat with pagination
+        Get messages for a specific chat with pagination.
 
         Args:
             chat_id: Chat identifier
             limit: Maximum number of messages to return
-            last_evaluated_key: For pagination
+            last_evaluated_key: For pagination.
 
         Returns:
-            MessageListResponse with messages list and pagination info
+            MessageListResponse with a list of messages and pagination info.
         """
         try:
-            result = self.repository.get_messages_by_chat(
+            # Delegate the database call to the repository
+            response_data = self.repository.get_messages_by_chat(
                 chat_id=chat_id,
                 limit=limit,
-                last_evaluated_key=last_evaluated_key,
-                id_estado_registro=1
+                last_evaluated_key=last_evaluated_key
             )
 
+            # Map the raw data to Pydantic models
             messages = [
                 self._map_to_message_response(msg)
-                for msg in result.get('messages', [])
+                for msg in response_data.get('messages', [])
             ]
+
+            # Get the total count of messages for the entire chat for accurate pagination
+            total_count = self.repository.count_messages(chat_id=chat_id, id_estado_registro=1)
 
             return MessageListResponse(
                 messages=messages,
-                total_count=result.get('count', 0),
-                last_evaluated_key=result.get('last_evaluated_key')
+                total_count=total_count,
+                last_evaluated_key=response_data.get('last_evaluated_key')
             )
 
         except Exception as e:
-            logger.error(f"Error in get_messages_by_chat service: {e}")
-            return MessageListResponse(
-                messages=[],
-                total_count=0,
-                last_evaluated_key=None
-            )
+            logger.error(f"Error getting messages for chat_id {chat_id}: {e}")
+            # Return a properly structured empty response on error
+            return MessageListResponse(messages=[], total_count=0, last_evaluated_key=None)
 
     async def get_last_n_messages(
         self,
@@ -180,12 +151,11 @@ class MessageService:
     # =============================================
 
     def _map_to_message_response(self, message_data: Dict[str, Any]) -> MessageResponse:
-        """Map DynamoDB item to MessageResponse"""
+        """Map DynamoDB item to the simplified MessageResponse model."""
         return MessageResponse(
+            id=message_data['created_at'],  # Use created_at as the unique ID for the frontend
             chat_id=message_data['chat_id'],
             created_at=message_data['created_at'],
-            id_estado_registro=message_data['id_estado_registro'],
-            sender=message_data['sender'],
-            message=message_data['message'],
-            **{'chat_id#id_estado_registro': message_data['chat_id#id_estado_registro']}
+            sender=int(message_data['sender']),  # Ensure sender is an int
+            message=message_data['message']
         )

@@ -17,18 +17,12 @@ class MessageCreate(BaseModel):
 
 
 class MessageResponse(BaseModel):
-    """Response model for a message"""
+    """Simplified response model for a message, matching frontend expectations."""
+    id: str          # Unique identifier, populated from created_at
     chat_id: str
-    created_at: str  # Timestamp as string (milliseconds since epoch)
-    id_estado_registro: int  # 1 = active, 0 = deleted
-    sender: int  # 0 = user, 1 = assistant
+    created_at: str
+    sender: int
     message: str
-
-    # Composite key for DynamoDB
-    chat_id_estado: str = Field(alias="chat_id#id_estado_registro")
-
-    class Config:
-        populate_by_name = True
 
 
 class MessageListResponse(BaseModel):

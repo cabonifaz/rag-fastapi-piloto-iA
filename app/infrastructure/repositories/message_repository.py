@@ -78,25 +78,29 @@ class MessageRepository:
         self,
         chat_id: str,
         limit: int = 50,
-        last_evaluated_key: Optional[Dict[str, Any]] = None,
-        id_estado_registro: int = 1
+        last_evaluated_key: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Get messages for a specific chat with pagination
 
         Args:
-            chat_id: Chat identifier
+            chat_id: Chat identifier (e.g., "chat-123")
             limit: Maximum number of messages to return
             last_evaluated_key: For pagination (from previous response)
-            id_estado_registro: Filter by status (default: 1 = active)
 
         Returns:
             Dictionary with messages list and pagination info
         """
         try:
+            # Ensure chat_id has the "chat-" prefix
+            if not chat_id.startswith('chat-'):
+                chat_id = f"chat-{chat_id}"
+
+            gsi_pk_value = f"{chat_id}#1"
+
             query_params = {
-                'KeyConditionExpression': Key('chat_id').eq(chat_id),
-                'FilterExpression': boto3.dynamodb.conditions.Attr('id_estado_registro').eq(id_estado_registro),
+                'IndexName': 'chat_id_id_estado_registro_created_at_index',
+                'KeyConditionExpression': Key('chat_id#id_estado_registro').eq(gsi_pk_value),
                 'Limit': limit,
                 'ScanIndexForward': True  # True = ascending order (oldest first)
             }
@@ -107,6 +111,7 @@ class MessageRepository:
             response = self.table.query(**query_params)
 
             return {
+                # Return messages as is (newest to oldest)
                 'messages': response.get('Items', []),
                 'count': response.get('Count', 0),
                 'last_evaluated_key': response.get('LastEvaluatedKey')

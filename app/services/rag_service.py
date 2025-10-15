@@ -2,6 +2,7 @@ from typing import Tuple, List, Dict, Any, AsyncGenerator, Optional
 import logging
 import json
 import re
+import time
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.domain.ports.embeddings_port import EmbeddingsPort
@@ -136,6 +137,36 @@ class RagService:
             logger.error(f"Error creating chat with SP: {e}")
             self.db.rollback()
             return None
+
+    async def update_chat_last_message_date(self, chat_id: int) -> bool:
+        """
+        Update chat's last message date using stored procedure.
+
+        Args:
+            chat_id: Chat ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not self.db:
+                logger.warning("Database session not available in RagService")
+                return False
+
+            query = text("""
+                EXEC SP_UPDATE_CHAT_ULTIMO_MENSAJE_FECHA
+                @ID_CHAT = :id_chat
+            """)
+
+            self.db.execute(query, {'id_chat': chat_id})
+            self.db.commit()
+            logger.info(f"Updated last message date for chat_id: {chat_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating chat last message date: {e}")
+            self.db.rollback()
+            return False
 
     async def save_message(
         self,
@@ -419,7 +450,6 @@ class RagService:
                         async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
                             # Send agent metadata on first chunk
                             if not agent_timestamp_sent:
-                                import time
                                 agent_timestamp = str(int(time.time() * 1000))
                                 yield {
                                     "type": "assistant_metadata",
@@ -532,11 +562,17 @@ class RagService:
                 }
                 return
 
+        # Yield metadata early (before processing) so frontend can show "Pensando..." placeholder
+        yield {
+            "type": "metadata",
+            "llm_model_used": settings.llm_model_id,
+            "chat_id": chat_id
+        }
+
         # Step 1: Generate embedding for the query
         query_embedding = await self.generate_embedding(cleaned_message)
 
         # Step 2: Search vector database using the embedding (hybrid search)
-        # Use provided parameters or fall back to environment defaults
         search_top_k = top_k if top_k is not None else settings.rag_top_k_results
         search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
 
@@ -556,15 +592,34 @@ class RagService:
         # Check if no documents found at database level
         if search_result["total_found"] == 0:
             # No documents found - return predefined message without LLM call
+            # Note: metadata already sent earlier, just send the message
+            assistant_timestamp = str(int(time.time() * 1000))
             yield {
-                "type": "metadata",
-                "llm_model_used": None,
-                "chat_id": chat_id
+                "type": "assistant_metadata",
+                "sender": 1,  # 1 = assistant/AI
+                "created_at": assistant_timestamp
             }
+
+            # Update chat last message date before sending the message
+            await self.update_chat_last_message_date(chat_id)
+
             yield {
                 "type": "chunk",
                 "content": NO_CONTEXT_MESSAGE
             }
+
+            # Save the "no context" message to DynamoDB
+            if chat_id:
+                try:
+                    await self.save_message(
+                        chat_id=chat_id,
+                        created_at=assistant_timestamp,
+                        sender=1,
+                        message=NO_CONTEXT_MESSAGE
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to save no-context message: {e}")
+
             yield {
                 "type": "complete",
                 "status": "success"
@@ -612,32 +667,28 @@ class RagService:
         # Use provided parameters or fall back to environment defaults
         llm_temperature = temperature if temperature is not None else settings.llm_temperature
         llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
-        
-        # Yield metadata first (matching /rag response format - no context exposed)
+
+        # Send assistant_metadata BEFORE starting LLM streaming
+        # This gives frontend time to render the empty "Pensando..." placeholder
+        assistant_timestamp = str(int(time.time() * 1000))
         yield {
-            "type": "metadata",
-            "llm_model_used": settings.llm_model_id,
-            "chat_id": chat_id
+            "type": "assistant_metadata",
+            "sender": 1,  # 1 = assistant/AI
+            "created_at": assistant_timestamp
         }
 
         # Accumulate assistant response chunks
         assistant_response = ""
-        assistant_timestamp = None
+        first_chunk_sent = False
 
         # Stream the LLM response with role behavior
         async for chunk in self.generate_text_stream(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
-            # Capture timestamp when first chunk arrives and send assistant metadata
-            if assistant_timestamp is None:
-                import time
-                assistant_timestamp = str(int(time.time() * 1000))
-                # Send assistant message metadata
-                yield {
-                    "type": "assistant_metadata",
-                    "sender": 1,  # 1 = assistant/AI
-                    "created_at": assistant_timestamp
-                }
-
             assistant_response += chunk
+
+            # Update chat last message date when first chunk with content is sent
+            if not first_chunk_sent and chunk.strip():
+                await self.update_chat_last_message_date(chat_id)
+                first_chunk_sent = True
 
             yield {
                 "type": "chunk",

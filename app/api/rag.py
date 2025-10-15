@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from typing import Dict, Any
+import asyncio
 import json
 import logging
 from sqlalchemy.orm import Session
@@ -79,6 +80,9 @@ async def chat_streaming_endpoint(
                     else:
                         # Send metadata and complete as-is
                         yield f"data: {json.dumps(chunk_data)}\n\n"
+
+                    # Force flush by yielding control back to event loop
+                    await asyncio.sleep(0)
                         
             except ClientError as e:
                 error_code = e.response['Error']['Code']
@@ -192,6 +196,9 @@ async def agent_streaming_endpoint(
                     else:
                         # Send metadata and complete as-is
                         yield f"data: {json.dumps(chunk_data)}\n\n"
+
+                    # Force flush by yielding control back to event loop
+                    await asyncio.sleep(0)
 
             except ClientError as e:
                 error_code = e.response['Error']['Code']
