@@ -535,8 +535,6 @@ class RagService:
         # Step 1: Generate embedding for the query
         query_embedding = await self.generate_embedding(cleaned_message)
 
-        print("embeding")
-
         # Step 2: Search vector database using the embedding (hybrid search)
         # Use provided parameters or fall back to environment defaults
         search_top_k = top_k if top_k is not None else settings.rag_top_k_results
@@ -551,8 +549,6 @@ class RagService:
             similarity_threshold=search_threshold,
             alpha=alpha
         )
-
-        print("vectorial")
 
         # Add query to result for compatibility
         search_result["query"] = cleaned_message
@@ -611,7 +607,6 @@ class RagService:
 
         # Normal RAG flow with context
         rag_prompt = self._build_rag_prompt(cleaned_message, context_text)
-        print("prompt builded")
 
         # Step 4: Generate streaming response using LLM
         # Use provided parameters or fall back to environment defaults
@@ -643,7 +638,7 @@ class RagService:
                 }
 
             assistant_response += chunk
-            print(assistant_response)
+
             yield {
                 "type": "chunk",
                 "content": chunk

@@ -115,80 +115,46 @@ class ChatRepository:
             logger.error(f"Error getting chat {chat_id}: {e}")
             return None
 
-    def list_chats_by_user(
-        self,
-        user_id: int,
-        id_empresa: Optional[int] = None,
-        id_area: Optional[int] = None,
-        id_estado: int = 1,
-        page: int = 1,
-        page_size: int = 50
-    ) -> List[Dict[str, Any]]:
+    def get_chats_by_user(self, user_id: int) -> List[Dict[str, Any]]:
         """
-        List chats for a specific user with optional filtering
+        List chats for a specific user using SP_GET_USER_CHATS
 
         Args:
-            user_id: User identifier (from USUCRE field)
-            id_empresa: Filter by company (optional)
-            id_area: Filter by area (optional)
-            id_estado: Filter by status (default: 1 = active)
-            page: Page number (1-indexed)
-            page_size: Items per page
+            user_id: User identifier
 
         Returns:
             List of dictionaries with chat data
         """
         try:
-            # TODO: Replace with actual stored procedure name when available
-            # query = text("EXEC dbo.SP_CHAT_LIST_BY_USER @USER_ID = :user_id, @ID_EMPRESA = :id_empresa, @ID_AREA = :id_area, @ID_ESTADO = :id_estado, @PAGE = :page, @PAGE_SIZE = :page_size")
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
 
-            # Temporary direct SELECT until SP is created
-            where_conditions = ["ID_ESTADO_REGISTRO = :id_estado"]
-            params = {
-                'id_estado': id_estado,
-                'offset': (page - 1) * page_size,
-                'page_size': page_size
-            }
+            try:
+                cursor.execute("EXEC SP_GET_USER_CHATS @ID_USUARIO = ?", user_id)
 
-            if id_empresa is not None:
-                where_conditions.append("ID_EMPRESA = :id_empresa")
-                params['id_empresa'] = id_empresa
+                chats = []
 
-            if id_area is not None:
-                where_conditions.append("ID_AREA = :id_area")
-                params['id_area'] = id_area
+                # Check if we have results
+                if cursor.description:
+                    columns = [desc[0] for desc in cursor.description]
+                    rows = cursor.fetchall()
 
-            where_clause = " AND ".join(where_conditions)
+                    # Convert rows to list of dictionaries
+                    for row in rows:
+                        chat_dict = dict(zip(columns, row))
+                        chats.append(chat_dict)
 
-            query = text(f"""
-                SELECT
-                    ID_CHAT,
-                    ID_AREA,
-                    ID_EMPRESA,
-                    TITULO,
-                    ULTIMO_MENSAJE_FECHA,
-                    USUCRE,
-                    USUMOD,
-                    FCHMOD,
-                    FCHCRE,
-                    ID_ESTADO_REGISTRO
-                FROM dbo.CHATS
-                WHERE {where_clause}
-                ORDER BY FCHCRE DESC
-                OFFSET :offset ROWS
-                FETCH NEXT :page_size ROWS ONLY
-            """)
+                cursor.close()
+                return chats
 
-            result = self.db.execute(query, params)
-
-            chats = []
-            for row in result.fetchall():
-                chats.append(dict(row._mapping))
-
-            return chats
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_chats_by_user: {cursor_error}")
+                cursor.close()
+                raise
 
         except Exception as e:
-            logger.error(f"Error listing chats: {e}")
+            logger.error(f"Error listing chats for user {user_id}: {e}")
             return []
 
     def update_chat_titulo(

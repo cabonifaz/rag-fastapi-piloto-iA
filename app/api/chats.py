@@ -26,95 +26,57 @@ def get_chat_service(db: Session = Depends(get_db)) -> ChatService:
     return ChatService(db)
 
 
-@router.post("", response_model=ChatResponse, status_code=status.HTTP_201_CREATED)
-async def create_chat_endpoint(
-    request: ChatCreateRequest,
+@router.get("/get_chats")
+async def get_user_chats(
     current_user: Dict[str, Any] = Depends(get_current_user),
     chat_service: ChatService = Depends(get_chat_service)
 ):
     """
-    Create a new chat session
+    Get user chats endpoint
 
-    Requires JWT authentication. Creates a new chat with the provided titulo, id_empresa, and id_area.
-    If titulo is not provided, an auto-generated title will be used.
-
-    Args:
-        request: ChatCreateRequest with titulo (optional), id_empresa, id_area
+    Retrieves all chats for the authenticated user using their user ID from JWT.
 
     Returns:
-        ChatResponse with created chat details
-
-    Raises:
-        HTTPException: 500 if chat creation fails
-    """
-    try:
-        username = current_user.get('USUARIO', 'unknown')
-
-        chat = await chat_service.create_chat(request=request, username=username)
-
-        if not chat:
-            error_response = create_error_response("Error al crear el chat")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"result": error_response.model_dump()}
-            )
-
-        return chat
-
-    except HTTPException:
-        raise
-
-    except Exception as e:
-        logger.error(f"Unexpected error in create_chat endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"result": error_response.model_dump()}
-        )
-
-
-@router.get("", response_model=ChatListResponse)
-async def list_chats_endpoint(
-    id_empresa: Optional[int] = Query(None, description="Filter by company ID"),
-    id_area: Optional[int] = Query(None, description="Filter by area ID"),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    chat_service: ChatService = Depends(get_chat_service)
-):
-    """
-    List user's chats with optional filtering
-
-    Requires JWT authentication. Returns paginated list of active chats.
-    Can be filtered by id_empresa and/or id_area.
-
-    Query Parameters:
-        - id_empresa: Filter by company (optional)
-        - id_area: Filter by area (optional)
-        - page: Page number (default: 1, min: 1)
-        - page_size: Items per page (default: 50, min: 1, max: 100)
-
-    Returns:
-        ChatListResponse with paginated chat list and metadata
+        List of chats for the user
 
     Raises:
         HTTPException: 500 for server errors
     """
     try:
-        chat_list = await chat_service.list_chats(
-            id_empresa=id_empresa,
-            id_area=id_area,
-            page=page,
-            page_size=page_size
-        )
+        user_id = current_user.get('ID_USUARIO')
 
-        return chat_list
+        if not user_id:
+            error_response = create_error_response("Información de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Get user chats from service
+        chats = await chat_service.get_chats_by_user(user_id)
+
+        if chats is None:
+            error_response = create_error_response("Error al obtener los chats del usuario")
+            raise HTTPException(
+                status_code=500,
+                detail={"result": error_response.model_dump()}
+            )
+
+        success_response = create_success_response("Chats obtenidos exitosamente")
+        return {
+            "chats": chats,  # Can be [] for new users
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
 
     except Exception as e:
-        logger.error(f"Unexpected error in list_chats endpoint: {e}")
+        logger.error(f"Unexpected error in get user chats endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,
             detail={"result": error_response.model_dump()}
         )
 

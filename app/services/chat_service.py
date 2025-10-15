@@ -120,85 +120,47 @@ class ChatService:
             logger.error(f"Error in get_chat service: {e}")
             return None
 
-    async def list_chats(
-        self,
-        id_empresa: Optional[int] = None,
-        id_area: Optional[int] = None,
-        page: int = 1,
-        page_size: int = 50
-    ) -> ChatListResponse:
+    async def get_chats_by_user(self, user_id: int) -> List[Dict[str, Any]]:
         """
-        List chats with optional filtering
+        List chats for a specific user using SP_GET_USER_CHATS
 
         Args:
-            id_empresa: Filter by company (optional)
-            id_area: Filter by area (optional)
-            page: Page number (1-indexed)
-            page_size: Items per page
+            user_id: User identifier
 
         Returns:
-            ChatListResponse with paginated chat list
+            List of dictionaries with chat data
         """
         try:
-            # Build dynamic WHERE clause
-            where_conditions = ["ID_ESTADO_REGISTRO = 1"]
-            params = {
-                'offset': (page - 1) * page_size,
-                'page_size': page_size
-            }
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
 
-            if id_empresa is not None:
-                where_conditions.append("ID_EMPRESA = :id_empresa")
-                params['id_empresa'] = id_empresa
+            try:
+                cursor.execute("EXEC SP_GET_USER_CHATS @ID_USUARIO = ?", user_id)
 
-            if id_area is not None:
-                where_conditions.append("ID_AREA = :id_area")
-                params['id_area'] = id_area
+                chats = []
 
-            where_clause = " AND ".join(where_conditions)
+                # Check if we have results
+                if cursor.description:
+                    columns = [desc[0] for desc in cursor.description]
+                    rows = cursor.fetchall()
 
-            # Get paginated chats
-            query = text(f"""
-                SELECT
-                    ID_CHAT,
-                    ID_AREA,
-                    ID_EMPRESA,
-                    TITULO,
-                    ULTIMO_MENSAJE_FECHA,
-                    FCHCRE,
-                    ID_ESTADO_REGISTRO
-                FROM dbo.CHATS
-                WHERE {where_clause}
-                ORDER BY FCHCRE DESC
-                OFFSET :offset ROWS
-                FETCH NEXT :page_size ROWS ONLY
-            """)
+                    # Convert rows to list of dictionaries
+                    for row in rows:
+                        chat_dict = dict(zip(columns, row))
+                        chats.append(chat_dict)
 
-            result = self.db.execute(query, params)
-            chats_data = [dict(row._mapping) for row in result.fetchall()]
+                cursor.close()
+                return chats
 
-            # Get total count
-            count_query = text(f"""
-                SELECT COUNT(*) as total
-                FROM dbo.CHATS
-                WHERE {where_clause}
-            """)
-            count_params = {k: v for k, v in params.items() if k not in ['offset', 'page_size']}
-            count_result = self.db.execute(count_query, count_params)
-            total_count = count_result.fetchone()[0]
-
-            chat_items = [self._map_to_chat_list_item(chat) for chat in chats_data]
-
-            return ChatListResponse(
-                chats=chat_items,
-                total_count=total_count,
-                page=page,
-                page_size=page_size
-            )
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_chats_by_user: {cursor_error}")
+                cursor.close()
+                raise
 
         except Exception as e:
-            logger.error(f"Error in list_chats service: {e}")
-            return ChatListResponse(chats=[], total_count=0, page=page, page_size=page_size)
+            logger.error(f"Error listing chats for user {user_id}: {e}")
+            return []
 
     async def update_chat_titulo(
         self,
