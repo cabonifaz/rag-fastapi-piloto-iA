@@ -25,7 +25,7 @@ class MessageService:
     async def get_messages_by_chat(
         self,
         chat_id: str,
-        limit: int = 50,
+        limit: int = 20,
         last_evaluated_key: Optional[Dict[str, Any]] = None
     ) -> MessageListResponse:
         """
@@ -67,6 +67,42 @@ class MessageService:
             # Return a properly structured empty response on error
             return MessageListResponse(messages=[], total_count=0, last_evaluated_key=None)
 
+    async def create_message(
+        self,
+        chat_id: int,
+        created_at: str,
+        sender: int,
+        message: str,
+        id_estado_registro: int = 1
+    ) -> bool:
+        """
+        Create a new message in DynamoDB.
+
+        Args:
+            chat_id: Chat identifier (integer)
+            created_at: Timestamp as string (milliseconds since epoch)
+            sender: 0 = user, 1 = assistant
+            message: Message content
+            id_estado_registro: Status (default: 1 = active)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self.repository.create_message(
+                chat_id=chat_id,
+                created_at=created_at,
+                sender=sender,
+                message=message,
+                id_estado_registro=id_estado_registro
+            )
+            logger.info(f"Message created successfully for chat_id: {chat_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error in create_message service: {e}")
+            return False
+
     async def get_last_n_messages(
         self,
         chat_id: str,
@@ -83,68 +119,21 @@ class MessageService:
             List of MessageResponse (ordered from oldest to newest)
         """
         try:
-            messages_data = self.repository.get_last_n_messages(
+            # Use get_last_n_messages_by_chat instead of get_last_n_messages
+            response_data = self.repository.get_last_n_messages_by_chat(
                 chat_id=chat_id,
-                n=n,
-                id_estado_registro=1
+                limit=n
             )
 
             return [
                 self._map_to_message_response(msg)
-                for msg in messages_data
+                for msg in response_data.get('messages', [])
             ]
 
         except Exception as e:
             logger.error(f"Error in get_last_n_messages service: {e}")
             return []
 
-    async def soft_delete_message(
-        self,
-        chat_id: str,
-        created_at: str
-    ) -> bool:
-        """
-        Soft delete a message (set id_estado_registro to 0)
-
-        Args:
-            chat_id: Chat identifier
-            created_at: Message timestamp
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            return self.repository.soft_delete_message(
-                chat_id=chat_id,
-                created_at=created_at
-            )
-
-        except Exception as e:
-            logger.error(f"Error in soft_delete_message service: {e}")
-            return False
-
-    async def count_messages(
-        self,
-        chat_id: str
-    ) -> int:
-        """
-        Count total messages for a chat
-
-        Args:
-            chat_id: Chat identifier
-
-        Returns:
-            Total count of active messages
-        """
-        try:
-            return self.repository.count_messages(
-                chat_id=chat_id,
-                id_estado_registro=1
-            )
-
-        except Exception as e:
-            logger.error(f"Error in count_messages service: {e}")
-            return 0
 
     # =============================================
     # Helper Methods

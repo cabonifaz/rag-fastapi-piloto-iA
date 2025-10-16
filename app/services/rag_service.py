@@ -12,6 +12,9 @@ from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.core.config import settings
 from app.infrastructure.task_decomposition.task_generator import TaskGenerator
 from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
+from app.services.message_service import MessageService
+from app.infrastructure.context_counter.aws_bedrock_provider import ContextMessageCounter
+from app.infrastructure.repositories.chat_repository import ChatRepository
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -35,6 +38,9 @@ class RagService:
         self.llm_provider = llm_provider
         self.orchestrator = orchestrator
         self.db = db
+        self.message_service = MessageService()
+        self.context_counter = ContextMessageCounter()
+        self.chat_repository = ChatRepository(db) if db else None
 
     async def load_ia_area_config(self, id_ia_area: int) -> str:
         """
@@ -83,144 +89,6 @@ class RagService:
         except Exception as e:
             logger.error(f"Error loading IA area config for id_ia_area={id_ia_area}: {e}, using llm_role_behavior from env")
             return settings.llm_role_behavior
-
-    async def create_chat_with_sp(self, id_usuario: int, id_area: int, id_empresa: int, titulo: str) -> Optional[int]:
-        """
-        Create a new chat using stored procedure.
-
-        Args:
-            id_usuario: User ID
-            id_area: Area identifier
-            id_empresa: Company identifier
-            titulo: Chat title
-
-        Returns:
-            ID_CHAT of the created chat, or None if creation failed
-        """
-        try:
-            if not self.db:
-                logger.warning("Database session not available in RagService")
-                return None
-
-            query = text("""
-                EXEC SP_CREATE_CHAT
-                @ID_USUARIO = :id_usuario,
-                @ID_AREA = :id_area,
-                @ID_EMPRESA = :id_empresa,
-                @TITULO = :titulo
-            """)
-
-            result = self.db.execute(query, {
-                'id_usuario': id_usuario,
-                'id_area': id_area,
-                'id_empresa': id_empresa,
-                'titulo': titulo
-            })
-
-            chat_data = result.fetchone()
-            result.close()
-
-            if not chat_data:
-                logger.warning(f"No response from SP_CREATE_CHAT")
-                return None
-
-            chat_dict = dict(chat_data._mapping) if hasattr(chat_data, '_mapping') else dict(zip(result.keys(), chat_data))
-            chat_id = chat_dict.get('ID_CHAT')
-
-            if chat_id:
-                self.db.commit()
-                return chat_id
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Error creating chat with SP: {e}")
-            self.db.rollback()
-            return None
-
-    async def update_chat_last_message_date(self, chat_id: int) -> bool:
-        """
-        Update chat's last message date using stored procedure.
-
-        Args:
-            chat_id: Chat ID
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            if not self.db:
-                logger.warning("Database session not available in RagService")
-                return False
-
-            query = text("""
-                EXEC SP_UPDATE_CHAT_ULTIMO_MENSAJE_FECHA
-                @ID_CHAT = :id_chat
-            """)
-
-            self.db.execute(query, {'id_chat': chat_id})
-            self.db.commit()
-            logger.info(f"Updated last message date for chat_id: {chat_id}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error updating chat last message date: {e}")
-            self.db.rollback()
-            return False
-
-    async def save_message(
-        self,
-        chat_id: int,
-        created_at: str,
-        sender: int,
-        message: str,
-        id_estado_registro: int = 1
-    ) -> None:
-        """
-        Save a message to DynamoDB.
-
-        Args:
-            chat_id: Chat identifier
-            created_at: Timestamp as string (milliseconds since epoch)
-            sender: 0 = user, 1 = assistant
-            message: Message content
-            id_estado_registro: Status (default: 1 = active)
-
-        Raises:
-            Exception: If message save fails
-        """
-        try:
-            import boto3
-            from app.core.config import settings
-
-            # Initialize DynamoDB client
-            session = boto3.Session(
-                profile_name=settings.aws_profile,
-                region_name=settings.aws_region
-            )
-            dynamodb = session.resource('dynamodb')
-            table = dynamodb.Table(settings.dynamodb_table_messages)
-
-            # Convert chat_id to DynamoDB format: "chat-{id}"
-            chat_id_str = f"chat-{chat_id}"
-
-            # Create composite key for GSI
-            chat_id_estado = f"{chat_id_str}#{id_estado_registro}"
-
-            item = {
-                'chat_id': chat_id_str,
-                'created_at': created_at,
-                'id_estado_registro': id_estado_registro,
-                'chat_id#id_estado_registro': chat_id_estado,
-                'sender': sender,
-                'message': message
-            }
-
-            table.put_item(Item=item)
-
-        except Exception as e:
-            logger.error(f"Error saving message for chat_id {chat_id}: {e}")
-            raise
 
     @staticmethod
     def clean_user_query(message: str) -> str:
@@ -506,6 +374,42 @@ class RagService:
             logger.error(f"Initialization error in process_rag_query_stream: {e}")
             raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
 
+        # Get last 3 messages from chat history if chat_id exists
+        conversation_analysis = []
+        if chat_id is not None:
+            try:
+                messages_response = await self.message_service.get_last_n_messages(
+                    chat_id=f"chat-{chat_id}",
+                    n=3
+                )
+                # Format messages for context counter
+                conversation_analysis = [
+                    {
+                        "role": "user" if msg.sender == 0 else "assistant",
+                        "content": msg.message
+                    }
+                    for msg in messages_response
+                ]
+                logger.info(f"Retrieved {len(conversation_analysis)} messages from chat history for context")
+            except Exception as e:
+                logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
+                conversation_analysis = []
+
+        print(conversation_analysis)
+
+        # Analyze query with context counter if chat_id exists
+        context_analysis = None
+        if chat_id is not None:
+            try:
+                context_analysis = await self.context_counter.analyze_query(
+                    user_query=message,
+                    conversation_history=conversation_analysis
+                )
+                logger.info(f"Context analysis result: {context_analysis}")
+            except Exception as e:
+                logger.warning(f"Failed to analyze query context: {e}, continuing without context analysis")
+                context_analysis = None
+
         # Load IA area role behavior configuration
         role_behavior = await self.load_ia_area_config(id_ia_area)
 
@@ -524,13 +428,13 @@ class RagService:
             formatted_date = now.strftime("%d/%m/%Y %H:%M")
             titulo = f"Nueva conversación {formatted_date}"
 
-            # Call stored procedure to create chat
-            new_chat_id = await self.create_chat_with_sp(
+            # Call stored procedure to create chat via repository
+            new_chat_id = self.chat_repository.create_chat(
                 id_usuario=user_id,
                 id_area=area_id,
                 id_empresa=company_id,
                 titulo=titulo
-            )
+            ) if self.chat_repository else None
 
             if new_chat_id:
                 chat_id = new_chat_id
@@ -553,7 +457,7 @@ class RagService:
         # Save user message to DynamoDB
         if chat_id:
             try:
-                await self.save_message(
+                await self.message_service.create_message(
                     chat_id=chat_id,
                     created_at=created_at,
                     sender=0,
@@ -624,7 +528,8 @@ class RagService:
             }
 
             # Update chat last message date before sending the message
-            await self.update_chat_last_message_date(chat_id)
+            if self.chat_repository:
+                self.chat_repository.update_ultimo_mensaje_fecha(chat_id)
 
             yield {
                 "type": "chunk",
@@ -634,7 +539,7 @@ class RagService:
             # Save the "no context" message to DynamoDB
             if chat_id:
                 try:
-                    await self.save_message(
+                    await self.message_service.create_message(
                         chat_id=chat_id,
                         created_at=assistant_timestamp,
                         sender=1,
@@ -710,7 +615,8 @@ class RagService:
 
             # Update chat last message date when first chunk with content is sent
             if not first_chunk_sent and chunk.strip():
-                await self.update_chat_last_message_date(chat_id)
+                if self.chat_repository:
+                    self.chat_repository.update_ultimo_mensaje_fecha(chat_id)
                 first_chunk_sent = True
 
             yield {
@@ -721,7 +627,7 @@ class RagService:
         # Save assistant message to DynamoDB before completion signal
         if chat_id and assistant_response and assistant_timestamp:
             try:
-                await self.save_message(
+                await self.message_service.create_message(
                     chat_id=chat_id,
                     created_at=assistant_timestamp,
                     sender=1,  # 1 = assistant

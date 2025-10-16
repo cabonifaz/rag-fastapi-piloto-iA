@@ -2,7 +2,6 @@
 
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 import logging
 
 from app.models.chat_models import (
@@ -12,6 +11,7 @@ from app.models.chat_models import (
     ChatListResponse,
     ChatListItem
 )
+from app.infrastructure.repositories.chat_repository import ChatRepository
 
 logger = logging.getLogger(__name__)
 
@@ -36,18 +36,19 @@ class ChatService:
 
     def __init__(self, db: Session):
         self.db = db
+        self.repository = ChatRepository(db)
 
     async def create_chat(
         self,
         request: ChatCreateRequest,
-        username: str
+        user_id: int
     ) -> Optional[ChatResponse]:
         """
-        Create a new chat session
+        Create a new chat session using stored procedure
 
         Args:
             request: Chat creation request with id_empresa, id_area, and optional titulo
-            username: Username of the user creating the chat (for USUCRE)
+            user_id: User ID creating the chat
 
         Returns:
             ChatResponse with created chat data, or None if creation failed
@@ -56,69 +57,26 @@ class ChatService:
             # Auto-generate title if not provided
             titulo = request.titulo or await self._generate_auto_title()
 
-            query = text("""
-                INSERT INTO dbo.CHATS (ID_AREA, ID_EMPRESA, TITULO, USUCRE, FCHCRE, ID_ESTADO_REGISTRO)
-                OUTPUT INSERTED.*
-                VALUES (:id_area, :id_empresa, :titulo, :usucre, GETDATE(), 1)
-            """)
+            # Use repository to create chat with SP_CREATE_CHAT
+            chat_id = self.repository.create_chat(
+                id_usuario=user_id,
+                id_area=request.id_area,
+                id_empresa=request.id_empresa,
+                titulo=titulo
+            )
 
-            result = self.db.execute(query, {
-                'id_area': request.id_area,
-                'id_empresa': request.id_empresa,
-                'titulo': titulo,
-                'usucre': username
-            })
+            if not chat_id:
+                return None
 
-            chat_data = result.fetchone()
-            self.db.commit()
-
+            # Fetch the created chat to return full response
+            chat_data = self.repository.get_chat_by_id(chat_id)
             if chat_data:
-                return self._map_to_chat_response(dict(chat_data._mapping))
+                return self._map_to_chat_response(chat_data)
             return None
 
         except Exception as e:
             logger.error(f"Error in create_chat service: {e}")
-            self.db.rollback()
             raise
-
-    async def get_chat(self, chat_id: int) -> Optional[ChatResponse]:
-        """
-        Get chat details by ID
-
-        Args:
-            chat_id: Chat identifier
-
-        Returns:
-            ChatResponse with chat data, or None if not found
-        """
-        try:
-            query = text("""
-                SELECT
-                    ID_CHAT,
-                    ID_AREA,
-                    ID_EMPRESA,
-                    TITULO,
-                    ULTIMO_MENSAJE_FECHA,
-                    USUCRE,
-                    USUMOD,
-                    FCHMOD,
-                    FCHCRE,
-                    ID_ESTADO_REGISTRO
-                FROM dbo.CHATS
-                WHERE ID_CHAT = :chat_id
-                    AND ID_ESTADO_REGISTRO = 1
-            """)
-
-            result = self.db.execute(query, {'chat_id': chat_id})
-            chat_data = result.fetchone()
-
-            if chat_data:
-                return self._map_to_chat_response(dict(chat_data._mapping))
-            return None
-
-        except Exception as e:
-            logger.error(f"Error in get_chat service: {e}")
-            return None
 
     async def get_chats_by_user(self, user_id: int) -> List[Dict[str, Any]]:
         """
@@ -131,35 +89,9 @@ class ChatService:
             List of dictionaries with chat data
         """
         try:
-            # Use raw connection to handle stored procedure execution
-            raw_conn = self.db.connection().connection
-            cursor = raw_conn.cursor()
-
-            try:
-                cursor.execute("EXEC SP_GET_USER_CHATS @ID_USUARIO = ?", user_id)
-
-                chats = []
-
-                # Check if we have results
-                if cursor.description:
-                    columns = [desc[0] for desc in cursor.description]
-                    rows = cursor.fetchall()
-
-                    # Convert rows to list of dictionaries
-                    for row in rows:
-                        chat_dict = dict(zip(columns, row))
-                        chats.append(chat_dict)
-
-                cursor.close()
-                return chats
-
-            except Exception as cursor_error:
-                logger.error(f"Cursor error in get_chats_by_user: {cursor_error}")
-                cursor.close()
-                raise
-
+            return self.repository.get_chats_by_user(user_id)
         except Exception as e:
-            logger.error(f"Error listing chats for user {user_id}: {e}")
+            logger.error(f"Error in get_chats_by_user service: {e}")
             return []
 
     async def update_chat_titulo(
@@ -178,26 +110,24 @@ class ChatService:
             Dict with ID_TIPO_MENSAJE (2=success, 1=failure) and MENSAJE
         """
         try:
-            query = text("""
-                EXEC SP_UPDATE_CHAT_TITULO
-                    @ID_CHAT = :id_chat,
-                    @TITULO = :titulo
-            """)
+            success = self.repository.update_chat_titulo(
+                chat_id=chat_id,
+                titulo=request.titulo
+            )
 
-            self.db.execute(query, {
-                'id_chat': chat_id,
-                'titulo': request.titulo
-            })
-            self.db.commit()
-
-            return {
-                "ID_TIPO_MENSAJE": 2,
-                "MENSAJE": "Chat title updated successfully"
-            }
+            if success:
+                return {
+                    "ID_TIPO_MENSAJE": 2,
+                    "MENSAJE": "Chat title updated successfully"
+                }
+            else:
+                return {
+                    "ID_TIPO_MENSAJE": 1,
+                    "MENSAJE": "Failed to update chat title"
+                }
 
         except Exception as e:
             logger.error(f"Error in update_chat_titulo service: {e}")
-            self.db.rollback()
             return {
                 "ID_TIPO_MENSAJE": 1,
                 "MENSAJE": f"Failed to update chat title: {str(e)}"
@@ -215,27 +145,21 @@ class ChatService:
             Dict with ID_TIPO_MENSAJE (2=success, 1=failure) and MENSAJE
         """
         try:
-            query = text("""
-                EXEC SP_UPDATE_CHAT_ESTADO_REGISTRO
-                    @ID_CHAT = :id_chat,
-                    @ID_ESTADO_REGISTRO = :id_estado_registro
-            """)
+            success = self.repository.delete_chat(chat_id)
 
-            self.db.execute(query, {
-                'id_chat': chat_id,
-                'id_estado_registro': 0  # 0 = deleted/inactive
-            })
-
-            self.db.commit()
-
-            return {
-                "ID_TIPO_MENSAJE": 2,
-                "MENSAJE": "Chat deleted successfully"
-            }
+            if success:
+                return {
+                    "ID_TIPO_MENSAJE": 2,
+                    "MENSAJE": "Chat deleted successfully"
+                }
+            else:
+                return {
+                    "ID_TIPO_MENSAJE": 1,
+                    "MENSAJE": "Failed to delete chat"
+                }
 
         except Exception as e:
             logger.error(f"Error in delete_chat service: {e}")
-            self.db.rollback()
             return {
                 "ID_TIPO_MENSAJE": 1,
                 "MENSAJE": f"Failed to delete chat: {str(e)}"
@@ -253,42 +177,10 @@ class ChatService:
             True if updated successfully, False otherwise
         """
         try:
-            query = text("""
-                UPDATE dbo.CHATS
-                SET ULTIMO_MENSAJE_FECHA = GETDATE()
-                WHERE ID_CHAT = :chat_id
-                    AND ID_ESTADO_REGISTRO = 1
-            """)
-
-            result = self.db.execute(query, {'chat_id': chat_id})
-            self.db.commit()
-            return result.rowcount > 0
-
+            return self.repository.update_ultimo_mensaje_fecha(chat_id)
         except Exception as e:
-            logger.error(f"Error in update_ultimo_mensaje_fecha: {e}")
-            self.db.rollback()
+            logger.error(f"Error in update_ultimo_mensaje_fecha service: {e}")
             return False
-
-    async def generate_chat_title_from_message(self, message: str) -> str:
-        """
-        Generate a concise chat title from first message
-        Simple implementation: truncate to 50 characters
-
-        Args:
-            message: User's first message
-
-        Returns:
-            Generated title string
-        """
-        try:
-            max_length = 50
-            if len(message) <= max_length:
-                return message
-            return message[:max_length].rsplit(' ', 1)[0] + "..."
-
-        except Exception as e:
-            logger.error(f"Error generating title: {e}")
-            return "Nueva Conversación"
 
     # =============================================
     # Helper Methods

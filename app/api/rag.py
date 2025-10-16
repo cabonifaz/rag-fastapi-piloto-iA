@@ -29,8 +29,7 @@ router = APIRouter()
 
 def get_full_rag_dependencies(db: Session = Depends(get_db)):
     """Dependency injection for complete RAG with LLM answer generation."""
-    rag_service, llm_provider = container.get_full_rag_chat_service()
-    rag_service.db = db
+    rag_service, llm_provider = container.get_full_rag_chat_service(db=db)
     return rag_service, llm_provider
 
 

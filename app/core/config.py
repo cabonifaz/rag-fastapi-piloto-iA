@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     orchestrator_max_tokens: int
     orchestrator_temperature: float
     orchestrator_top_p: float
+
+    context_counter_model_id: str
     
     weaviate_url: Optional[str] = None
     weaviate_api_key: Optional[str] = None
@@ -108,6 +110,13 @@ class Settings(BaseSettings):
     def validate_llm_model_id(cls, v):
         if not v:
             raise ValueError("LLM model ID is required")
+        return v
+
+    @field_validator('context_counter_model_id')
+    @classmethod
+    def validate_context_counter_model_id(cls, v):
+        if not v:
+            raise ValueError("Context counter model ID is required")
         return v
     
     @field_validator('llm_max_tokens')

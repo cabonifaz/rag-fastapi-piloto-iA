@@ -95,7 +95,7 @@ class DIContainer:
 
         return self._llm_provider
 
-    def get_full_rag_chat_service(self) -> tuple[RagService, LLMPort]:
+    def get_full_rag_chat_service(self, db=None) -> tuple[RagService, LLMPort]:
         """Get rag service with vectorstore AND LLM provider for complete RAG with answer generation."""
         embeddings_provider = self.get_embeddings_provider()
         vectorstore = self.get_vectorstore()
@@ -106,7 +106,8 @@ class DIContainer:
             embeddings_provider=embeddings_provider,
             vectorstore=vectorstore,
             llm_provider=llm_provider,
-            orchestrator=orchestrator
+            orchestrator=orchestrator,
+            db=db
         )
 
         return rag_service, llm_provider
