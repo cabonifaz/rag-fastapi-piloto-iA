@@ -512,11 +512,17 @@ class RagService:
         # Clean the user message
         cleaned_message = self.clean_user_query(message)
 
+        # Track if a new chat was created and store the title
+        new_chat_created = False
+        new_chat_titulo = None
+        new_chat_timestamp = None
+
         # Create chat if chat_id is not provided
         if chat_id is None:
-            titulo = cleaned_message[:25].strip()
-            if not titulo:
-                titulo = "Nueva conversación"
+            from datetime import datetime
+            now = datetime.now()
+            formatted_date = now.strftime("%d/%m/%Y %H:%M")
+            titulo = f"Nueva conversación {formatted_date}"
 
             # Call stored procedure to create chat
             new_chat_id = await self.create_chat_with_sp(
@@ -528,6 +534,9 @@ class RagService:
 
             if new_chat_id:
                 chat_id = new_chat_id
+                new_chat_created = True
+                new_chat_titulo = titulo
+                new_chat_timestamp = now.isoformat()
             else:
                 # Chat creation failed - stop execution
                 logger.error("Chat creation failed - no ID returned, stopping execution")
@@ -568,6 +577,20 @@ class RagService:
             "llm_model_used": settings.llm_model_id,
             "chat_id": chat_id
         }
+
+        # If a new chat was created, send the chat object to the frontend
+        if new_chat_created:
+            yield {
+                "type": "chat_created",
+                "chat": {
+                    "ID_CHAT": chat_id,
+                    "ID_AREA": area_id,
+                    "ID_EMPRESA": company_id,
+                    "TITULO": new_chat_titulo,
+                    "ULTIMO_MENSAJE_FECHA": new_chat_timestamp,
+                    "ID_ESTADO_REGISTRO": 1
+                }
+            }
 
         # Step 1: Generate embedding for the query
         query_embedding = await self.generate_embedding(cleaned_message)
@@ -673,7 +696,7 @@ class RagService:
         assistant_timestamp = str(int(time.time() * 1000))
         yield {
             "type": "assistant_metadata",
-            "sender": 1,  # 1 = assistant/AI
+            "sender": 1,
             "created_at": assistant_timestamp
         }
 
