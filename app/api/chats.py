@@ -81,51 +81,7 @@ async def get_user_chats(
         )
 
 
-@router.get("/{chat_id}", response_model=ChatResponse)
-async def get_chat_endpoint(
-    chat_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    chat_service: ChatService = Depends(get_chat_service)
-):
-    """
-    Get chat details by ID
-
-    Requires JWT authentication. Returns full chat information.
-
-    Args:
-        chat_id: Chat identifier
-
-    Returns:
-        ChatResponse with chat details
-
-    Raises:
-        HTTPException: 404 if chat not found, 500 for server errors
-    """
-    try:
-        chat = await chat_service.get_chat(chat_id=chat_id)
-
-        if not chat:
-            error_response = create_error_response("Chat no encontrado")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"result": error_response.model_dump()}
-            )
-
-        return chat
-
-    except HTTPException:
-        raise
-
-    except Exception as e:
-        logger.error(f"Unexpected error in get_chat endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"result": error_response.model_dump()}
-        )
-
-
-@router.patch("/{chat_id}", response_model=ChatResponse)
+@router.patch("/{chat_id}")
 async def update_chat_titulo_endpoint(
     chat_id: int,
     request: ChatUpdateRequest,
@@ -135,49 +91,48 @@ async def update_chat_titulo_endpoint(
     """
     Update chat title (TITULO)
 
-    Requires JWT authentication. Updates the chat's TITULO field.
+    Requires JWT authentication. Updates the chat's TITULO field using SP_UPDATE_CHAT_TITULO.
 
     Args:
         chat_id: Chat identifier
         request: ChatUpdateRequest with new titulo
 
     Returns:
-        ChatResponse with updated chat details
+        Dict with ID_TIPO_MENSAJE (2=success, 1=failure) and MENSAJE
 
     Raises:
-        HTTPException: 404 if chat not found, 500 for server errors
+        HTTPException: 500 for server errors
     """
     try:
-        username = current_user.get('USUARIO', 'unknown')
-
-        chat = await chat_service.update_chat_titulo(
+        result = await chat_service.update_chat_titulo(
             chat_id=chat_id,
-            request=request,
-            username=username
+            request=request
         )
 
-        if not chat:
-            error_response = create_error_response("Chat no encontrado")
+        # Check if the operation failed
+        if result.get("ID_TIPO_MENSAJE") == 1:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"result": error_response.model_dump()}
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result
             )
 
-        return chat
+        return result
 
     except HTTPException:
         raise
 
     except Exception as e:
         logger.error(f"Unexpected error in update_chat_titulo endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"result": error_response.model_dump()}
+            detail={
+                "ID_TIPO_MENSAJE": 1,
+                "MENSAJE": "Error interno del servidor"
+            }
         )
 
 
-@router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{chat_id}")
 async def delete_chat_endpoint(
     chat_id: int,
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -186,39 +141,39 @@ async def delete_chat_endpoint(
     """
     Delete a chat (soft delete)
 
-    Requires JWT authentication. Soft deletes the chat by setting ID_ESTADO_REGISTRO to 0.
-    The chat data is preserved but marked as inactive.
+    Requires JWT authentication. Soft deletes the chat by setting ID_ESTADO_REGISTRO to 0
+    using SP_UPDATE_CHAT_ESTADO_REGISTRO. The chat data is preserved but marked as inactive.
 
     Args:
         chat_id: Chat identifier
 
     Returns:
-        204 No Content on successful deletion
+        Dict with ID_TIPO_MENSAJE (2=success, 1=failure) and MENSAJE
 
     Raises:
-        HTTPException: 404 if chat not found, 500 for server errors
+        HTTPException: 500 for server errors
     """
     try:
-        username = current_user.get('USUARIO', 'unknown')
+        result = await chat_service.delete_chat(chat_id=chat_id)
 
-        success = await chat_service.delete_chat(chat_id=chat_id, username=username)
-
-        if not success:
-            error_response = create_error_response("Chat no encontrado")
+        # Check if the operation failed
+        if result.get("ID_TIPO_MENSAJE") == 1:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"result": error_response.model_dump()}
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result
             )
 
-        return None
+        return result
 
     except HTTPException:
         raise
 
     except Exception as e:
         logger.error(f"Unexpected error in delete_chat endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"result": error_response.model_dump()}
+            detail={
+                "ID_TIPO_MENSAJE": 1,
+                "MENSAJE": "Error interno del servidor"
+            }
         )

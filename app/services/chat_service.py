@@ -166,83 +166,80 @@ class ChatService:
         self,
         chat_id: int,
         request: ChatUpdateRequest,
-        username: str
-    ) -> Optional[ChatResponse]:
+    ) -> Dict[str, Any]:
         """
-        Update chat TITULO
+        Update chat TITULO using stored procedure SP_UPDATE_CHAT_TITULO
 
         Args:
             chat_id: Chat identifier
             request: Update request with new titulo
-            username: Username of the user updating the chat (for USUMOD)
 
         Returns:
-            ChatResponse with updated chat data, or None if not found
+            Dict with ID_TIPO_MENSAJE (2=success, 1=failure) and MENSAJE
         """
         try:
             query = text("""
-                UPDATE dbo.CHATS
-                SET
-                    TITULO = :titulo,
-                    USUMOD = :usumod,
-                    FCHMOD = GETDATE()
-                OUTPUT INSERTED.*
-                WHERE ID_CHAT = :chat_id
-                    AND ID_ESTADO_REGISTRO = 1
+                EXEC SP_UPDATE_CHAT_TITULO
+                    @ID_CHAT = :id_chat,
+                    @TITULO = :titulo
             """)
 
-            result = self.db.execute(query, {
-                'chat_id': chat_id,
-                'titulo': request.titulo,
-                'usumod': username
+            self.db.execute(query, {
+                'id_chat': chat_id,
+                'titulo': request.titulo
             })
-
-            chat_data = result.fetchone()
             self.db.commit()
 
-            if chat_data:
-                return self._map_to_chat_response(dict(chat_data._mapping))
-            return None
+            return {
+                "ID_TIPO_MENSAJE": 2,
+                "MENSAJE": "Chat title updated successfully"
+            }
 
         except Exception as e:
             logger.error(f"Error in update_chat_titulo service: {e}")
             self.db.rollback()
-            raise
+            return {
+                "ID_TIPO_MENSAJE": 1,
+                "MENSAJE": f"Failed to update chat title: {str(e)}"
+            }
 
-    async def delete_chat(self, chat_id: int, username: str) -> bool:
+    async def delete_chat(self, chat_id: int) -> Dict[str, Any]:
         """
-        Soft delete a chat (set ID_ESTADO_REGISTRO to 0)
+        Soft delete a chat using stored procedure SP_UPDATE_CHAT_ESTADO_REGISTRO
+        Sets ID_ESTADO_REGISTRO to 0 (deleted/inactive)
 
         Args:
             chat_id: Chat identifier
-            username: Username of the user deleting the chat (for USUMOD)
 
         Returns:
-            True if deleted successfully, False otherwise
+            Dict with ID_TIPO_MENSAJE (2=success, 1=failure) and MENSAJE
         """
         try:
             query = text("""
-                UPDATE dbo.CHATS
-                SET
-                    ID_ESTADO_REGISTRO = 0,
-                    USUMOD = :usumod,
-                    FCHMOD = GETDATE()
-                WHERE ID_CHAT = :chat_id
-                    AND ID_ESTADO_REGISTRO = 1
+                EXEC SP_UPDATE_CHAT_ESTADO_REGISTRO
+                    @ID_CHAT = :id_chat,
+                    @ID_ESTADO_REGISTRO = :id_estado_registro
             """)
 
-            result = self.db.execute(query, {
-                'chat_id': chat_id,
-                'usumod': username
+            self.db.execute(query, {
+                'id_chat': chat_id,
+                'id_estado_registro': 0  # 0 = deleted/inactive
             })
 
             self.db.commit()
-            return result.rowcount > 0
+
+            return {
+                "ID_TIPO_MENSAJE": 2,
+                "MENSAJE": "Chat deleted successfully"
+            }
 
         except Exception as e:
             logger.error(f"Error in delete_chat service: {e}")
             self.db.rollback()
-            return False
+            return {
+                "ID_TIPO_MENSAJE": 1,
+                "MENSAJE": f"Failed to delete chat: {str(e)}"
+            }
 
     async def update_ultimo_mensaje_fecha(self, chat_id: int) -> bool:
         """
