@@ -1,6 +1,6 @@
 """Chat models for managing chat sessions."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -23,6 +23,8 @@ class ChatUpdateRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """Response model for chat details - matches CHATS table structure"""
+    model_config = ConfigDict(from_attributes=True)
+
     id_chat: int
     id_area: int
     id_empresa: int
@@ -34,12 +36,11 @@ class ChatResponse(BaseModel):
     fchcre: datetime
     id_estado_registro: int
 
-    class Config:
-        from_attributes = True
-
 
 class ChatListItem(BaseModel):
     """Lightweight chat item for list view"""
+    model_config = ConfigDict(from_attributes=True)
+
     id_chat: int
     titulo: str
     ultimo_mensaje_fecha: Optional[datetime]
@@ -47,9 +48,6 @@ class ChatListItem(BaseModel):
     id_area: int
     id_empresa: int
     id_estado_registro: int
-
-    class Config:
-        from_attributes = True
 
 
 class ChatListResponse(BaseModel):

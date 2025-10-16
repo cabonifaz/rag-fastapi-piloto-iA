@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import validator
+from pydantic import field_validator, ConfigDict
 from typing import Optional
 import logging
 from .database_config import database_config
@@ -7,6 +7,12 @@ from .database_config import database_config
 logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore"
+    )
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     api_debug: bool = False
@@ -69,73 +75,85 @@ class Settings(BaseSettings):
     dynamodb_table_messages: str
     
     
-    @validator('aws_region')
+    @field_validator('aws_region')
+    @classmethod
     def validate_aws_region(cls, v):
         if not v:
             raise ValueError("AWS region is required")
         return v
     
-    @validator('embeddings_provider')
+    @field_validator('embeddings_provider')
+    @classmethod
     def validate_embeddings_provider(cls, v):
         if v not in ['aws', 'openai']:
             raise ValueError("Embeddings provider must be 'aws' or 'openai'")
         return v
     
-    @validator('llm_provider')
+    @field_validator('llm_provider')
+    @classmethod
     def validate_llm_provider(cls, v):
         if v not in ['aws', 'openai']:
             raise ValueError("LLM provider must be 'aws' or 'openai'")
         return v
     
-    @validator('embeddings_model_id')
+    @field_validator('embeddings_model_id')
+    @classmethod
     def validate_embeddings_model_id(cls, v):
         if not v:
             raise ValueError("Embeddings model ID is required")
         return v
     
-    @validator('llm_model_id')
+    @field_validator('llm_model_id')
+    @classmethod
     def validate_llm_model_id(cls, v):
         if not v:
             raise ValueError("LLM model ID is required")
         return v
     
-    @validator('llm_max_tokens')
+    @field_validator('llm_max_tokens')
+    @classmethod
     def validate_llm_max_tokens(cls, v):
         if v <= 0:
             raise ValueError("LLM max tokens must be greater than 0")
         return v
     
-    @validator('llm_temperature')
+    @field_validator('llm_temperature')
+    @classmethod
     def validate_llm_temperature(cls, v):
         if not (0.0 <= v <= 2.0):
             raise ValueError("LLM temperature must be between 0.0 and 2.0")
         return v
     
-    @validator('rag_top_k_results')
+    @field_validator('rag_top_k_results')
+    @classmethod
     def validate_rag_top_k_results(cls, v):
         if v <= 0:
             raise ValueError("RAG top_k results must be greater than 0")
         return v
     
-    @validator('rag_similarity_threshold')
+    @field_validator('rag_similarity_threshold')
+    @classmethod
     def validate_rag_similarity_threshold(cls, v):
         if not (0.0 <= v <= 1.0):
             raise ValueError("RAG similarity threshold must be between 0.0 and 1.0")
         return v
 
-    @validator('rag_hybrid_alpha')
+    @field_validator('rag_hybrid_alpha')
+    @classmethod
     def validate_rag_hybrid_alpha(cls, v):
         if not (0.0 <= v <= 1.0):
             raise ValueError("RAG hybrid alpha must be between 0.0 and 1.0")
         return v
 
-    @validator('jwt_secret_key')
+    @field_validator('jwt_secret_key')
+    @classmethod
     def validate_jwt_secret_key(cls, v):
         if not v or len(v) < 32:
             raise ValueError("JWT secret key must be at least 32 characters long")
         return v
     
-    @validator('jwt_expiration_minutes')
+    @field_validator('jwt_expiration_minutes')
+    @classmethod
     def validate_jwt_expiration_minutes(cls, v):
         if v <= 0 or v > 2880:
             raise ValueError("JWT expiration minutes must be between 1 and 1440")
@@ -154,11 +172,6 @@ class Settings(BaseSettings):
     def database_url(self) -> str:
         """Get database connection string from database config"""
         return database_config.database_url
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        extra = "ignore"  # Ignore extra fields not defined in this model
 
 try:
     settings = Settings()
