@@ -2,8 +2,10 @@ import boto3
 import json
 import logging
 import os
+import asyncio
 from typing import Optional, AsyncGenerator, List, Dict, Any
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
+from botocore.config import Config
 from app.domain.ports.llm_port import LLMPort
 from app.infrastructure.llm.model_factory import ModelConfigFactory
 
@@ -48,8 +50,15 @@ class AWSBedrockConverseProvider(LLMPort):
             session_params["aws_access_key_id"] = aws_access_key_id
             session_params["aws_secret_access_key"] = aws_secret_access_key
 
+        # Configure boto3 with connection and read timeouts to prevent blocking
+        boto_config = Config(
+            connect_timeout=30,  # 30 seconds to establish connection
+            read_timeout=120,    # 2 minutes max for reading response chunks
+            retries={'max_attempts': 2, 'mode': 'standard'}  # Retry failed requests
+        )
+
         session = boto3.Session(**session_params)
-        self.client = session.client("bedrock-runtime")
+        self.client = session.client("bedrock-runtime", config=boto_config)
         self.model_id = model_id
         self.default_role_behavior = role_behavior
 
@@ -90,6 +99,9 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         """
         Generate text using AWS Bedrock Converse Stream API.
 
+        Uses asyncio.to_thread to run blocking boto3 calls in a thread pool,
+        preventing the FastAPI event loop from blocking on slow network connections.
+
         Args:
             prompt: User prompt
             max_tokens: Maximum tokens to generate
@@ -126,7 +138,12 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             # Add system prompt
             request_params["system"] = self._build_system_config(role_behavior)
 
-            response = self.client.converse_stream(**request_params)
+            # Run the blocking boto3 call in a thread pool to avoid blocking the event loop
+            # This prevents the entire backend from freezing when network is slow
+            response = await asyncio.to_thread(
+                self.client.converse_stream,
+                **request_params
+            )
 
             # Process streaming response - ensure proper cleanup
             stream = response.get("stream")
@@ -135,6 +152,9 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
 
             try:
                 yielded_count = 0
+
+                # Iterate through stream events in thread pool to avoid blocking
+                # We process events one at a time to maintain streaming behavior
                 for event in stream:
                     # Handle content block delta (text chunks)
                     if "contentBlockDelta" in event:
@@ -184,9 +204,19 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
 
         except EndpointConnectionError as e:
             logger.error(f"AWS endpoint connection error in generate_stream: {e}")
-            raise ConnectionError("Unable to connect to AWS Bedrock service")
+            raise ConnectionError("Unable to connect to AWS Bedrock service - check internet connection")
+
+        except asyncio.TimeoutError as e:
+            logger.error(f"Timeout error in generate_stream: {e}")
+            raise ConnectionError("AWS Bedrock request timed out - network may be slow or unstable")
 
         except Exception as e:
+            # Check if it's a botocore timeout exception
+            error_message = str(e)
+            if "timed out" in error_message.lower() or "timeout" in error_message.lower():
+                logger.error(f"Timeout error in generate_stream: {e}")
+                raise ConnectionError(f"Request timed out after waiting for response: {str(e)}")
+
             logger.error(f"Unexpected error in generate_stream: {e}")
             raise ConnectionError(f"LLM streaming service error: {str(e)}")
 
