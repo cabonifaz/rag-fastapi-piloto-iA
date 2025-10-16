@@ -406,14 +406,16 @@ class WeaviateRepository(VectorStorePort):
 
             # Build area filter using v4 Filter class
             # Note: No company filter needed - collection itself is scoped to company
-            # Include both the specific area AND Default area documents
+            # Include both the specific area_id AND Default area documents
+            # area_id contains concatenated values like "AREA123"
+            # area contains "Default" for shared documents
             area_filter = (
-                Filter.by_property("area").equal(area) |
+                Filter.by_property("area_id").equal(area) |
                 Filter.by_property("area").equal("Default")
             )
 
             filters = area_filter
-            
+
             # Vector similarity search
             results = await self.search_by_vector(
                 class_name=collection_name,
@@ -503,9 +505,11 @@ class WeaviateRepository(VectorStorePort):
 
             # Build area filter using v4 Filter class
             # Note: No company filter needed - collection itself is scoped to company
-            # Include both the specific area AND Default area documents
+            # Include both the specific area_id AND Default area documents
+            # area_id contains concatenated values like "AREA123"
+            # area contains "Default" for shared documents
             area_filter = (
-                Filter.by_property("area").equal(area) |
+                Filter.by_property("area_id").equal(area) |
                 Filter.by_property("area").equal("Default")
             )
 

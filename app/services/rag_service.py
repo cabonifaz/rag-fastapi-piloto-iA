@@ -344,8 +344,8 @@ class RagService:
                         search_results = await self.search_by_embedding_hybrid(
                             query_text=semantic_query,
                             query_embedding=query_embedding,
-                            company=company,
-                            area=area,
+                            company_id=company_id,
+                            area_id=area_id,
                             top_k=top_k,
                             similarity_threshold=similarity_threshold,
                             alpha=alpha
@@ -602,8 +602,8 @@ class RagService:
         search_result = await self.search_by_embedding_hybrid(
             query_text=cleaned_message,
             query_embedding=query_embedding,
-            company=company,
-            area=area,
+            company_id=company_id,
+            area_id=area_id,
             top_k=search_top_k,
             similarity_threshold=search_threshold,
             alpha=alpha
@@ -762,15 +762,19 @@ class RagService:
             logger.error(f"Unexpected error during embedding generation: {e}")
             raise ConnectionError(f"Embedding generation failed: {str(e)}")
 
-    async def search_by_embedding_hybrid(self, query_text: str, query_embedding: List[float], company: str, area: str, top_k: int = None, similarity_threshold: float = None, alpha: float = None) -> Dict[str, Any]:
+    async def search_by_embedding_hybrid(self, query_text: str, query_embedding: List[float], company_id: int, area_id: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None) -> Dict[str, Any]:
         """
         Hybrid search (vector + BM25) using pre-generated embedding and query text.
-        Company is used as the collection name since each company has its own collection.
+        Company ID and Area ID are concatenated with prefixes to form collection name and area filter.
         """
         from app.core.config import settings
 
         search_top_k = top_k if top_k is not None else settings.rag_top_k_results
         search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
+
+        # Concatenate IDs with prefixes to form collection name and area filter
+        company = f"EMPR{company_id}"
+        area = f"AREA{area_id}"
 
         try:
             # Hybrid search (vector + BM25) - company is the collection name
