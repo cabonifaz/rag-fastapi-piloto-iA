@@ -50,7 +50,7 @@ class OpenAIModelConfig:
 
         return ""
 
-    def build_rag_prompt(self, message: str, context_text: str) -> str:
+    def build_rag_prompt(self, message: str, context_text: str, conversation_history: list = None) -> str:
         """Build RAG prompt optimized for OpenAI models."""
         return f"""Answer the user's question based **only** on the following context.
 Do not search online or make assumptions beyond it.
@@ -61,6 +61,9 @@ Do not search online or make assumptions beyond it.
 - Keep a **balanced tone**: neither too short nor overly elaborate.
 - If the context includes document excerpts, **cite titles or page numbers briefly** when relevant.
 - Do **not invent** or add information not present in the context.
+
+Previous conversation:
+{conversation_history}
 
 Question:
 {message}

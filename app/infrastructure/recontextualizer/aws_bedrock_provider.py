@@ -7,18 +7,18 @@ from typing import Optional, Dict, List
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from botocore.config import Config
 from app.core.config import settings
-from app.infrastructure.context_counter.nova_models import NovaCounterConfig
+from app.infrastructure.recontextualizer.nova_models import NovaRecontextualizerConfig
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class ContextMessageCounter:
+class QueryRecontextualizer:
     """
-    Analyzes a user query and conversation context to:
-    1. Determine the number of past messages needed for context
-    2. Infer the main topic when the user makes implicit references
-    3. Decide whether to use the inferred topic for retrieval
+    Recontextualizes user queries by analyzing conversation history to:
+    1. Resolve pronouns and implicit references
+    2. Include necessary context from previous messages
+    3. Create standalone, self-contained queries for better RAG retrieval
 
     Uses AWS Bedrock Converse API (non-streaming version) with Nova models.
     """
@@ -32,17 +32,17 @@ class ContextMessageCounter:
         aws_secret_access_key: Optional[str] = None,
     ):
         """
-        Initialize AWS Bedrock Converse client for the context counter.
+        Initialize AWS Bedrock Converse client for query recontextualization.
 
         Args:
             region: AWS region (defaults to settings.aws_region)
-            model_id: Bedrock model ID (defaults to settings.context_counter_model_id)
+            model_id: Bedrock model ID (defaults to settings.recontextualizer_model_id)
             profile_name: AWS profile name
             aws_access_key_id: AWS access key ID
             aws_secret_access_key: AWS secret access key
         """
         self.region = region or settings.aws_region
-        self.model_id = model_id or settings.context_counter_model_id
+        self.model_id = model_id or settings.recontextualizer_model_id
 
         session_params = {"region_name": self.region}
 
@@ -70,11 +70,11 @@ class ContextMessageCounter:
             self.client = session.client("bedrock-runtime", config=boto_config)
 
             # Get model-specific configuration
-            self.model_config = NovaCounterConfig
+            self.model_config = NovaRecontextualizerConfig
 
-            logger.info(f"ContextMessageCounter initialized with model: {self.model_id}")
+            logger.info(f"QueryRecontextualizer initialized with model: {self.model_id}")
         except Exception as e:
-            logger.error(f"Failed to initialize ContextMessageCounter: {e}")
+            logger.error(f"Failed to initialize QueryRecontextualizer: {e}")
             raise RuntimeError(f"Could not connect to AWS Bedrock: {str(e)}")
 
     def _build_system_config(self) -> list:
@@ -82,13 +82,13 @@ class ContextMessageCounter:
         system_prompt = self.model_config.get_system_prompt()
         return [{"text": system_prompt}]
 
-    async def analyze_query(
+    async def recontextualize_query(
         self,
         user_query: str,
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, any]:
         """
-        Asynchronously analyzes the user query and conversation context.
+        Asynchronously recontextualizes the user query using conversation history.
 
         Uses asyncio.to_thread to run blocking boto3 calls in a thread pool,
         preventing the FastAPI event loop from blocking.
@@ -99,15 +99,25 @@ class ContextMessageCounter:
 
         Returns:
             Dictionary with:
-                - context_messages: int (number of past messages needed)
-                - inferred_topic: str (inferred topic if applicable)
-                - use_inferred_topic: bool (whether to use inferred topic for retrieval)
+                - needs_context: bool (whether the query needed context)
+                - response: str (the recontextualized query)
+                - summary_intent: bool (whether user is asking for a summary)
+            Returns a default dict with the original query if recontextualization fails.
         """
+        # Default response if no conversation history
+        if not conversation_history or len(conversation_history) == 0:
+            logger.info("No conversation history provided, returning original query")
+            return {
+                "needs_context": False,
+                "response": user_query,
+                "summary_intent": False
+            }
+
         try:
-            # Build the user prompt with query and conversation history (limited to last 3 messages)
+            # Build the user prompt with query and conversation history
             prompt = self.model_config.build_user_prompt(
                 user_query,
-                conversation_history if conversation_history else []
+                conversation_history
             )
 
             # Build request parameters
@@ -121,9 +131,9 @@ class ContextMessageCounter:
                 ],
                 "system": self._build_system_config(),
                 "inferenceConfig": {
-                    "maxTokens": 200,  # Enough for response with inferred topic
-                    "temperature": 0.0,  # Deterministic output
-                    "topP": 1.0
+                    "maxTokens": 1024,  # Sufficient for recontextualized queries
+                    "temperature": 0.2,  # Low temperature for consistent recontextualization
+                    "topP": 0.9
                 }
             }
 
@@ -133,20 +143,29 @@ class ContextMessageCounter:
                 **request_params
             )
 
-            # Extract the full response (count, topic, and flag)
+            # Extract the recontextualized query result
             result = self._extract_result(response)
 
-            logger.info(
-                f"Context analysis - Messages: {result['context_messages']}, "
-                f"Use inferred: {result['use_inferred_topic']}, "
-                f"Topic: {result['inferred_topic'] if result['use_inferred_topic'] else 'N/A'}"
-            )
-
-            return result
+            if result:
+                logger.info(
+                    f"Query recontextualized:\n"
+                    f"  Original: {user_query}\n"
+                    f"  Recontextualized: {result['response']}\n"
+                    f"  Needs context: {result['needs_context']}\n"
+                    f"  Summary intent: {result['summary_intent']}"
+                )
+                return result
+            else:
+                logger.warning("Failed to extract recontextualized query, returning original")
+                return {
+                    "needs_context": False,
+                    "response": user_query,
+                    "summary_intent": False
+                }
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
-            logger.error(f"AWS ClientError in ContextMessageCounter: {error_code} - {e}")
+            logger.error(f"AWS ClientError in QueryRecontextualizer: {error_code} - {e}")
 
             if error_code == 'ValidationException':
                 logger.error(f"Invalid parameters for model {self.model_id}: {str(e)}")
@@ -159,39 +178,39 @@ class ContextMessageCounter:
             elif error_code == 'ResourceNotFoundException':
                 logger.error(f"Model {self.model_id} not found or not accessible")
 
-            return {"context_messages": 0, "inferred_topic": "", "use_inferred_topic": False}
+            return {"needs_context": False, "response": user_query, "summary_intent": False}
 
         except NoCredentialsError as e:
-            logger.error(f"AWS credentials error in ContextMessageCounter: {e}")
-            return {"context_messages": 0, "inferred_topic": "", "use_inferred_topic": False}
+            logger.error(f"AWS credentials error in QueryRecontextualizer: {e}")
+            return {"needs_context": False, "response": user_query, "summary_intent": False}
 
         except EndpointConnectionError as e:
-            logger.error(f"AWS endpoint connection error in ContextMessageCounter: {e}")
-            return {"context_messages": 0, "inferred_topic": "", "use_inferred_topic": False}
+            logger.error(f"AWS endpoint connection error in QueryRecontextualizer: {e}")
+            return {"needs_context": False, "response": user_query, "summary_intent": False}
 
         except asyncio.TimeoutError as e:
-            logger.error(f"Timeout error in ContextMessageCounter: {e}")
-            return {"context_messages": 0, "inferred_topic": "", "use_inferred_topic": False}
+            logger.error(f"Timeout error in QueryRecontextualizer: {e}")
+            return {"needs_context": False, "response": user_query, "summary_intent": False}
 
         except Exception as e:
             # Check if it's a timeout exception
             error_message = str(e)
             if "timed out" in error_message.lower() or "timeout" in error_message.lower():
-                logger.error(f"Timeout error in ContextMessageCounter: {e}")
+                logger.error(f"Timeout error in QueryRecontextualizer: {e}")
             else:
-                logger.error(f"Unexpected error in ContextMessageCounter: {e}")
+                logger.error(f"Unexpected error in QueryRecontextualizer: {e}")
 
-            return {"context_messages": 0, "inferred_topic": "", "use_inferred_topic": False}
+            return {"needs_context": False, "response": user_query, "summary_intent": False}
 
-    def _extract_result(self, response) -> Dict[str, any]:
+    def _extract_result(self, response) -> Optional[Dict[str, any]]:
         """
-        Extract the context count, inferred topic, and usage flag from the Converse API response.
+        Extract the recontextualized query from the Converse API response.
 
         Args:
             response: The response from bedrock_client.converse()
 
         Returns:
-            Dictionary with context_messages, inferred_topic, and use_inferred_topic.
+            Dictionary with needs_context, response, and summary_intent, or None if extraction fails.
         """
         # Delegate to the model config's extract_response method
         return self.model_config.extract_response(response)

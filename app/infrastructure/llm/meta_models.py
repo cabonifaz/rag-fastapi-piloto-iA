@@ -49,7 +49,7 @@ class MetaModelConfig:
             return chunk_data["text"]
         return ""
 
-    def build_rag_prompt(self, message: str, context_text: str) -> str:
+    def build_rag_prompt(self, message: str, context_text: str, conversation_history: list = None) -> str:
         """Build RAG prompt optimized for Llama models."""
         return f"""IMPORTANT: Respond in the SAME LANGUAGE as the question.
 
@@ -57,6 +57,9 @@ Present the data provided below. Show ALL entries exactly as provided. Do not ma
 
 Data:
 {context_text}
+
+Previous conversation:
+{conversation_history}
 
 Question: {message}
 

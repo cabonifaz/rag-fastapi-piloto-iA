@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.infrastructure.task_decomposition.task_generator import TaskGenerator
 from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
 from app.services.message_service import MessageService
-from app.infrastructure.context_counter.aws_bedrock_provider import ContextMessageCounter
+from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 from app.infrastructure.repositories.chat_repository import ChatRepository
 
 # Configure logging
@@ -39,7 +39,7 @@ class RagService:
         self.orchestrator = orchestrator
         self.db = db
         self.message_service = MessageService()
-        self.context_counter = ContextMessageCounter()
+        self.recontextualizer = QueryRecontextualizer()
         self.chat_repository = ChatRepository(db) if db else None
 
     async def load_ia_area_config(self, id_ia_area: int) -> str:
@@ -118,7 +118,7 @@ class RagService:
         return user_query
 
 
-    def _build_rag_prompt(self, message: str, context_text: str) -> str:
+    def _build_rag_prompt(self, message: str, context_text: str, conversation_history: list = None) -> str:
         """
         Build the RAG prompt with context and user message.
         Delegates to model-specific configuration for optimal prompts.
@@ -127,7 +127,7 @@ class RagService:
         model_config = self.llm_provider.get_model_config()
 
         # Use model-specific prompt building
-        return model_config.build_rag_prompt(message, context_text)
+        return model_config.build_rag_prompt(message, context_text, conversation_history)
 
 
     async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
@@ -374,13 +374,13 @@ class RagService:
             logger.error(f"Initialization error in process_rag_query_stream: {e}")
             raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
 
-        # Get last 3 messages from chat history if chat_id exists
+        # Get last 6 messages from chat history if chat_id exists
         conversation_analysis = []
         if chat_id is not None:
             try:
                 messages_response = await self.message_service.get_last_n_messages(
                     chat_id=f"chat-{chat_id}",
-                    n=3
+                    n=6
                 )
                 # Format messages for context counter
                 conversation_analysis = [
@@ -390,31 +390,32 @@ class RagService:
                     }
                     for msg in messages_response
                 ]
+                # Reverse the list so messages are in correct chronological order (oldest first)
+                conversation_analysis.reverse()
                 logger.info(f"Retrieved {len(conversation_analysis)} messages from chat history for context")
             except Exception as e:
                 logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
                 conversation_analysis = []
 
-        print(conversation_analysis)
+        cleaned_message = self.clean_user_query(message)
 
-        # Analyze query with context counter if chat_id exists
-        context_analysis = None
+        # Recontextualize query if chat_id exists
+        recontextualized_result = None
         if chat_id is not None:
             try:
-                context_analysis = await self.context_counter.analyze_query(
-                    user_query=message,
+                recontextualized_result = await self.recontextualizer.recontextualize_query(
+                    user_query=cleaned_message,
                     conversation_history=conversation_analysis
                 )
-                logger.info(f"Context analysis result: {context_analysis}")
+                logger.info(f"Recontextualization result: {recontextualized_result}")
             except Exception as e:
-                logger.warning(f"Failed to analyze query context: {e}, continuing without context analysis")
-                context_analysis = None
+                logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
+                recontextualized_result = None
+
+        print(recontextualized_result)
 
         # Load IA area role behavior configuration
         role_behavior = await self.load_ia_area_config(id_ia_area)
-
-        # Clean the user message
-        cleaned_message = self.clean_user_query(message)
 
         # Track if a new chat was created and store the title
         new_chat_created = False
@@ -496,15 +497,27 @@ class RagService:
                 }
             }
 
-        # Step 1: Generate embedding for the query
-        query_embedding = await self.generate_embedding(cleaned_message)
+        # Step 1: Determine query to use for embedding and search
+        query_for_search = cleaned_message
+        if recontextualized_result and recontextualized_result.get("needs_context", False):
+            recontextualized_query = recontextualized_result.get("response", "").strip()
+            if recontextualized_query:
+                query_for_search = recontextualized_query
+                logger.info(f"Using recontextualized query for search: {query_for_search}")
+            else:
+                logger.warning("Recontextualized response is empty, using original cleaned message")
+        else:
+            logger.info(f"Using original query for search (needs_context={recontextualized_result.get('needs_context', 'N/A') if recontextualized_result else 'N/A'})")
+
+        # Generate embedding for the query (either original or recontextualized)
+        query_embedding = await self.generate_embedding(query_for_search)
 
         # Step 2: Search vector database using the embedding (hybrid search)
         search_top_k = top_k if top_k is not None else settings.rag_top_k_results
         search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
 
         search_result = await self.search_by_embedding_hybrid(
-            query_text=cleaned_message,
+            query_text=query_for_search,
             query_embedding=query_embedding,
             company_id=company_id,
             area_id=area_id,
@@ -515,81 +528,92 @@ class RagService:
 
         # Add query to result for compatibility
         search_result["query"] = cleaned_message
-        
-        # Check if no documents found at database level
-        if search_result["total_found"] == 0:
-            # No documents found - return predefined message without LLM call
-            # Note: metadata already sent earlier, just send the message
-            assistant_timestamp = str(int(time.time() * 1000))
-            yield {
-                "type": "assistant_metadata",
-                "sender": 1,  # 1 = assistant/AI
-                "created_at": assistant_timestamp
-            }
 
-            # Update chat last message date before sending the message
-            if self.chat_repository:
-                self.chat_repository.update_ultimo_mensaje_fecha(chat_id)
-
-            yield {
-                "type": "chunk",
-                "content": NO_CONTEXT_MESSAGE
-            }
-
-            # Save the "no context" message to DynamoDB
-            if chat_id:
-                try:
-                    await self.message_service.create_message(
-                        chat_id=chat_id,
-                        created_at=assistant_timestamp,
-                        sender=1,
-                        message=NO_CONTEXT_MESSAGE
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to save no-context message: {e}")
-
-            yield {
-                "type": "complete",
-                "status": "success"
-            }
-            return
-        
         # Step 3: Prepare context text for LLM with source metadata
         context_with_sources = []
-        for doc in search_result["documents"]:
-            if doc["content"]:
-                # Formato de referencia de páginas
-                if doc.get("page_start") is not None and doc.get("page_end") is not None:
-                    if doc["page_start"] == doc["page_end"]:
-                        page_ref = f"Page {doc['page_start']}"
-                    else:
-                        page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
-                else:
-                    page_ref = "Page N/A"
-                # Armar metadata extra
-                source_info = []
-                if doc.get("doc_id"):
-                    source_info.append(f"ID: {doc['doc_id']}")
-                if doc.get("doc_title"):
-                    source_info.append(f"Title: {doc['doc_title']}")
-                if doc.get("section_title"):
-                    source_info.append(f"Section: {doc['section_title']}")
-                if doc.get("section_path"):
-                    source_info.append(f"Path: {doc['section_path']}")
-                if doc.get("score"):
-                    source_info.append(f"Score: {doc['score']}")
-                # Construcción del bloque final
-                joined_sources = '\n'.join(source_info)
-                context_with_sources.append(
-                    f"Source: {joined_sources}, {page_ref}\nContent:\n{doc['content']}"
-                )
-        
-        context_text = "\n\n".join(context_with_sources)
-        
-        # Step 4: Generate LLM answer
 
-        # Normal RAG flow with context
-        rag_prompt = self._build_rag_prompt(cleaned_message, context_text)
+        # Only process documents if any were found
+        if search_result["total_found"] > 0:
+            for doc in search_result["documents"]:
+                if doc["content"]:
+                    # Formato de referencia de páginas
+                    if doc.get("page_start") is not None and doc.get("page_end") is not None:
+                        if doc["page_start"] == doc["page_end"]:
+                            page_ref = f"Page {doc['page_start']}"
+                        else:
+                            page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
+                    else:
+                        page_ref = "Page N/A"
+                    # Armar metadata extra
+                    source_info = []
+                    if doc.get("doc_id"):
+                        source_info.append(f"ID: {doc['doc_id']}")
+                    if doc.get("doc_title"):
+                        source_info.append(f"Title: {doc['doc_title']}")
+                    if doc.get("section_title"):
+                        source_info.append(f"Section: {doc['section_title']}")
+                    if doc.get("section_path"):
+                        source_info.append(f"Path: {doc['section_path']}")
+                    if doc.get("score"):
+                        source_info.append(f"Score: {doc['score']}")
+                    # Construcción del bloque final
+                    joined_sources = '\n'.join(source_info)
+                    context_with_sources.append(
+                        f"Source: {joined_sources}, {page_ref}\nContent:\n{doc['content']}"
+                    )
+
+        # Build context text (will be empty string if no documents found)
+        context_text = "\n\n".join(context_with_sources) if context_with_sources else ""
+
+        # Step 4: Fetch additional conversation history for LLM prompt if needed
+        # Based on recontextualization result flags
+        conversation_history_for_prompt = []
+        if chat_id and recontextualized_result:
+            needs_context = recontextualized_result.get("needs_context", False)
+            summary_intent = recontextualized_result.get("summary_intent", False)
+
+            # Determine how many messages to fetch based on flags
+            messages_to_fetch = 0
+            if needs_context and summary_intent:
+                # Both flags true: fetch 16 messages
+                messages_to_fetch = 16
+                logger.info("Fetching 16 messages for LLM prompt (needs_context=true, summary_intent=true)")
+            elif needs_context:
+                # Only needs_context true: fetch 8 messages
+                messages_to_fetch = 8
+                logger.info("Fetching 8 messages for LLM prompt (needs_context=true)")
+            elif summary_intent:
+                # Only summary_intent true: fetch 16 messages
+                messages_to_fetch = 16
+                logger.info("Fetching 16 messages for LLM prompt (summary_intent=true)")
+            # If both false: don't fetch any messages (messages_to_fetch = 0)
+
+            # Fetch messages if needed
+            if messages_to_fetch > 0:
+                try:
+                    history_messages = await self.message_service.get_last_n_messages(
+                        chat_id=f"chat-{chat_id}",
+                        n=messages_to_fetch
+                    )
+                    conversation_history_for_prompt = [
+                        {
+                            "role": "user" if msg.sender == 0 else "assistant",
+                            "content": msg.message
+                        }
+                        for msg in history_messages
+                    ]
+                    # Reverse the list so messages are in correct chronological order (oldest first)
+                    conversation_history_for_prompt.reverse()
+                    logger.info(f"Retrieved {len(conversation_history_for_prompt)} messages for LLM prompt")
+                except Exception as e:
+                    logger.warning(f"Failed to retrieve conversation history for prompt: {e}")
+                    conversation_history_for_prompt = []
+
+        # Step 5: Generate LLM answer
+        # Build RAG prompt with context and optional conversation history
+        rag_prompt = self._build_rag_prompt(cleaned_message, context_text, conversation_history_for_prompt)
+
+        print(rag_prompt)
 
         # Step 4: Generate streaming response using LLM
         # Use provided parameters or fall back to environment defaults

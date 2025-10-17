@@ -76,7 +76,7 @@ class AWSBedrockConverseProvider(LLMPort):
 
         # Concatenate role behavior with formatting instructions
         system_text = f"""{role_behavior}
-Start responses with a short, friendly phrase that engages the user naturally before the main answer.
+Use a natural, human-like tone in responses. Maintain conversational and engaging style throughout.
 When providing data or structured information, prioritize technical accuracy and formatting:
 - Always render JSON with "table", "headers", and "rows" as a **Markdown table**.
 - If the context comes from an API call, render it as a Markdown table and omit references.
