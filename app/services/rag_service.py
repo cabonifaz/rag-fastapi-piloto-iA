@@ -118,7 +118,7 @@ class RagService:
         return user_query
 
 
-    def _build_rag_prompt(self, message: str, context_text: str, conversation_history: list = None) -> str:
+    def _build_rag_prompt(self, message: str, context_text: str) -> str:
         """
         Build the RAG prompt with context and user message.
         Delegates to model-specific configuration for optimal prompts.
@@ -126,8 +126,8 @@ class RagService:
         # Get model configuration from LLM provider
         model_config = self.llm_provider.get_model_config()
 
-        # Use model-specific prompt building
-        return model_config.build_rag_prompt(message, context_text, conversation_history)
+        # Use model-specific prompt building (conversation history handled by Converse API)
+        return model_config.build_rag_prompt(message, context_text)
 
 
     async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
@@ -412,8 +412,6 @@ class RagService:
                 logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
                 recontextualized_result = None
 
-        print(recontextualized_result)
-
         # Load IA area role behavior configuration
         role_behavior = await self.load_ia_area_config(id_ia_area)
 
@@ -610,10 +608,8 @@ class RagService:
                     conversation_history_for_prompt = []
 
         # Step 5: Generate LLM answer
-        # Build RAG prompt with context and optional conversation history
-        rag_prompt = self._build_rag_prompt(cleaned_message, context_text, conversation_history_for_prompt)
-
-        print(rag_prompt)
+        # Build RAG prompt with context (conversation history handled by Converse API messages)
+        rag_prompt = self._build_rag_prompt(cleaned_message, context_text)
 
         # Step 4: Generate streaming response using LLM
         # Use provided parameters or fall back to environment defaults
@@ -633,8 +629,14 @@ class RagService:
         assistant_response = ""
         first_chunk_sent = False
 
-        # Stream the LLM response with role behavior
-        async for chunk in self.generate_text_stream(rag_prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
+        # Stream the LLM response with role behavior and conversation history
+        async for chunk in self.generate_text_stream(
+            prompt=rag_prompt,
+            max_tokens=llm_max_tokens,
+            temperature=llm_temperature,
+            role_behavior=role_behavior,
+            messages=conversation_history_for_prompt if conversation_history_for_prompt else None
+        ):
             assistant_response += chunk
 
             # Update chat last message date when first chunk with content is sent
@@ -767,20 +769,30 @@ class RagService:
             "status": "success"
         }
 
-    async def generate_text_stream(self, prompt: str, max_tokens: int = None, temperature: float = None, role_behavior: str = None) -> AsyncGenerator[str, None]:
+    async def generate_text_stream(
+        self,
+        prompt: str = None,
+        max_tokens: int = None,
+        temperature: float = None,
+        role_behavior: str = None,
+        messages: Optional[List[Dict[str, str]]] = None
+    ) -> AsyncGenerator[str, None]:
         """
         Generate streaming text response using LLM.
 
         Args:
-            prompt: The user prompt
+            prompt: The user prompt (used if messages is None)
             max_tokens: Maximum tokens to generate
             temperature: Temperature for sampling
             role_behavior: Optional role behavior (system prompt)
+            messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
+                     If provided, prompt will be ignored and messages will be used instead
         """
         from app.core.config import settings
 
-        if not prompt or not prompt.strip():
-            raise ValueError("Prompt cannot be empty")
+        # Validate that either prompt or messages is provided
+        if messages is None and (not prompt or not prompt.strip()):
+            raise ValueError("Either prompt or messages must be provided")
 
         # Use provided values or fall back to config defaults
         llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
@@ -796,7 +808,13 @@ class RagService:
         try:
             has_content = False
 
-            async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
+            async for chunk in self.llm_provider.generate_stream(
+                prompt=prompt,
+                max_tokens=llm_max_tokens,
+                temperature=llm_temperature,
+                role_behavior=role_behavior,
+                messages=messages
+            ):
                 # Detect stop reason signal
                 if chunk.startswith("__STOP_REASON__:"):
                     stop_reason = chunk.split(":")[1]

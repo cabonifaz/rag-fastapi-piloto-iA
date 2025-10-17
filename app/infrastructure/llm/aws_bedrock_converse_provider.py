@@ -91,10 +91,11 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
 
     async def generate_stream(
         self,
-        prompt: str,
+        prompt: str = None,
         max_tokens: int = 2048,
         temperature: float = 0.3,
-        role_behavior: Optional[str] = None
+        role_behavior: Optional[str] = None,
+        messages: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[str, None]:
         """
         Generate text using AWS Bedrock Converse Stream API.
@@ -103,10 +104,12 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         preventing the FastAPI event loop from blocking on slow network connections.
 
         Args:
-            prompt: User prompt
+            prompt: User prompt (used if messages is None)
             max_tokens: Maximum tokens to generate
             temperature: Temperature for sampling
             role_behavior: Optional role behavior (overrides instance system_prompt)
+            messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
+                     If provided, prompt will be ignored and messages will be used instead
 
         Yields:
             Text chunks as they are generated
@@ -114,15 +117,38 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         try:
             from app.core.config import settings
 
-            # Build request parameters
-            request_params = {
-                "modelId": self.model_id,
-                "messages": [
+            # Build messages array - use provided messages or create from prompt
+            if messages is not None:
+                # Use provided conversation history
+                # Convert messages to Converse API format
+                converse_messages = []
+                for msg in messages:
+                    converse_messages.append({
+                        "role": msg["role"],
+                        "content": [{"text": msg["content"]}]
+                    })
+
+                # Append current prompt as the latest user message (if provided)
+                if prompt and prompt.strip():
+                    converse_messages.append({
+                        "role": "user",
+                        "content": [{"text": prompt}]
+                    })
+            else:
+                # Use single prompt (backward compatibility)
+                if prompt is None:
+                    raise ValueError("Either prompt or messages must be provided")
+                converse_messages = [
                     {
                         "role": "user",
                         "content": [{"text": prompt}]
                     }
-                ],
+                ]
+
+            # Build request parameters
+            request_params = {
+                "modelId": self.model_id,
+                "messages": converse_messages,
                 "inferenceConfig": {
                     "maxTokens": max_tokens,
                     "temperature": temperature,
