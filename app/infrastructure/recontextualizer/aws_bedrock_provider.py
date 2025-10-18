@@ -7,13 +7,14 @@ from typing import Optional, Dict, List
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from botocore.config import Config
 from app.core.config import settings
+from app.domain.ports.recontextualizer_port import RecontextualizerPort
 from app.infrastructure.recontextualizer.nova_models import NovaRecontextualizerConfig
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class QueryRecontextualizer:
+class QueryRecontextualizer(RecontextualizerPort):
     """
     Recontextualizes user queries by analyzing conversation history to:
     1. Resolve pronouns and implicit references

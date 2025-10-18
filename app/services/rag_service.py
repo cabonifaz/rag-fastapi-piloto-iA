@@ -9,6 +9,7 @@ from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
+from app.domain.ports.recontextualizer_port import RecontextualizerPort
 from app.core.config import settings
 from app.infrastructure.task_decomposition.task_generator import TaskGenerator
 from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
@@ -32,13 +33,32 @@ class RagService:
     4. Returns response
     """
 
-    def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort, llm_provider: LLMPort, orchestrator: QueryAnalysisPort = None):
+    def __init__(
+        self,
+        embeddings_provider: EmbeddingsPort,
+        vectorstore: VectorStorePort,
+        llm_provider: LLMPort,
+        message_service: MessageService,
+        recontextualizer: RecontextualizerPort,
+        orchestrator: QueryAnalysisPort = None
+    ):
+        """
+        Initialize RagService with all dependencies injected.
+
+        Args:
+            embeddings_provider: Port for generating embeddings
+            vectorstore: Port for vector database operations
+            llm_provider: Port for LLM operations
+            message_service: Service for managing chat messages in DynamoDB
+            recontextualizer: Service for query recontextualization
+            orchestrator: Optional port for query analysis and task decomposition
+        """
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
         self.llm_provider = llm_provider
+        self.message_service = message_service
+        self.recontextualizer = recontextualizer
         self.orchestrator = orchestrator
-        self.message_service = MessageService()
-        self.recontextualizer = QueryRecontextualizer()
 
     async def load_ia_area_config(self, id_ia_area: int, db: Session) -> str:
         """
@@ -643,9 +663,7 @@ class RagService:
 
             # Update chat last message date when first chunk with content is sent
             if not first_chunk_sent and chunk.strip():
-                # Create ChatRepository instance for this update
-                chat_repository = ChatRepository(db)
-                chat_repository.update_ultimo_mensaje_fecha(chat_id)
+                ChatRepository(db).update_ultimo_mensaje_fecha(chat_id)
                 first_chunk_sent = True
 
             yield {

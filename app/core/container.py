@@ -3,16 +3,19 @@
 from app.core.config import settings
 from app.services.rag_service import RagService
 from app.services.chat_service import ChatService
+from app.services.message_service import MessageService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
+from app.domain.ports.recontextualizer_port import RecontextualizerPort
 
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
 from app.infrastructure.vectorstores.weaviate_repository import WeaviateRepository
 from app.infrastructure.llm.aws_bedrock_converse_provider import AWSBedrockConverseProvider
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
+from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 
 
 class DIContainer:
@@ -28,6 +31,8 @@ class DIContainer:
         self._orchestrator_analyzer = None
         self._rag_service = None
         self._chat_service = None
+        self._message_service = None
+        self._recontextualizer = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -104,13 +109,17 @@ class DIContainer:
             embeddings_provider = self.get_embeddings_provider()
             vectorstore = self.get_vectorstore()
             llm_provider = self.get_llm_provider()
+            message_service = self.get_message_service()
+            recontextualizer = self.get_recontextualizer()
             orchestrator = self.get_orchestrator_analyzer()
 
-            # Create ONCE - singleton
+            # Create ONCE - singleton with all dependencies injected
             self._rag_service = RagService(
                 embeddings_provider=embeddings_provider,
                 vectorstore=vectorstore,
                 llm_provider=llm_provider,
+                message_service=message_service,
+                recontextualizer=recontextualizer,
                 orchestrator=orchestrator
             )
 
@@ -133,6 +142,23 @@ class DIContainer:
             self._chat_service = ChatService()
 
         return self._chat_service
+
+    def get_message_service(self) -> MessageService:
+        """Get message service as singleton (stateless, uses DynamoDB)."""
+        if self._message_service is None:
+            # Create ONCE - singleton
+            self._message_service = MessageService()
+
+        return self._message_service
+
+    def get_recontextualizer(self) -> RecontextualizerPort:
+        """Get query recontextualizer as singleton."""
+        if self._recontextualizer is None:
+            # Create ONCE - singleton
+            # Uses settings for AWS configuration
+            self._recontextualizer = QueryRecontextualizer()
+
+        return self._recontextualizer
 
 
 # Global container instance
