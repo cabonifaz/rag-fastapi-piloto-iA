@@ -163,6 +163,16 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             # Add system prompt
             request_params["system"] = self._build_system_config(role_behavior)
 
+            # Debug: Print converse messages order
+            print("\n" + "="*80)
+            print("CONVERSE API REQUEST - MESSAGES ORDER:")
+            print("="*80)
+            for idx, msg in enumerate(converse_messages):
+                role = msg["role"]
+                content_preview = msg["content"][0]["text"][:100] + "..." if len(msg["content"][0]["text"]) > 100 else msg["content"][0]["text"]
+                print(f"[{idx}] {role.upper()}: {content_preview}")
+            print("="*80 + "\n")
+
             # Run the blocking boto3 call in a thread pool to avoid blocking the event loop
             # This prevents the entire backend from freezing when network is slow
             response = await asyncio.to_thread(

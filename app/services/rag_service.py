@@ -3,6 +3,7 @@ import logging
 import json
 import re
 import time
+from datetime import datetime
 from sqlalchemy.orm import Session
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
@@ -65,18 +66,6 @@ class RagService:
         self.ia_config_service = ia_config_service
         self.recontextualizer = recontextualizer
         self.orchestrator = orchestrator
-
-    def _build_rag_prompt(self, message: str, context_text: str) -> str:
-        """
-        Build the RAG prompt with context and user message.
-        Delegates to model-specific configuration for optimal prompts.
-        """
-        # Get model configuration from LLM provider
-        model_config = self.llm_provider.get_model_config()
-
-        # Use model-specific prompt building (conversation history handled by Converse API)
-        return model_config.build_rag_prompt(message, context_text)
-
 
     async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
         """
@@ -225,7 +214,8 @@ class RagService:
                                 query_to_use = f"{user_query}. IMPORTANT: Provide your response in the same language as the question. If explanation or summary is needed, include it briefly before the table. Then present the tabular data as a well-structured markdown table, showing ALL rows and ALL columns without adding empty or duplicate rows. Convert headers to natural language in the same language as the question, and ensure the table is properly aligned and easy to read. If there is additional text content after the table, continue with it as plain text below the table."
 
                         # Build prompt with context (we know context_text exists here)
-                        prompt = self._build_rag_prompt(query_to_use, context_text)
+                        model_config = self.llm_provider.get_model_config()
+                        prompt = model_config.build_rag_prompt(query_to_use, context_text)
 
                         # Use provided parameters or fall back to environment defaults
                         llm_temperature = temperature if temperature is not None else settings.llm_temperature
@@ -300,16 +290,16 @@ class RagService:
             logger.error(f"Initialization error in process_rag_query_stream: {e}")
             raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
 
-        # Get last 6 messages from chat history if chat_id exists
-        conversation_analysis = []
+        # Get last 16 messages from chat history if chat_id exists (fetch once for both recontextualization and LLM)
+        conversation_history = []
         if chat_id is not None:
             try:
                 messages_response = await self.message_service.get_last_n_messages(
                     chat_id=f"chat-{chat_id}",
-                    n=6
+                    n=16
                 )
-                # Format messages for context counter
-                conversation_analysis = [
+                # Format messages for context
+                conversation_history = [
                     {
                         "role": "user" if msg.sender == 0 else "assistant",
                         "content": msg.message
@@ -317,21 +307,24 @@ class RagService:
                     for msg in messages_response
                 ]
                 # Reverse the list so messages are in correct chronological order (oldest first)
-                conversation_analysis.reverse()
-                logger.info(f"Retrieved {len(conversation_analysis)} messages from chat history for context")
+                conversation_history.reverse()
+                logger.info(f"Retrieved {len(conversation_history)} messages from chat history")
             except Exception as e:
                 logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
-                conversation_analysis = []
+                conversation_history = []
 
         cleaned_message = clean_user_query(message)
 
-        # Recontextualize query if chat_id exists
+        # Recontextualize query if chat_id exists, using only the last 6 messages
         recontextualized_result = None
-        if chat_id is not None:
+        if chat_id is not None and conversation_history:
             try:
+                # Use only the last 6 messages for recontextualization (most recent context)
+                conversation_for_recontextualization = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
+
                 recontextualized_result = await self.recontextualizer.recontextualize_query(
                     user_query=cleaned_message,
-                    conversation_history=conversation_analysis
+                    conversation_history=conversation_for_recontextualization
                 )
                 logger.info(f"Recontextualization result: {recontextualized_result}")
             except Exception as e:
@@ -348,7 +341,6 @@ class RagService:
 
         # Create chat if chat_id is not provided
         if chat_id is None:
-            from datetime import datetime
             now = datetime.now()
             formatted_date = now.strftime("%d/%m/%Y %H:%M")
             titulo = f"Nueva conversación {formatted_date}"
@@ -453,55 +445,41 @@ class RagService:
         # Step 3: Prepare context text for LLM with source metadata using utility function
         context_text = build_context_from_search_results(search_results)
 
-        # Step 4: Fetch additional conversation history for LLM prompt if needed
-        # Based on recontextualization result flags
+        # Step 4: Select conversation history for LLM prompt based on recontextualization flags
+        # Use the already-fetched conversation_history to avoid duplicate DB calls
         conversation_history_for_prompt = []
-        if chat_id and recontextualized_result:
+        if chat_id and conversation_history and recontextualized_result:
             needs_context = recontextualized_result.get("needs_context", False)
             summary_intent = recontextualized_result.get("summary_intent", False)
 
-            # Determine how many messages to fetch based on flags
-            messages_to_fetch = 0
+            # Determine how many messages to use based on flags
+            messages_to_use = 0
             if needs_context and summary_intent:
-                # Both flags true: fetch 16 messages
-                messages_to_fetch = 16
-                logger.info("Fetching 16 messages for LLM prompt (needs_context=true, summary_intent=true)")
+                # Both flags true: use all 16 messages
+                messages_to_use = 16
+                logger.info("Using 16 messages for LLM prompt (needs_context=true, summary_intent=true)")
             elif needs_context:
-                # Only needs_context true: fetch 8 messages
-                messages_to_fetch = 8
-                logger.info("Fetching 8 messages for LLM prompt (needs_context=true)")
+                # Only needs_context true: use 8 messages
+                messages_to_use = 8
+                logger.info("Using 8 messages for LLM prompt (needs_context=true)")
             elif summary_intent:
-                # Only summary_intent true: fetch 16 messages
-                messages_to_fetch = 16
-                logger.info("Fetching 16 messages for LLM prompt (summary_intent=true)")
-            # If both false: don't fetch any messages (messages_to_fetch = 0)
+                # Only summary_intent true: use 16 messages
+                messages_to_use = 16
+                logger.info("Using 16 messages for LLM prompt (summary_intent=true)")
+            # If both false: don't use any messages (messages_to_use = 0)
 
-            # Fetch messages if needed
-            if messages_to_fetch > 0:
-                try:
-                    history_messages = await self.message_service.get_last_n_messages(
-                        chat_id=f"chat-{chat_id}",
-                        n=messages_to_fetch
-                    )
-                    conversation_history_for_prompt = [
-                        {
-                            "role": "user" if msg.sender == 0 else "assistant",
-                            "content": msg.message
-                        }
-                        for msg in history_messages
-                    ]
-                    # Reverse the list so messages are in correct chronological order (oldest first)
-                    conversation_history_for_prompt.reverse()
-                    logger.info(f"Retrieved {len(conversation_history_for_prompt)} messages for LLM prompt")
-                except Exception as e:
-                    logger.warning(f"Failed to retrieve conversation history for prompt: {e}")
-                    conversation_history_for_prompt = []
+            # Select the appropriate number of messages from already-fetched history
+            if messages_to_use > 0:
+                # Take the last N messages (most recent)
+                conversation_history_for_prompt = conversation_history[-messages_to_use:] if len(conversation_history) >= messages_to_use else conversation_history
+                logger.info(f"Selected {len(conversation_history_for_prompt)} messages for LLM prompt from cached history")
 
         # Step 5: Generate LLM answer
         # Build RAG prompt with context (conversation history handled by Converse API messages)
-        rag_prompt = self._build_rag_prompt(cleaned_message, context_text)
+        model_config = self.llm_provider.get_model_config()
+        rag_prompt = model_config.build_rag_prompt(cleaned_message, context_text)
 
-        # Step 4: Generate streaming response using LLM
+        # Step 6: Generate streaming response using LLM
         # Use provided parameters or fall back to environment defaults
         llm_temperature = temperature if temperature is not None else settings.llm_temperature
         llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
