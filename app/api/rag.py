@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.utils.jwt_auth import get_current_user, get_current_user_with_company_validation
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.services.rag_service import RagService
+from app.domain.ports.llm_port import LLMPort
 from app.core.config import settings
 from app.core.container import container
 from app.core.database import get_db
@@ -27,30 +28,35 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def get_full_rag_dependencies(db: Session = Depends(get_db)):
-    """Dependency injection for complete RAG with LLM answer generation."""
-    rag_service, llm_provider = container.get_full_rag_chat_service(db=db)
-    return rag_service, llm_provider
+def get_rag_service() -> RagService:
+    """Get singleton RagService from container."""
+    return container.get_rag_service()
+
+
+def get_llm_provider() -> LLMPort:
+    """Get singleton LLM provider from container."""
+    return container.get_llm_provider()
 
 
 @router.post("/chat-streaming")
 async def chat_streaming_endpoint(
     request: UnifiedRequest,
-    dependencies: tuple = Depends(get_full_rag_dependencies),
+    rag_service: RagService = Depends(get_rag_service),
+    llm_provider: LLMPort = Depends(get_llm_provider),
+    db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
 ):
     """
     Streaming chat endpoint with RAG-powered answer generation.
-    
+
     Returns Server-Sent Events (SSE) format for real-time streaming.
-    
+
     Response format:
     - metadata: Initial context information
     - chunk: Individual text chunks as they're generated
     - complete: Final completion signal
     """
     try:
-        rag_service, llm_provider = dependencies
 
         async def generate_stream():
             try:
@@ -64,6 +70,7 @@ async def chat_streaming_endpoint(
                     area_id=request.area_id,
                     area=request.area,
                     id_ia_area=request.id_ia_area,
+                    db=db,
                     created_at=request.created_at,
                     chat_id=request.chat_id,
                     top_k=request.top_k,
@@ -145,7 +152,9 @@ async def chat_streaming_endpoint(
 @router.post("/agent-streaming")
 async def agent_streaming_endpoint(
     request: AgentStreamingRequest,
-    dependencies: tuple = Depends(get_full_rag_dependencies),
+    rag_service: RagService = Depends(get_rag_service),
+    llm_provider: LLMPort = Depends(get_llm_provider),
+    db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
 ):
     """
@@ -162,7 +171,6 @@ async def agent_streaming_endpoint(
     - complete: Final completion signal
     """
     try:
-        rag_service, llm_provider = dependencies
 
         # Validate external token
         if not request.external_token or not request.external_token.strip():
@@ -180,6 +188,7 @@ async def agent_streaming_endpoint(
                     area_id=request.area_id,
                     area=request.area,
                     id_ia_area=request.id_ia_area,
+                    db=db,
                     top_k=request.top_k,
                     similarity_threshold=request.similarity_threshold,
                     alpha=request.alpha,

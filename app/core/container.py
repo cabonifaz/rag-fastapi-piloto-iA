@@ -25,6 +25,7 @@ class DIContainer:
         self._vectorstore = None
         self._llm_provider = None
         self._orchestrator_analyzer = None
+        self._rag_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -95,22 +96,23 @@ class DIContainer:
 
         return self._llm_provider
 
-    def get_full_rag_chat_service(self, db=None) -> tuple[RagService, LLMPort]:
-        """Get rag service with vectorstore AND LLM provider for complete RAG with answer generation."""
-        embeddings_provider = self.get_embeddings_provider()
-        vectorstore = self.get_vectorstore()
-        llm_provider = self.get_llm_provider()
-        orchestrator = self.get_orchestrator_analyzer()
+    def get_rag_service(self) -> RagService:
+        """Get rag service as singleton (stateless, no db parameter)."""
+        if self._rag_service is None:
+            embeddings_provider = self.get_embeddings_provider()
+            vectorstore = self.get_vectorstore()
+            llm_provider = self.get_llm_provider()
+            orchestrator = self.get_orchestrator_analyzer()
 
-        rag_service = RagService(
-            embeddings_provider=embeddings_provider,
-            vectorstore=vectorstore,
-            llm_provider=llm_provider,
-            orchestrator=orchestrator,
-            db=db
-        )
+            # Create ONCE - singleton
+            self._rag_service = RagService(
+                embeddings_provider=embeddings_provider,
+                vectorstore=vectorstore,
+                llm_provider=llm_provider,
+                orchestrator=orchestrator
+            )
 
-        return rag_service, llm_provider
+        return self._rag_service
 
     def get_orchestrator_analyzer(self) -> OrchestratorQueryAnalyzer:
         """Get orchestrator query analyzer instance (singleton)."""

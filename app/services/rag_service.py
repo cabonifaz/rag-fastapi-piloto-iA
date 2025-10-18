@@ -32,29 +32,28 @@ class RagService:
     4. Returns response
     """
 
-    def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort, llm_provider: LLMPort, orchestrator: QueryAnalysisPort = None, db: Session = None):
+    def __init__(self, embeddings_provider: EmbeddingsPort, vectorstore: VectorStorePort, llm_provider: LLMPort, orchestrator: QueryAnalysisPort = None):
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
         self.llm_provider = llm_provider
         self.orchestrator = orchestrator
-        self.db = db
         self.message_service = MessageService()
         self.recontextualizer = QueryRecontextualizer()
-        self.chat_repository = ChatRepository(db) if db else None
 
-    async def load_ia_area_config(self, id_ia_area: int) -> str:
+    async def load_ia_area_config(self, id_ia_area: int, db: Session) -> str:
         """
         Load IA area configuration from database using stored procedure.
         Falls back to LLM_ROLE_BEHAVIOR from env if SP returns no value or fails.
 
         Args:
             id_ia_area: ID of the IA area
+            db: Database session
 
         Returns:
             Configuration string (max 1000 characters) from SP or LLM_ROLE_BEHAVIOR from env
         """
         try:
-            if not self.db:
+            if not db:
                 logger.warning("Database session not available in RagService, using llm_role_behavior from env")
                 return settings.llm_role_behavior
 
@@ -63,7 +62,7 @@ class RagService:
                 @ID_IA_AREA = :id_ia_area
             """)
 
-            result = self.db.execute(query, {
+            result = db.execute(query, {
                 'id_ia_area': id_ia_area
             })
 
@@ -130,7 +129,7 @@ class RagService:
         return model_config.build_rag_prompt(message, context_text)
 
 
-    async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
+    async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
         """
         Analyze user query using the agent orchestrator model to determine workflow requirements.
         Enhanced version that accepts all process_rag_query_stream parameters for complete context.
@@ -157,7 +156,7 @@ class RagService:
             orchestrator = self.orchestrator
 
             # Load IA area role behavior configuration
-            role_behavior = await self.load_ia_area_config(id_ia_area)
+            role_behavior = await self.load_ia_area_config(id_ia_area, db)
 
             # Clean user query
             user_query = self.clean_user_query(message)
@@ -350,7 +349,7 @@ class RagService:
             }
 
 
-    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, created_at: str, chat_id: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, created_at: str, chat_id: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -413,7 +412,7 @@ class RagService:
                 recontextualized_result = None
 
         # Load IA area role behavior configuration
-        role_behavior = await self.load_ia_area_config(id_ia_area)
+        role_behavior = await self.load_ia_area_config(id_ia_area, db)
 
         # Track if a new chat was created and store the title
         new_chat_created = False
@@ -427,13 +426,16 @@ class RagService:
             formatted_date = now.strftime("%d/%m/%Y %H:%M")
             titulo = f"Nueva conversación {formatted_date}"
 
+            # Create ChatRepository instance for this request
+            chat_repository = ChatRepository(db)
+
             # Call stored procedure to create chat via repository
-            new_chat_id = self.chat_repository.create_chat(
+            new_chat_id = chat_repository.create_chat(
                 id_usuario=user_id,
                 id_area=area_id,
                 id_empresa=company_id,
                 titulo=titulo
-            ) if self.chat_repository else None
+            )
 
             if new_chat_id:
                 chat_id = new_chat_id
@@ -641,8 +643,9 @@ class RagService:
 
             # Update chat last message date when first chunk with content is sent
             if not first_chunk_sent and chunk.strip():
-                if self.chat_repository:
-                    self.chat_repository.update_ultimo_mensaje_fecha(chat_id)
+                # Create ChatRepository instance for this update
+                chat_repository = ChatRepository(db)
+                chat_repository.update_ultimo_mensaje_fecha(chat_id)
                 first_chunk_sent = True
 
             yield {
