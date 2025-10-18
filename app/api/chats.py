@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any
 import logging
 
 from app.core.database import get_db
+from app.core.container import container
 from app.services.chat_service import ChatService
 from app.models.chat_models import (
     ChatCreateRequest,
@@ -21,15 +22,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def get_chat_service(db: Session = Depends(get_db)) -> ChatService:
-    """Dependency injection for ChatService"""
-    return ChatService(db)
+def get_chat_service() -> ChatService:
+    """Get singleton ChatService from container."""
+    return container.get_chat_service()
 
 
 @router.get("/get_chats")
 async def get_user_chats(
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    chat_service: ChatService = Depends(get_chat_service)
+    chat_service: ChatService = Depends(get_chat_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get user chats endpoint
@@ -53,7 +55,7 @@ async def get_user_chats(
             )
 
         # Get user chats from service
-        chats = await chat_service.get_chats_by_user(user_id)
+        chats = await chat_service.get_chats_by_user(db, user_id)
 
         if chats is None:
             error_response = create_error_response("Error al obtener los chats del usuario")
@@ -85,8 +87,9 @@ async def get_user_chats(
 async def update_chat_titulo_endpoint(
     chat_id: int,
     request: ChatUpdateRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    chat_service: ChatService = Depends(get_chat_service)
+    chat_service: ChatService = Depends(get_chat_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Update chat title (TITULO)
@@ -105,6 +108,7 @@ async def update_chat_titulo_endpoint(
     """
     try:
         result = await chat_service.update_chat_titulo(
+            db=db,
             chat_id=chat_id,
             request=request
         )
@@ -135,8 +139,9 @@ async def update_chat_titulo_endpoint(
 @router.delete("/{chat_id}")
 async def delete_chat_endpoint(
     chat_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    chat_service: ChatService = Depends(get_chat_service)
+    chat_service: ChatService = Depends(get_chat_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Delete a chat (soft delete)
@@ -154,7 +159,7 @@ async def delete_chat_endpoint(
         HTTPException: 500 for server errors
     """
     try:
-        result = await chat_service.delete_chat(chat_id=chat_id)
+        result = await chat_service.delete_chat(db=db, chat_id=chat_id)
 
         # Check if the operation failed
         if result.get("ID_TIPO_MENSAJE") == 1:

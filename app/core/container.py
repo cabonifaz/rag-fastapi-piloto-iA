@@ -2,6 +2,7 @@
 
 from app.core.config import settings
 from app.services.rag_service import RagService
+from app.services.chat_service import ChatService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -26,6 +27,7 @@ class DIContainer:
         self._llm_provider = None
         self._orchestrator_analyzer = None
         self._rag_service = None
+        self._chat_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -123,6 +125,14 @@ class DIContainer:
                 raise ConnectionError(f"Failed to initialize orchestrator analyzer: {str(e)}")
 
         return self._orchestrator_analyzer
+
+    def get_chat_service(self) -> ChatService:
+        """Get chat service as singleton (stateless, no db parameter)."""
+        if self._chat_service is None:
+            # Create ONCE - singleton
+            self._chat_service = ChatService()
+
+        return self._chat_service
 
 
 # Global container instance
