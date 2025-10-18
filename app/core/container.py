@@ -4,6 +4,7 @@ from app.core.config import settings
 from app.services.rag_service import RagService
 from app.services.chat_service import ChatService
 from app.services.message_service import MessageService
+from app.services.ia_config_service import IaConfigService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -33,6 +34,7 @@ class DIContainer:
         self._chat_service = None
         self._message_service = None
         self._recontextualizer = None
+        self._ia_config_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -110,6 +112,7 @@ class DIContainer:
             vectorstore = self.get_vectorstore()
             llm_provider = self.get_llm_provider()
             message_service = self.get_message_service()
+            ia_config_service = self.get_ia_config_service()
             recontextualizer = self.get_recontextualizer()
             orchestrator = self.get_orchestrator_analyzer()
 
@@ -119,6 +122,7 @@ class DIContainer:
                 vectorstore=vectorstore,
                 llm_provider=llm_provider,
                 message_service=message_service,
+                ia_config_service=ia_config_service,
                 recontextualizer=recontextualizer,
                 orchestrator=orchestrator
             )
@@ -159,6 +163,14 @@ class DIContainer:
             self._recontextualizer = QueryRecontextualizer()
 
         return self._recontextualizer
+
+    def get_ia_config_service(self) -> IaConfigService:
+        """Get IA config service as singleton (stateless, no db parameter)."""
+        if self._ia_config_service is None:
+            # Create ONCE - singleton
+            self._ia_config_service = IaConfigService()
+
+        return self._ia_config_service
 
 
 # Global container instance

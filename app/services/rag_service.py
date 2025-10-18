@@ -4,7 +4,6 @@ import json
 import re
 import time
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -14,8 +13,10 @@ from app.core.config import settings
 from app.infrastructure.task_decomposition.task_generator import TaskGenerator
 from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
 from app.services.message_service import MessageService
+from app.services.ia_config_service import IaConfigService
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 from app.infrastructure.repositories.chat_repository import ChatRepository
+from app.utils.query_utils import clean_user_query
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class RagService:
         vectorstore: VectorStorePort,
         llm_provider: LLMPort,
         message_service: MessageService,
+        ia_config_service: IaConfigService,
         recontextualizer: RecontextualizerPort,
         orchestrator: QueryAnalysisPort = None
     ):
@@ -50,6 +52,7 @@ class RagService:
             vectorstore: Port for vector database operations
             llm_provider: Port for LLM operations
             message_service: Service for managing chat messages in DynamoDB
+            ia_config_service: Service for loading IA area configuration
             recontextualizer: Service for query recontextualization
             orchestrator: Optional port for query analysis and task decomposition
         """
@@ -57,85 +60,9 @@ class RagService:
         self.vectorstore = vectorstore
         self.llm_provider = llm_provider
         self.message_service = message_service
+        self.ia_config_service = ia_config_service
         self.recontextualizer = recontextualizer
         self.orchestrator = orchestrator
-
-    async def load_ia_area_config(self, id_ia_area: int, db: Session) -> str:
-        """
-        Load IA area configuration from database using stored procedure.
-        Falls back to LLM_ROLE_BEHAVIOR from env if SP returns no value or fails.
-
-        Args:
-            id_ia_area: ID of the IA area
-            db: Database session
-
-        Returns:
-            Configuration string (max 1000 characters) from SP or LLM_ROLE_BEHAVIOR from env
-        """
-        try:
-            if not db:
-                logger.warning("Database session not available in RagService, using llm_role_behavior from env")
-                return settings.llm_role_behavior
-
-            query = text("""
-                EXEC SP_IA_AREA_CONFIG_LOAD
-                @ID_IA_AREA = :id_ia_area
-            """)
-
-            result = db.execute(query, {
-                'id_ia_area': id_ia_area
-            })
-
-            config_data = result.fetchone()
-            result.close()
-
-            if not config_data:
-                logger.info(f"No config found for id_ia_area={id_ia_area}, using llm_role_behavior from env")
-                return settings.llm_role_behavior
-
-            config_dict = dict(config_data._mapping) if hasattr(config_data, '_mapping') else dict(zip(result.keys(), config_data))
-
-            # Get the first value from the result (config text)
-            config_text = list(config_dict.values())[0] if config_dict else None
-
-            if config_text and str(config_text).strip():
-                return str(config_text)[:1000]
-
-            # No valid config text, use env fallback
-            logger.info(f"No valid config found for id_ia_area={id_ia_area}, using llm_role_behavior from env")
-            return settings.llm_role_behavior
-
-        except Exception as e:
-            logger.error(f"Error loading IA area config for id_ia_area={id_ia_area}: {e}, using llm_role_behavior from env")
-            return settings.llm_role_behavior
-
-    @staticmethod
-    def clean_user_query(message: str) -> str:
-        """
-        Clean user query by removing special quotes, normalizing whitespace, and handling line breaks.
-
-        Args:
-            message: Raw user input message
-
-        Returns:
-            Cleaned query string
-        """
-        # First strip leading/trailing whitespace and line breaks
-        user_query = message.strip()
-
-        # Replace newlines/line breaks in the middle with spaces
-        user_query = user_query.replace('\n', ' ').replace('\r', ' ')
-
-        # Remove special quote characters from anywhere in the string
-        special_quotes = ['"', '“', '”', "'"]
-        for quote in special_quotes:
-            user_query = user_query.replace(quote, '')
-
-        # Normalize multiple spaces into single space and trim again
-        user_query = re.sub(r'\s+', ' ', user_query).strip()
-
-        return user_query
-
 
     def _build_rag_prompt(self, message: str, context_text: str) -> str:
         """
@@ -176,10 +103,10 @@ class RagService:
             orchestrator = self.orchestrator
 
             # Load IA area role behavior configuration
-            role_behavior = await self.load_ia_area_config(id_ia_area, db)
+            role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
 
             # Clean user query
-            user_query = self.clean_user_query(message)
+            user_query = clean_user_query(message)
 
             # Define available APIs (this could be loaded from config)
             available_apis = [
@@ -416,7 +343,7 @@ class RagService:
                 logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
                 conversation_analysis = []
 
-        cleaned_message = self.clean_user_query(message)
+        cleaned_message = clean_user_query(message)
 
         # Recontextualize query if chat_id exists
         recontextualized_result = None
@@ -432,7 +359,7 @@ class RagService:
                 recontextualized_result = None
 
         # Load IA area role behavior configuration
-        role_behavior = await self.load_ia_area_config(id_ia_area, db)
+        role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
 
         # Track if a new chat was created and store the title
         new_chat_created = False
