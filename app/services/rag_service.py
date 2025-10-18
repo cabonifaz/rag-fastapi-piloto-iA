@@ -3,6 +3,7 @@ import logging
 import json
 import re
 import time
+import asyncio
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.domain.ports.embeddings_port import EmbeddingsPort
@@ -348,8 +349,9 @@ class RagService:
             # Create ChatRepository instance for this request
             chat_repository = ChatRepository(db)
 
-            # Call stored procedure to create chat via repository
-            new_chat_id = chat_repository.create_chat(
+            # Call stored procedure to create chat via repository (run in thread pool to avoid blocking)
+            new_chat_id = await asyncio.to_thread(
+                chat_repository.create_chat,
                 id_usuario=user_id,
                 id_area=area_id,
                 id_empresa=company_id,
@@ -510,7 +512,11 @@ class RagService:
 
             # Update chat last message date when first chunk with content is sent
             if not first_chunk_sent and chunk.strip():
-                ChatRepository(db).update_ultimo_mensaje_fecha(chat_id)
+                chat_repo = ChatRepository(db)
+                await asyncio.to_thread(
+                    chat_repo.update_ultimo_mensaje_fecha,
+                    chat_id
+                )
                 first_chunk_sent = True
 
             yield {

@@ -2,6 +2,7 @@ import boto3
 import json
 import logging
 import os
+import asyncio
 from typing import List, Optional
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.domain.ports.embeddings_port import EmbeddingsPort
@@ -68,45 +69,27 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
     async def embed(self, text: str) -> List[float]:
         """
         Genera embeddings desde un modelo de AWS Bedrock.
-        Includes token counting and cost calculation.
+        Uses asyncio.to_thread to run blocking boto3 calls without blocking the event loop.
         """
         try:
             if not text or not text.strip():
                 raise ValueError("Input text cannot be empty")
 
-            # Costs calculation (deactivated)
-            # Count input tokens
-            # input_tokens = TokenCounter.estimate_tokens(text, self.model_id)
-
             # Use model-specific configuration to format request
             body = self.model_config.format_request(text)
 
-            response = self.client.invoke_model(
+            # Run the blocking boto3 call in a thread pool to avoid blocking the event loop
+            # This prevents the entire backend from freezing when network is slow
+            response = await asyncio.to_thread(
+                self.client.invoke_model,
                 modelId=self.model_id,
                 body=body,
                 accept="application/json",
-                contentType="application/json",
+                contentType="application/json"
             )
 
+            # Read and parse response body
             response_body = json.loads(response["body"].read())
-
-            # Costs calculation (deactivated)
-            # Extract token usage from response (if available)
-            # token_usage = TokenCounter.extract_token_usage_from_response(response_body, self.model_id)
-            #
-            # # If no usage data from AWS, use our estimation
-            # if token_usage.input_tokens == 0:
-            #     token_usage = TokenUsage(
-            #         input_tokens=input_tokens,
-            #         output_tokens=0,  # Embeddings don't have output tokens
-            #         total_tokens=input_tokens,
-            #         model_id=self.model_id
-            #     )
-            #
-            # # Calculate and log costs
-            # cost_calc = TokenCounter.calculate_cost(token_usage)
-            # TokenCounter.log_usage_and_cost(token_usage, cost_calc, f"EMBEDDING - {self.model_id}")
-            # # Costs calculation (deactivated)
 
             # Use model-specific configuration to extract embedding
             embedding = self.model_config.extract_embedding(response_body)

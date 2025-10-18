@@ -128,7 +128,17 @@ class NovaRecontextualizerConfig:
 
             # Parse JSON response
             try:
-                result = json.loads(text)
+                # Strip markdown code blocks if present (```json ... ```)
+                text_stripped = text.strip()
+                if text_stripped.startswith('```'):
+                    # Find the first newline after opening ```
+                    start_idx = text_stripped.find('\n')
+                    # Find the closing ```
+                    end_idx = text_stripped.rfind('```')
+                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                        text_stripped = text_stripped[start_idx + 1:end_idx].strip()
+
+                result = json.loads(text_stripped)
 
                 # Validate required fields
                 if not isinstance(result, dict):
