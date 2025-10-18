@@ -115,21 +115,28 @@ class QueryRecontextualizer(RecontextualizerPort):
             }
 
         try:
-            # Build the user prompt with query and conversation history
-            prompt = self.model_config.build_user_prompt(
-                user_query,
-                conversation_history
-            )
+            # Build messages array using proper Converse API format
+            # Convert conversation history to Converse messages format
+            converse_messages = []
+            for msg in conversation_history:
+                converse_messages.append({
+                    "role": msg["role"],
+                    "content": [{"text": msg["content"]}]
+                })
+
+            # Build the current query prompt with any model-specific instructions
+            prompt = self.model_config.build_user_prompt(user_query, conversation_history)
+
+            # Append current query as the latest user message
+            converse_messages.append({
+                "role": "user",
+                "content": [{"text": prompt}]
+            })
 
             # Build request parameters
             request_params = {
                 "modelId": self.model_id,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [{"text": prompt}]
-                    }
-                ],
+                "messages": converse_messages,
                 "system": self._build_system_config(),
                 "inferenceConfig": {
                     "maxTokens": 1024,  # Sufficient for recontextualized queries

@@ -45,25 +45,8 @@ class AnthropicRecontextualizerConfig:
         Returns:
             Formatted prompt string with query and context.
         """
-        # Use recent messages for context (up to last 6 messages as per system prompt)
-        recent_messages = conversation_history[-6:] if conversation_history else []
-
-        # Format conversation context
-        if not recent_messages:
-            context_text = "No previous conversation context."
-        else:
-            context_lines = []
-            for msg in recent_messages:
-                role = msg.get('role', 'unknown')
-                content = msg.get('content', '')
-                context_lines.append(f"{role}: {content}")
-            context_text = "\n".join(context_lines)
-
-        # Build the complete prompt
-        prompt = f"""**Recent conversation history (last 6 messages):**
-{context_text}
-
-**Current query:** {user_query}
+        # Build the complete prompt (conversation history sent separately via Converse API)
+        prompt = f"""**Current query:** {user_query}
 
 **Instruction:** Analyze whether the query requires recontextualization and respond accordingly."""
 
