@@ -17,6 +17,8 @@ from app.services.ia_config_service import IaConfigService
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 from app.infrastructure.repositories.chat_repository import ChatRepository
 from app.utils.query_utils import clean_user_query
+from app.utils.search_utils import build_context_from_search_results
+from app.utils.llm_utils import generate_text_stream_with_validation
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -141,7 +143,7 @@ class RagService:
                 if task.get("action") == "embedding":
                     try:
                         query_text = task.get("input", user_query)
-                        query_embedding = await self.generate_embedding(query_text)
+                        query_embedding = await self.embeddings_provider.embed(query_text)
                     except Exception as e:
                         execution_failed = True
                         break  # Stop execution if embedding fails
@@ -150,52 +152,24 @@ class RagService:
                     try:
                         if query_embedding is None:
                             # Generate embedding if not already done
-                            query_embedding = await self.generate_embedding(user_query)
+                            query_embedding = await self.embeddings_provider.embed(user_query)
 
                         # Use semantic_query from analysis if available, otherwise use user_query
                         semantic_query = analysis.get("semantic_query", "").strip() if analysis.get("semantic_query") else user_query
 
-                        search_results = await self.search_by_embedding_hybrid(
-                            query_text=semantic_query,
-                            query_embedding=query_embedding,
+                        # Perform hybrid search using vectorstore directly
+                        search_results = await self.vectorstore.search_in_collection_hybrid(
                             company_id=company_id,
                             area_id=area_id,
+                            query_text=semantic_query,
+                            query_vector=query_embedding,
                             top_k=top_k,
                             similarity_threshold=similarity_threshold,
                             alpha=alpha
                         )
-                        # Build context from retrieved documents
-                        if search_results["documents"]:
-                            context_parts = []
-                            for doc in search_results["documents"]:
-                                if doc["content"]:
-                                    # Formato de referencia de páginas
-                                    if doc.get("page_start") is not None and doc.get("page_end") is not None:
-                                        if doc["page_start"] == doc["page_end"]:
-                                            page_ref = f"Page {doc['page_start']}"
-                                        else:
-                                            page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
-                                    else:
-                                        page_ref = "Page N/A"
-                                    # Armar metadata extra
-                                    source_info = []
-                                    if doc.get("doc_id"): 
-                                        source_info.append(f"ID: {doc['doc_id']}")
-                                    if doc.get("doc_title"): 
-                                        source_info.append(f"Title: {doc['doc_title']}")
-                                    if doc.get("section_title"): 
-                                        source_info.append(f"Section: {doc['section_title']}")
-                                    if doc.get("section_path"): 
-                                        source_info.append(f"Path: {doc['section_path']}")
-                                    if doc.get("score"): 
-                                        source_info.append(f"Score: {doc['score']}")
-                                    # Construcción del bloque final
-                                    joined_sources = '\n'.join(source_info)
-                                    context_parts.append(
-                                        f"Source: {joined_sources}, {page_ref}\nContent:\n{doc['content']}"
-                                    )
 
-                            context_text = "\n\n".join(context_parts)
+                        # Build context from retrieved documents using utility function
+                        context_text = build_context_from_search_results(search_results)
                     except Exception as e:
                         execution_failed = True
                         break  # Stop execution if retrieval fails
@@ -260,8 +234,14 @@ class RagService:
                         # Track if assistant metadata has been sent
                         agent_timestamp_sent = False
 
-                        # Stream response directly from LLM provider (same as process_rag_query_stream)
-                        async for chunk in self.llm_provider.generate_stream(prompt, max_tokens=llm_max_tokens, temperature=llm_temperature, role_behavior=role_behavior):
+                        # Stream response using utility function for consistent stop reason handling
+                        async for chunk in generate_text_stream_with_validation(
+                            llm_provider=self.llm_provider,
+                            prompt=prompt,
+                            max_tokens=llm_max_tokens,
+                            temperature=llm_temperature,
+                            role_behavior=role_behavior
+                        ):
                             # Send agent metadata on first chunk
                             if not agent_timestamp_sent:
                                 agent_timestamp = str(int(time.time() * 1000))
@@ -457,60 +437,21 @@ class RagService:
             logger.info(f"Using original query for search (needs_context={recontextualized_result.get('needs_context', 'N/A') if recontextualized_result else 'N/A'})")
 
         # Generate embedding for the query (either original or recontextualized)
-        query_embedding = await self.generate_embedding(query_for_search)
+        query_embedding = await self.embeddings_provider.embed(query_for_search)
 
         # Step 2: Search vector database using the embedding (hybrid search)
-        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
-        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
-
-        search_result = await self.search_by_embedding_hybrid(
-            query_text=query_for_search,
-            query_embedding=query_embedding,
+        search_results = await self.vectorstore.search_in_collection_hybrid(
             company_id=company_id,
             area_id=area_id,
-            top_k=search_top_k,
-            similarity_threshold=search_threshold,
+            query_text=query_for_search,
+            query_vector=query_embedding,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
             alpha=alpha
         )
 
-        # Add query to result for compatibility
-        search_result["query"] = cleaned_message
-
-        # Step 3: Prepare context text for LLM with source metadata
-        context_with_sources = []
-
-        # Only process documents if any were found
-        if search_result["total_found"] > 0:
-            for doc in search_result["documents"]:
-                if doc["content"]:
-                    # Formato de referencia de páginas
-                    if doc.get("page_start") is not None and doc.get("page_end") is not None:
-                        if doc["page_start"] == doc["page_end"]:
-                            page_ref = f"Page {doc['page_start']}"
-                        else:
-                            page_ref = f"Pages {doc['page_start']}-{doc['page_end']}"
-                    else:
-                        page_ref = "Page N/A"
-                    # Armar metadata extra
-                    source_info = []
-                    if doc.get("doc_id"):
-                        source_info.append(f"ID: {doc['doc_id']}")
-                    if doc.get("doc_title"):
-                        source_info.append(f"Title: {doc['doc_title']}")
-                    if doc.get("section_title"):
-                        source_info.append(f"Section: {doc['section_title']}")
-                    if doc.get("section_path"):
-                        source_info.append(f"Path: {doc['section_path']}")
-                    if doc.get("score"):
-                        source_info.append(f"Score: {doc['score']}")
-                    # Construcción del bloque final
-                    joined_sources = '\n'.join(source_info)
-                    context_with_sources.append(
-                        f"Source: {joined_sources}, {page_ref}\nContent:\n{doc['content']}"
-                    )
-
-        # Build context text (will be empty string if no documents found)
-        context_text = "\n\n".join(context_with_sources) if context_with_sources else ""
+        # Step 3: Prepare context text for LLM with source metadata using utility function
+        context_text = build_context_from_search_results(search_results)
 
         # Step 4: Fetch additional conversation history for LLM prompt if needed
         # Based on recontextualization result flags
@@ -578,8 +519,9 @@ class RagService:
         assistant_response = ""
         first_chunk_sent = False
 
-        # Stream the LLM response with role behavior and conversation history
-        async for chunk in self.generate_text_stream(
+        # Stream the LLM response with role behavior and conversation history using utility function
+        async for chunk in generate_text_stream_with_validation(
+            llm_provider=self.llm_provider,
             prompt=rag_prompt,
             max_tokens=llm_max_tokens,
             temperature=llm_temperature,
@@ -624,170 +566,3 @@ class RagService:
             "type": "complete",
             "status": "success"
         }
-
-    async def generate_embedding(self, query: str) -> List[float]:
-        """
-        Generate embedding for a query text.
-        """
-        try:
-            query_embedding = await self.embeddings_provider.embed(query)
-            return query_embedding
-        except ConnectionError as e:
-            logger.error(f"Connection error during embedding generation: {e}")
-            raise ConnectionError(f"Embedding service unavailable: {str(e)}")
-        except ValueError as e:
-            logger.error(f"Invalid input for embedding: {e}")
-            raise ValueError(f"Invalid query for embedding: {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error during embedding generation: {e}")
-            raise ConnectionError(f"Embedding generation failed: {str(e)}")
-
-    async def search_by_embedding_hybrid(self, query_text: str, query_embedding: List[float], company_id: int, area_id: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None) -> Dict[str, Any]:
-        """
-        Hybrid search (vector + BM25) using pre-generated embedding and query text.
-        Company ID and Area ID are concatenated with prefixes to form collection name and area filter.
-        """
-        from app.core.config import settings
-
-        search_top_k = top_k if top_k is not None else settings.rag_top_k_results
-        search_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
-
-        # Concatenate IDs with prefixes to form collection name and area filter
-        company = f"EMPR{company_id}"
-        area = f"AREA{area_id}"
-
-        try:
-            # Hybrid search (vector + BM25) - company is the collection name
-            search_results = await self.vectorstore.search_in_collection_hybrid(
-                collection_name=company,
-                query_text=query_text,
-                query_vector=query_embedding,
-                area=area,
-                top_k=search_top_k,
-                similarity_threshold=search_threshold,
-                alpha=alpha
-            )
-        except ConnectionError as e:
-            logger.error(f"Connection error during hybrid search: {e}")
-            raise ConnectionError(f"Vector database unavailable: {str(e)}")
-        except ValueError as e:
-            logger.error(f"Invalid search parameters: {e}")
-            raise ValueError(f"Invalid search parameters: {str(e)}")
-        except TimeoutError as e:
-            logger.error(f"Timeout error during hybrid search: {e}")
-            raise TimeoutError(f"Hybrid search timeout: {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error during hybrid search: {e}")
-            raise ConnectionError(f"Hybrid search failed: {str(e)}")
-
-        # Format results
-        documents = []
-        for result in search_results:
-            metadata = result.get("metadata", {})
-            documents.append({
-                "content": result.get("content", ""),
-                # Document metadata
-                "doc_id": metadata.get("doc_id", ""),
-                "doc_title": metadata.get("doc_title", ""),
-                "section_title": metadata.get("section_title", ""),
-                "section_path": metadata.get("section_path", ""),
-                "chunk_id": metadata.get("chunk_id", ""),
-                "page_start": metadata.get("page_start"),
-                "page_end": metadata.get("page_end"),
-                "char_start": metadata.get("char_start"),
-                "char_end": metadata.get("char_end"),
-                "token_count": metadata.get("token_count"),
-                # Search metadata (hybrid returns score, not distance)
-                "score": metadata.get("score"),
-                "relevance_score": metadata.get("relevance_score"),
-                "search_type": metadata.get("search_type", "hybrid")
-            })
-
-        return {
-            "documents": documents,
-            "total_found": len(documents),
-            "search_parameters": {
-                "top_k": search_top_k,
-                "similarity_threshold": search_threshold,
-                "alpha": alpha if alpha is not None else settings.rag_hybrid_alpha,
-                "embedding_model": settings.embeddings_model_id,
-                "search_type": "hybrid"
-            },
-            "embedding_dimensions": len(query_embedding),
-            "status": "success"
-        }
-
-    async def generate_text_stream(
-        self,
-        prompt: str = None,
-        max_tokens: int = None,
-        temperature: float = None,
-        role_behavior: str = None,
-        messages: Optional[List[Dict[str, str]]] = None
-    ) -> AsyncGenerator[str, None]:
-        """
-        Generate streaming text response using LLM.
-
-        Args:
-            prompt: The user prompt (used if messages is None)
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for sampling
-            role_behavior: Optional role behavior (system prompt)
-            messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
-                     If provided, prompt will be ignored and messages will be used instead
-        """
-        from app.core.config import settings
-
-        # Validate that either prompt or messages is provided
-        if messages is None and (not prompt or not prompt.strip()):
-            raise ValueError("Either prompt or messages must be provided")
-
-        # Use provided values or fall back to config defaults
-        llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
-        llm_temperature = temperature if temperature is not None else settings.llm_temperature
-
-        # Validate parameters
-        if llm_max_tokens <= 0:
-            raise ValueError("max_tokens must be greater than 0")
-
-        if not (0.0 <= llm_temperature <= 2.0):
-            raise ValueError("temperature must be between 0.0 and 2.0")
-
-        try:
-            has_content = False
-
-            async for chunk in self.llm_provider.generate_stream(
-                prompt=prompt,
-                max_tokens=llm_max_tokens,
-                temperature=llm_temperature,
-                role_behavior=role_behavior,
-                messages=messages
-            ):
-                # Detect stop reason signal
-                if chunk.startswith("__STOP_REASON__:"):
-                    stop_reason = chunk.split(":")[1]
-                    if stop_reason == "max_tokens":
-                        # Yield the error as a regular message instead of throwing exception
-                        yield "⚠️ El modelo agotó los tokens disponibles durante el análisis de la consulta. Por favor, intenta con una pregunta más específica o reduce la complejidad de tu solicitud."
-                        has_content = True
-                    continue
-
-                has_content = True
-                yield chunk
-
-            if not has_content:
-                raise ValueError("El modelo no generó una respuesta. Por favor, intenta reformular tu pregunta.")
-
-        except ConnectionError as e:
-            logger.error(f"Connection error during LLM generation: {e}")
-            raise ConnectionError(f"LLM service unavailable: {str(e)}")
-        except ValueError as e:
-            logger.error(f"Invalid input for LLM: {e}")
-            raise ValueError(f"Invalid prompt or parameters: {str(e)}")
-        except TimeoutError as e:
-            logger.error(f"Timeout error during LLM generation: {e}")
-            raise TimeoutError(f"LLM generation timeout: {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error during LLM generation: {e}")
-            raise ConnectionError(f"LLM generation failed: {str(e)}")
-

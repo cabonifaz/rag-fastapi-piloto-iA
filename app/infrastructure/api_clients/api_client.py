@@ -4,6 +4,7 @@ import subprocess
 import asyncio
 import json
 import logging
+import re
 from typing import Dict, Any, Optional, List
 import httpx
 
@@ -45,8 +46,6 @@ BASE64_SIGNATURES = [
 
 def is_base64_content(value: str) -> bool:
     """Check if string matches common base64 file signatures."""
-    import re
-
     # Check for data URI scheme
     if value.startswith('data:'):
         return True

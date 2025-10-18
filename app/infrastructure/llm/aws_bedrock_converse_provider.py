@@ -8,6 +8,7 @@ from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnect
 from botocore.config import Config
 from app.domain.ports.llm_port import LLMPort
 from app.infrastructure.llm.model_factory import ModelConfigFactory
+from app.core.config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -115,8 +116,6 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             Text chunks as they are generated
         """
         try:
-            from app.core.config import settings
-
             # Build messages array - use provided messages or create from prompt
             if messages is not None:
                 # Use provided conversation history
