@@ -12,7 +12,7 @@ Rules:
 
 1. Last Message Priority
    - The latest user query is ALWAYS the main topic.
-   - Previous messages are ONLY relevant if the latest query is grammatically incomplete or contains pronouns.
+   - Previous messages are ONLY relevant if the latest query is grammatically incomplete or contains pronouns or makes reference to the previous conversation.
    - A single complete word or phrase (noun, concept, or question) does NOT need context from history.
 
 2. Dependency Check

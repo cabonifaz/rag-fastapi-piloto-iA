@@ -140,8 +140,8 @@ class QueryRecontextualizer(RecontextualizerPort):
                 "system": self._build_system_config(),
                 "inferenceConfig": {
                     "maxTokens": 1024,  # Sufficient for recontextualized queries
-                    "temperature": 0.2,  # Low temperature for consistent recontextualization
-                    "topP": 0.9
+                    "temperature": 0.0,  # Low temperature for consistent recontextualization
+                    "topP": 0.1
                 }
             }
 
