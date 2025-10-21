@@ -277,9 +277,9 @@ class RagService:
                 raise ValueError("Message cannot be empty")
             if not user_id:
                 raise ValueError("User ID is required")
-            if not company or not company.strip():
+            if not company_id:
                 raise ValueError("Company ID is required and cannot be empty")
-            if not area or not area.strip():
+            if not area_id:
                 raise ValueError("Area is required and cannot be empty")
             if id_ia_area is None:
                 raise ValueError("ID IA Area is required and cannot be empty")
