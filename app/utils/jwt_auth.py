@@ -67,13 +67,13 @@ class JWTAuth:
             )
 
     @staticmethod
-    def validate_company_access(token: str, company_id: str, area: str = None) -> bool:
+    def validate_company_access(token: str, company: str, area: str = None) -> bool:
         """
         Validate user access to company/area based on role
 
         Args:
             token: JWT token
-            company_id: Requested company name (matches EMPRESA field in token)
+            company: Requested company name (matches EMPRESA field in token)
             area: Requested area name (matches AREA field in token, optional)
 
         Returns:
@@ -81,7 +81,7 @@ class JWTAuth:
         """
         try:
             # Validate input parameters
-            if not company_id or not company_id.strip():
+            if not company or not company.strip():
                 return False
             if area is not None and (not area or not area.strip()):
                 return False
@@ -96,16 +96,16 @@ class JWTAuth:
             if role_id == 1:
                 return True
 
-            # Admin (role_id = 2): Validate company_id exists in any company_areas row
+            # Admin (role_id = 2): Validate company exists in any company_areas row
             if role_id == 2:
-                return any(ca.get('EMPRESA') == company_id for ca in company_areas)
+                return any(ca.get('EMPRESA') == company for ca in company_areas)
 
-            # User (role_id = 3): Validate both company_id and area exist in the same row
+            # User (role_id = 3): Validate both company and area exist in the same row
             if role_id == 3:
                 if not area:
                     return False
                 return any(
-                    ca.get('EMPRESA') == company_id and
+                    ca.get('EMPRESA') == company and
                     ca.get('AREA') == area
                     for ca in company_areas
                 )
@@ -158,25 +158,25 @@ async def get_current_user_with_company_validation(
         if "application/json" in content_type:
             # For JSON requests (like chat-streaming)
             body = await request.json()
-            company_id = body.get("company_id")
+            company = body.get("company")
             area = body.get("area")
         elif "multipart/form-data" in content_type:
             # For form requests (like upload)
             form = await request.form()
-            company_id = form.get("company_name")
+            company = form.get("company_name")
             area = form.get("area_name")
         else:
             raise HTTPException(status_code=400, detail="Unsupported content type")
 
         # Validate input parameters first
-        if company_id is not None and (not company_id or not company_id.strip()):
+        if company is not None and (not company or not company.strip()):
             raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "Company ID cannot be empty"}})
         if area is not None and (not area or not area.strip()):
             raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "Area cannot be empty"}})
 
         # Validate company/area access
-        if company_id and not JWTAuth.validate_company_access(token, company_id, area):
-            logger.warning(f"Access denied for user {user_data.get('ID_USUARIO')} to company: {company_id}, area: {area}")
+        if company and not JWTAuth.validate_company_access(token, company, area):
+            logger.warning(f"Access denied for user {user_data.get('ID_USUARIO')} to company: {company}, area: {area}")
             raise HTTPException(
                 status_code=403,
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Acceso denegado"}}

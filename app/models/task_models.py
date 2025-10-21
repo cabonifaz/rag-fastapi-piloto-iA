@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 
 
@@ -35,6 +35,8 @@ class Task(BaseModel):
     """
     Individual task definition in the orchestration pipeline.
     """
+    model_config = ConfigDict(use_enum_values=True)
+
     action: TaskAction = Field(..., description="The action to be performed")
     input: Optional[str] = Field(None, description="Input text for embedding or context tasks")
     query: Optional[str] = Field(None, description="SQL query for database tasks")
@@ -49,14 +51,13 @@ class Task(BaseModel):
     error: Optional[str] = Field(None, description="Error message if task failed")
     execution_time_ms: Optional[float] = Field(None, description="Task execution time in milliseconds")
 
-    class Config:
-        use_enum_values = True
-
 
 class TaskPipeline(BaseModel):
     """
     Complete task pipeline with user context and execution metadata.
     """
+    model_config = ConfigDict(use_enum_values=True)
+
     pipeline_id: str = Field(..., description="Unique pipeline identifier")
     user_id: str = Field(..., description="User who initiated the pipeline")
     company_id: str = Field(..., description="Company context for data filtering")
@@ -82,9 +83,6 @@ class TaskPipeline(BaseModel):
     final_result: Optional[Dict[str, Any]] = Field(None, description="Final pipeline result")
     intermediate_results: Dict[str, Any] = Field(default_factory=dict, description="Intermediate task results")
 
-    class Config:
-        use_enum_values = True
-
 
 class IntentAnalysis(BaseModel):
     """
@@ -103,6 +101,8 @@ class TaskExecutionResult(BaseModel):
     """
     Result of individual task execution.
     """
+    model_config = ConfigDict(use_enum_values=True)
+
     task_action: TaskAction = Field(..., description="The action that was executed")
     status: TaskStatus = Field(..., description="Execution status")
     data: Optional[Dict[str, Any]] = Field(None, description="Result data")
@@ -110,9 +110,6 @@ class TaskExecutionResult(BaseModel):
     error: Optional[str] = Field(None, description="Error message if execution failed")
     execution_time_ms: float = Field(..., description="Execution time in milliseconds")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Execution timestamp")
-
-    class Config:
-        use_enum_values = True
 
 
 class PipelineExecutionSummary(BaseModel):
@@ -144,8 +141,7 @@ class PipelineExecutionSummary(BaseModel):
     created_at: datetime = Field(..., description="Pipeline creation time")
     completed_at: Optional[datetime] = Field(None, description="Pipeline completion time")
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class TaskValidationResult(BaseModel):

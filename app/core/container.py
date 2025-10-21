@@ -1,17 +1,22 @@
 # app/core/container.py
 
 from app.core.config import settings
+from app.services.rag_service import RagService
 from app.services.chat_service import ChatService
+from app.services.message_service import MessageService
+from app.services.ia_config_service import IaConfigService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
+from app.domain.ports.recontextualizer_port import RecontextualizerPort
 
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
 from app.infrastructure.vectorstores.weaviate_repository import WeaviateRepository
 from app.infrastructure.llm.aws_bedrock_converse_provider import AWSBedrockConverseProvider
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
+from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 
 
 class DIContainer:
@@ -25,6 +30,11 @@ class DIContainer:
         self._vectorstore = None
         self._llm_provider = None
         self._orchestrator_analyzer = None
+        self._rag_service = None
+        self._chat_service = None
+        self._message_service = None
+        self._recontextualizer = None
+        self._ia_config_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -83,10 +93,10 @@ class DIContainer:
                     self._llm_provider = AWSBedrockConverseProvider(
                         region=settings.llm_region,
                         model_id=settings.llm_model_id,
+                        role_behavior=settings.llm_role_behavior,
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
-                        aws_secret_access_key=settings.aws_secret_access_key,
-                        system_prompt=getattr(settings, 'llm_system_prompt', None)
+                        aws_secret_access_key=settings.aws_secret_access_key
                     )
                 else:
                     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
@@ -95,21 +105,29 @@ class DIContainer:
 
         return self._llm_provider
 
-    def get_full_rag_chat_service(self) -> tuple[ChatService, LLMPort]:
-        """Get chat service with vectorstore AND LLM provider for complete RAG with answer generation."""
-        embeddings_provider = self.get_embeddings_provider()
-        vectorstore = self.get_vectorstore()
-        llm_provider = self.get_llm_provider()
-        orchestrator = self.get_orchestrator_analyzer()
+    def get_rag_service(self) -> RagService:
+        """Get rag service as singleton (stateless, no db parameter)."""
+        if self._rag_service is None:
+            embeddings_provider = self.get_embeddings_provider()
+            vectorstore = self.get_vectorstore()
+            llm_provider = self.get_llm_provider()
+            message_service = self.get_message_service()
+            ia_config_service = self.get_ia_config_service()
+            recontextualizer = self.get_recontextualizer()
+            orchestrator = self.get_orchestrator_analyzer()
 
-        chat_service = ChatService(
-            embeddings_provider=embeddings_provider,
-            vectorstore=vectorstore,
-            llm_provider=llm_provider,
-            orchestrator=orchestrator
-        )
+            # Create ONCE - singleton with all dependencies injected
+            self._rag_service = RagService(
+                embeddings_provider=embeddings_provider,
+                vectorstore=vectorstore,
+                llm_provider=llm_provider,
+                message_service=message_service,
+                ia_config_service=ia_config_service,
+                recontextualizer=recontextualizer,
+                orchestrator=orchestrator
+            )
 
-        return chat_service, llm_provider
+        return self._rag_service
 
     def get_orchestrator_analyzer(self) -> OrchestratorQueryAnalyzer:
         """Get orchestrator query analyzer instance (singleton)."""
@@ -120,6 +138,39 @@ class DIContainer:
                 raise ConnectionError(f"Failed to initialize orchestrator analyzer: {str(e)}")
 
         return self._orchestrator_analyzer
+
+    def get_chat_service(self) -> ChatService:
+        """Get chat service as singleton (stateless, no db parameter)."""
+        if self._chat_service is None:
+            # Create ONCE - singleton
+            self._chat_service = ChatService()
+
+        return self._chat_service
+
+    def get_message_service(self) -> MessageService:
+        """Get message service as singleton (stateless, uses DynamoDB)."""
+        if self._message_service is None:
+            # Create ONCE - singleton
+            self._message_service = MessageService()
+
+        return self._message_service
+
+    def get_recontextualizer(self) -> RecontextualizerPort:
+        """Get query recontextualizer as singleton."""
+        if self._recontextualizer is None:
+            # Create ONCE - singleton
+            # Uses settings for AWS configuration
+            self._recontextualizer = QueryRecontextualizer()
+
+        return self._recontextualizer
+
+    def get_ia_config_service(self) -> IaConfigService:
+        """Get IA config service as singleton (stateless, no db parameter)."""
+        if self._ia_config_service is None:
+            # Create ONCE - singleton
+            self._ia_config_service = IaConfigService()
+
+        return self._ia_config_service
 
 
 # Global container instance

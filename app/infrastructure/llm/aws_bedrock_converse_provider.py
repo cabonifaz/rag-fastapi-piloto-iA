@@ -2,10 +2,13 @@ import boto3
 import json
 import logging
 import os
+import asyncio
 from typing import Optional, AsyncGenerator, List, Dict, Any
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
+from botocore.config import Config
 from app.domain.ports.llm_port import LLMPort
 from app.infrastructure.llm.model_factory import ModelConfigFactory
+from app.core.config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -22,10 +25,10 @@ class AWSBedrockConverseProvider(LLMPort):
         self,
         region: str,
         model_id: str,
+        role_behavior: str,
         profile_name: Optional[str] = None,
         aws_access_key_id: Optional[str] = None,
         aws_secret_access_key: Optional[str] = None,
-        system_prompt: Optional[str] = None,
     ):
         """
         Initialize AWS Bedrock Converse client.
@@ -48,72 +51,103 @@ class AWSBedrockConverseProvider(LLMPort):
             session_params["aws_access_key_id"] = aws_access_key_id
             session_params["aws_secret_access_key"] = aws_secret_access_key
 
+        # Configure boto3 with connection and read timeouts to prevent blocking
+        boto_config = Config(
+            connect_timeout=30,  # 30 seconds to establish connection
+            read_timeout=120,    # 2 minutes max for reading response chunks
+            retries={'max_attempts': 2, 'mode': 'standard'}  # Retry failed requests
+        )
+
         session = boto3.Session(**session_params)
-        self.client = session.client("bedrock-runtime")
+        self.client = session.client("bedrock-runtime", config=boto_config)
         self.model_id = model_id
-        self.system_prompt = """You are a friendly, concise, and technically precise assistant specialized in civil engineering. 
-Help users understand and solve questions about civil, structural, geotechnical, hydraulic, and construction engineering. 
-Communicate clearly and professionally — knowledgeable yet easy to follow, like an experienced engineer explaining with patience, warmth, and a touch of personality to someone with no background in the field.
-Start responses with a short, friendly phrase that engages the user naturally before the main answer.
+        self.default_role_behavior = role_behavior
+
+        # Get model-specific configuration for optimized prompts
+        self.model_config = ModelConfigFactory.get_model_config(model_id)
+
+    def set_system_prompt(self, system_prompt: str):
+        """Update the system prompt for this provider instance."""
+        self.system_prompt = system_prompt
+
+    def _build_system_config(self, custom_system: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
+        """Build system configuration for Converse API."""
+        # Use custom role behavior or default
+        role_behavior = custom_system or self.default_role_behavior
+
+        # Concatenate role behavior with formatting instructions
+        system_text = f"""{role_behavior}
+Use a natural, human-like tone in responses. Maintain conversational and engaging style throughout.
 When providing data or structured information, prioritize technical accuracy and formatting:
 - Always render JSON with "table", "headers", and "rows" as a **Markdown table**.
 - If the context comes from an API call, render it as a Markdown table and omit references.
 Answer directly and briefly. You may include short natural phrases **before or after** the main answer, but not inside technical tables or structured data.
 Do not overthink, speculate, or explain your internal reasoning.
-Always mirror the user’s language exactly in your response. If the input language is unclear, mixed,
+Always mirror the user's language exactly in your response. If the input language is unclear, mixed,
 or contains spelling errors, default to Spanish. Format responses in Markdown when relevant."""
 
-        # Get model-specific configuration for optimized prompts
-        self.model_config = ModelConfigFactory.get_model_config(model_id)
-
-        logger.info(f"AWS Bedrock Converse provider initialized with model: {model_id}")
-        logger.info(f"Model provider: {ModelConfigFactory.get_model_provider(model_id)}")
-        if system_prompt:
-            logger.info(f"System prompt configured: {system_prompt[:100]}...")
-
-    def set_system_prompt(self, system_prompt: str):
-        """Update the system prompt for this provider instance."""
-        self.system_prompt = system_prompt
-        logger.info(f"System prompt updated: {system_prompt[:100]}...")
-
-    def _build_system_config(self, custom_system: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
-        """Build system configuration for Converse API."""
-        system_text = custom_system or self.system_prompt
         if system_text:
             return [{"text": system_text}]
         return None
 
     async def generate_stream(
         self,
-        prompt: str,
+        prompt: str = None,
         max_tokens: int = 2048,
         temperature: float = 0.3,
-        system_prompt: Optional[str] = None
+        role_behavior: Optional[str] = None,
+        messages: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[str, None]:
         """
         Generate text using AWS Bedrock Converse Stream API.
 
+        Uses asyncio.to_thread to run blocking boto3 calls in a thread pool,
+        preventing the FastAPI event loop from blocking on slow network connections.
+
         Args:
-            prompt: User prompt
+            prompt: User prompt (used if messages is None)
             max_tokens: Maximum tokens to generate
             temperature: Temperature for sampling
-            system_prompt: Optional system prompt (overrides instance system_prompt)
+            role_behavior: Optional role behavior (overrides instance system_prompt)
+            messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
+                     If provided, prompt will be ignored and messages will be used instead
 
         Yields:
             Text chunks as they are generated
         """
         try:
-            from app.core.config import settings
+            # Build messages array - use provided messages or create from prompt
+            if messages is not None:
+                # Use provided conversation history
+                # Convert messages to Converse API format
+                converse_messages = []
+                for msg in messages:
+                    converse_messages.append({
+                        "role": msg["role"],
+                        "content": [{"text": msg["content"]}]
+                    })
 
-            # Build request parameters
-            request_params = {
-                "modelId": self.model_id,
-                "messages": [
+                # Append current prompt as the latest user message (if provided)
+                if prompt and prompt.strip():
+                    converse_messages.append({
+                        "role": "user",
+                        "content": [{"text": prompt}]
+                    })
+            else:
+                # Use single prompt (backward compatibility)
+                if prompt is None:
+                    raise ValueError("Either prompt or messages must be provided")
+                converse_messages = [
                     {
                         "role": "user",
                         "content": [{"text": prompt}]
                     }
-                ],
+                ]
+
+            # Build request parameters
+            request_params = {
+                "modelId": self.model_id,
+                "messages": converse_messages,
                 "inferenceConfig": {
                     "maxTokens": max_tokens,
                     "temperature": temperature,
@@ -127,9 +161,14 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
                 request_params["additionalModelRequestFields"] = additional_fields
 
             # Add system prompt
-            request_params["system"] = self._build_system_config(system_prompt)
+            request_params["system"] = self._build_system_config(role_behavior)
 
-            response = self.client.converse_stream(**request_params)
+            # Run the blocking boto3 call in a thread pool to avoid blocking the event loop
+            # This prevents the entire backend from freezing when network is slow
+            response = await asyncio.to_thread(
+                self.client.converse_stream,
+                **request_params
+            )
 
             # Process streaming response - ensure proper cleanup
             stream = response.get("stream")
@@ -138,6 +177,9 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
 
             try:
                 yielded_count = 0
+
+                # Iterate through stream events in thread pool to avoid blocking
+                # We process events one at a time to maintain streaming behavior
                 for event in stream:
                     # Handle content block delta (text chunks)
                     if "contentBlockDelta" in event:
@@ -152,12 +194,10 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
                     # Handle metadata events (optional logging)
                     elif "metadata" in event:
                         metadata = event["metadata"]
-                        logger.debug(f"Stream metadata: {metadata}")
 
                     # Handle message stop event
                     elif "messageStop" in event:
                         stop_reason = event["messageStop"].get("stopReason")
-                        logger.debug(f"Stream stopped: {stop_reason}")
                         # Yield stop reason info if no content was generated
                         if yielded_count == 0 and stop_reason == "max_tokens":
                             yield f"__STOP_REASON__:{stop_reason}"
@@ -189,9 +229,19 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
 
         except EndpointConnectionError as e:
             logger.error(f"AWS endpoint connection error in generate_stream: {e}")
-            raise ConnectionError("Unable to connect to AWS Bedrock service")
+            raise ConnectionError("Unable to connect to AWS Bedrock service - check internet connection")
+
+        except asyncio.TimeoutError as e:
+            logger.error(f"Timeout error in generate_stream: {e}")
+            raise ConnectionError("AWS Bedrock request timed out - network may be slow or unstable")
 
         except Exception as e:
+            # Check if it's a botocore timeout exception
+            error_message = str(e)
+            if "timed out" in error_message.lower() or "timeout" in error_message.lower():
+                logger.error(f"Timeout error in generate_stream: {e}")
+                raise ConnectionError(f"Request timed out after waiting for response: {str(e)}")
+
             logger.error(f"Unexpected error in generate_stream: {e}")
             raise ConnectionError(f"LLM streaming service error: {str(e)}")
 

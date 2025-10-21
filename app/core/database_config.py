@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import validator
+from pydantic import field_validator, ConfigDict
 from typing import Optional
 import logging
 
@@ -7,7 +7,12 @@ logger = logging.getLogger(__name__)
 
 class DatabaseConfig(BaseSettings):
     """Database configuration settings"""
-    
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore"
+    )
+
     # SQL Server Database Configuration
     db_server: str
     db_database: str
@@ -17,25 +22,29 @@ class DatabaseConfig(BaseSettings):
     db_port: int = 1433
     db_trusted_connection: bool = False
     
-    @validator('db_server')
+    @field_validator('db_server')
+    @classmethod
     def validate_db_server(cls, v):
         if not v:
             raise ValueError("Database server is required")
         return v
-    
-    @validator('db_database')
+
+    @field_validator('db_database')
+    @classmethod
     def validate_db_database(cls, v):
         if not v:
             raise ValueError("Database name is required")
         return v
-    
-    @validator('db_username')
+
+    @field_validator('db_username')
+    @classmethod
     def validate_db_username(cls, v):
         if not v:
             raise ValueError("Database username is required")
         return v
-    
-    @validator('db_password')
+
+    @field_validator('db_password')
+    @classmethod
     def validate_db_password(cls, v):
         if not v:
             raise ValueError("Database password is required")
@@ -48,11 +57,6 @@ class DatabaseConfig(BaseSettings):
             return f"mssql+pyodbc://@{self.db_server}:{self.db_port}/{self.db_database}?driver={self.db_driver.replace(' ', '+')}&trusted_connection=yes"
         else:
             return f"mssql+pyodbc://{self.db_username}:{self.db_password}@{self.db_server}:{self.db_port}/{self.db_database}?driver={self.db_driver.replace(' ', '+')}"
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        extra = "ignore"  # Ignore extra fields not defined in this model
 
 # Create database configuration instance
 try:

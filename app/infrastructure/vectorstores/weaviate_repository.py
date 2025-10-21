@@ -9,6 +9,7 @@ from weaviate.exceptions import WeaviateBaseError
 from weaviate.classes.query import Filter
 
 from app.domain.ports.vectorstore_port import VectorStorePort
+from app.core.config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -175,7 +176,6 @@ class WeaviateRepository(VectorStorePort):
         """
 
         # Use environment default if not provided
-        from app.core.config import settings
         actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
 
         def _query_sync() -> List[VectorSearchResult]:
@@ -265,7 +265,6 @@ class WeaviateRepository(VectorStorePort):
             Lista de dicts con: id (uuid), properties (dict) y score (float|None).
         """
 
-        from app.core.config import settings
         actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
         actual_alpha = alpha if alpha is not None else settings.rag_hybrid_alpha
 
@@ -362,8 +361,6 @@ class WeaviateRepository(VectorStorePort):
         area: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar vectors using the default class name from settings."""
-        from app.core.config import settings
-        
         return await self.search_in_collection(
             collection_name=settings.weaviate_class_name,
             query_vector=query_vector,
@@ -374,54 +371,61 @@ class WeaviateRepository(VectorStorePort):
 
     async def search_in_collection(
         self,
-        collection_name: str,
+        company_id: int,
+        area_id: int,
         query_vector: List[float],
-        company_id: str,
-        area: str,
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
-        """Search for similar vectors in a specific collection with required company and area filtering."""
+        """Search for similar vectors in a company-scoped collection with area filtering.
+
+        Args:
+            company_id: Company ID (will be formatted as "EMPR{company_id}" for collection name)
+            area_id: Area ID (will be formatted as "AREA{area_id}" for filtering)
+            query_vector: Vector for semantic search
+            top_k: Number of results to return
+            similarity_threshold: Minimum similarity score
+        """
 
         try:
-            from app.core.config import settings
+            # Format IDs with prefixes for Weaviate collection and area filtering
+            collection_name = f"EMPR{company_id}"
+            area = f"AREA{area_id}"
 
             # Use environment defaults if not provided
             actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
             actual_similarity_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
 
             # Validate inputs
-            if not collection_name:
-                raise ValueError("Collection name cannot be empty")
+            if company_id is None:
+                raise ValueError("Company ID is required")
+            if area_id is None:
+                raise ValueError("Area ID is required")
             if not query_vector:
                 raise ValueError("Query vector cannot be empty")
-            if not company_id:
-                raise ValueError("Company ID is required")
-            if not area:
-                raise ValueError("Area is required")
             if actual_top_k <= 0:
                 raise ValueError("top_k must be greater than 0")
             if similarity_threshold is not None and not (0.0 <= similarity_threshold <= 1.0):
                 raise ValueError("Similarity threshold must be between 0.0 and 1.0")
 
-            # Build filters for company_id and area using v4 Filter class
-            company_filter = Filter.by_property("company_id").equal(company_id)
-
-            # Include both the specific area AND Default area documents
+            # Build area filter using v4 Filter class
+            # Note: No company filter needed - collection itself is scoped to company
+            # Include both the specific area_id AND Default area documents
+            # area_id contains concatenated values like "AREA123"
+            # area contains "Default" for shared documents
             area_filter = (
-                Filter.by_property("area").equal(area) |
+                Filter.by_property("area_id").equal(area) |
                 Filter.by_property("area").equal("Default")
             )
 
-            # Combine filters with & operator
-            filters = company_filter & area_filter
-            
+            filters = area_filter
+
             # Vector similarity search
             results = await self.search_by_vector(
                 class_name=collection_name,
                 vector=query_vector,
                 top_k=actual_top_k,
-                return_properties=["text", "company_id", "doc_id", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
+                return_properties=["text", "doc_id", "chunk_id", "page_start", "page_end", "char_start", "char_end", "token_count"],
                 filters=filters,
                 include_distance=True
             )
@@ -469,51 +473,60 @@ class WeaviateRepository(VectorStorePort):
 
     async def search_in_collection_hybrid(
         self,
-        collection_name: str,
+        company_id: int,
+        area_id: int,
         query_text: str,
         query_vector: List[float],
-        company_id: str,
-        area: str,
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
         alpha: Optional[float] = None
     ) -> List[Dict[str, Any]]:
-        """Hybrid search (vector + BM25) in a specific collection with required company and area filtering."""
+        """Hybrid search (vector + BM25) in a company-scoped collection with area filtering.
+
+        Args:
+            company_id: Company ID (will be formatted as "EMPR{company_id}" for collection name)
+            area_id: Area ID (will be formatted as "AREA{area_id}" for filtering)
+            query_text: Text query for BM25 search
+            query_vector: Vector for semantic search
+            top_k: Number of results to return
+            similarity_threshold: Minimum similarity score
+            alpha: Hybrid search weight (0.0 = pure BM25, 1.0 = pure vector)
+        """
 
         try:
-            from app.core.config import settings
+            # Format IDs with prefixes for Weaviate collection and area filtering
+            collection_name = f"EMPR{company_id}"
+            area = f"AREA{area_id}"
 
             # Use environment defaults if not provided
             actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
             actual_similarity_threshold = similarity_threshold if similarity_threshold is not None else settings.rag_similarity_threshold
 
             # Validate inputs
-            if not collection_name:
-                raise ValueError("Collection name cannot be empty")
+            if company_id is None:
+                raise ValueError("Company ID is required")
+            if area_id is None:
+                raise ValueError("Area ID is required")
             if not query_text:
                 raise ValueError("Query text cannot be empty")
             if not query_vector:
                 raise ValueError("Query vector cannot be empty")
-            if not company_id:
-                raise ValueError("Company ID is required")
-            if not area:
-                raise ValueError("Area is required")
             if actual_top_k <= 0:
                 raise ValueError("top_k must be greater than 0")
             if similarity_threshold is not None and not (0.0 <= similarity_threshold <= 1.0):
                 raise ValueError("Similarity threshold must be between 0.0 and 1.0")
 
-            # Build filters for company_id and area using v4 Filter class
-            company_filter = Filter.by_property("company_id").equal(company_id)
-
-            # Include both the specific area AND Default area documents
+            # Build area filter using v4 Filter class
+            # Note: No company filter needed - collection itself is scoped to company
+            # Include both the specific area_id AND Default area documents
+            # area_id contains concatenated values like "AREA123"
+            # area contains "Default" for shared documents
             area_filter = (
-                Filter.by_property("area").equal(area) |
+                Filter.by_property("area_id").equal(area) |
                 Filter.by_property("area").equal("Default")
             )
 
-            # Combine filters with & operator
-            filters = company_filter & area_filter
+            filters = area_filter
 
             # HYBRID SEARCH (vector + BM25 keyword)
             results = await self.search_hybrid(

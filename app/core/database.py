@@ -3,6 +3,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.declarative import declarative_base
 from app.core.config import settings
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,6 @@ def get_db() -> Session:
 
 async def init_database():
     """Initialize database connection and create tables if they don't exist"""
-    import asyncio
     try:
         # Test database connection with timeout
         await asyncio.wait_for(

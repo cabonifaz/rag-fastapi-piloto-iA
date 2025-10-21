@@ -50,10 +50,8 @@ class AuthService:
             payload = {
                 'ID_USUARIO': clean_user_data.get('ID_USUARIO'),
                 'USUARIO': clean_user_data.get('USUARIO'),
-                'NOMBRES': clean_user_data.get('NOMBRES'),
-                'APELLIDOS': clean_user_data.get('APELLIDOS'),
                 'ID_TIPO_ROL': role_id,
-                'STRING1': role_name,
+                'ROL': role_name,
                 'company_areas': clean_user_data.get('company_areas', []),  # Include all available company areas
                 'exp': datetime.now(timezone.utc) + timedelta(minutes=self.jwt_expiration_minutes),  # Configurable expiration
                 'iat': datetime.now(timezone.utc),  # Issued at

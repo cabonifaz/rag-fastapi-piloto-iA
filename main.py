@@ -24,7 +24,7 @@ from app.core.config import settings
 from app.core.database import init_database, close_database
 
 # Then import the heavy modules
-from app.api import chat, auth, processing, external_login
+from app.api import rag, auth, processing, external_login, chats, messages
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +69,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(chat.router, prefix="/api/v1/rag", tags=["rag"])
+app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(processing.router, prefix="/api/v1/processing", tags=["document-processing"])
 app.include_router(external_login.router, prefix="/api/v1", tags=["external-login"])
+app.include_router(chats.router, prefix="/api/v1/chats", tags=["chat-management"])
+app.include_router(messages.router, prefix="/api/v1/messages", tags=["message-management"])
 
 
 @app.exception_handler(HTTPException)

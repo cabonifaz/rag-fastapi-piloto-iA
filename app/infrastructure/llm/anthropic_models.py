@@ -72,7 +72,7 @@ class AnthropicModelConfig:
         """Build RAG prompt optimized for Claude models."""
         return f"""Answer the user's question based on the following context. Do not search on the internet. Answer in the same language as the question. Present the answer on markdown format.
 
-If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted Markdown table. Include all source references used in the answer with document title and page numbers. 
+If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted Markdown table. Include all source references used in the answer with document title and page numbers.
 
 If the data comes from an API call, the context will include an "API Call". In this case, interpret the response JSON (usually an array of objects) as a table. Present that data in Markdown format, but do not include document or page references for API data.
 
