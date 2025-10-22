@@ -2,7 +2,7 @@ from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
 import jwt
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 from app.core.config import settings
 
@@ -12,6 +12,55 @@ security = HTTPBearer(auto_error=False)  # Don't auto-error, let us handle it
 
 class JWTAuth:
     """JWT Authentication utility"""
+
+    @staticmethod
+    def create_jwt_token(user_data: dict) -> str:
+        """Create JWT token with user data for frontend storage"""
+        try:
+            # Helper function to convert Decimal objects to int/float
+            def convert_decimal(obj):
+                from decimal import Decimal
+                if isinstance(obj, Decimal):
+                    return float(obj) if obj % 1 else int(obj)
+                elif isinstance(obj, dict):
+                    return {k: convert_decimal(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_decimal(item) for item in obj]
+                return obj
+
+            # Convert user_data to handle Decimal objects
+            clean_user_data = convert_decimal(user_data)
+
+            # Extract role information from roles array
+            role_name = 'User'  # Default role
+            role_id = 1  # Default role ID
+            if clean_user_data.get('roles') and len(clean_user_data['roles']) > 0:
+                role_info = clean_user_data['roles'][0]
+                role_name = role_info.get('STRING1', 'User')
+                role_id = role_info.get('ID_TIPO_ROL', 1)
+
+            # Create JWT payload with all fields needed by frontend
+            payload = {
+                'ID_USUARIO': clean_user_data.get('ID_USUARIO'),
+                'USUARIO': clean_user_data.get('USUARIO'),
+                'NOMBRES': clean_user_data.get('NOMBRES'),
+                'APELLIDOS': clean_user_data.get('APELLIDOS'),
+                'ID_TIPO_ROL': role_id,
+                'ROL': role_name,
+                'company_areas': clean_user_data.get('company_areas', []),  # Include all available company areas
+                'exp': datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expiration_minutes),
+                'iat': datetime.now(timezone.utc),  # Issued at
+                'iss': 'qamaq-rag-api'  # Issuer
+            }
+
+            # Create JWT token
+            token = jwt.encode(payload, settings.jwt_secret_key, algorithm='HS256')
+
+            return token
+
+        except Exception as e:
+            logger.error(f"Error creating JWT token: {e}")
+            raise
 
     @staticmethod
     def _extract_payload(token: str) -> Dict[str, Any]:

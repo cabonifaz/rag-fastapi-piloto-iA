@@ -2,71 +2,19 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, text
 from app.models.user_models import Usuario, LoginRequest, LoginResponse, UserInfo
 from app.core.database import get_db
-from app.core.config import settings
-from datetime import datetime, timezone, timedelta
+from app.utils.jwt_auth import JWTAuth
 import logging
 from typing import Optional
-import jwt
 
 logger = logging.getLogger(__name__)
 
 
 class AuthService:
     """Authentication service for user login validation"""
-    
+
     def __init__(self, db: Session):
         self.db = db
-        # JWT configuration from settings
-        self.jwt_secret = settings.jwt_secret_key
-        self.jwt_expiration_minutes = settings.jwt_expiration_minutes
-        self.jwt_algorithm = 'HS256'
-    
-    def create_jwt_token(self, user_data: dict) -> str:
-        """Create JWT token with user data for frontend cookie storage"""
-        try:
-            # Helper function to convert Decimal objects to int/float
-            def convert_decimal(obj):
-                from decimal import Decimal
-                if isinstance(obj, Decimal):
-                    return float(obj) if obj % 1 else int(obj)
-                elif isinstance(obj, dict):
-                    return {k: convert_decimal(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [convert_decimal(item) for item in obj]
-                return obj
-            
-            # Convert user_data to handle Decimal objects
-            clean_user_data = convert_decimal(user_data)
 
-            # Extract role information from roles array
-            role_name = 'User'  # Default role
-            role_id = 1  # Default role ID
-            if clean_user_data.get('roles') and len(clean_user_data['roles']) > 0:
-                role_info = clean_user_data['roles'][0]
-                role_name = role_info.get('STRING1', 'User')
-                role_id = role_info.get('ID_TIPO_ROL', 1)
-            
-            # Create JWT payload with all fields needed by frontend
-            payload = {
-                'ID_USUARIO': clean_user_data.get('ID_USUARIO'),
-                'USUARIO': clean_user_data.get('USUARIO'),
-                'ID_TIPO_ROL': role_id,
-                'ROL': role_name,
-                'company_areas': clean_user_data.get('company_areas', []),  # Include all available company areas
-                'exp': datetime.now(timezone.utc) + timedelta(minutes=self.jwt_expiration_minutes),  # Configurable expiration
-                'iat': datetime.now(timezone.utc),  # Issued at
-                'iss': 'qamaq-rag-api'  # Issuer
-            }
-
-            # Create JWT token
-            token = jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
-            
-            return token
-            
-        except Exception as e:
-            logger.error(f"Error creating JWT token: {e}")
-            raise
-    
     async def verify_user_password(self, usuario: str, password: str) -> bool:
         """Verify user password using SP_VERIFY_USER_PASS"""
         try:
@@ -197,7 +145,7 @@ class AuthService:
                 return None
             
             # Create JWT token
-            jwt_token = self.create_jwt_token(user_data)
+            jwt_token = JWTAuth.create_jwt_token(user_data)
 
             # Return response with JWT token
             return LoginResponse(
