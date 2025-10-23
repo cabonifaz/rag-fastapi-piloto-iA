@@ -2,6 +2,7 @@
 
 from app.core.config import settings
 from app.services.rag_service import RagService
+from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
 from app.services.message_service import MessageService
 from app.services.ia_config_service import IaConfigService
@@ -31,6 +32,7 @@ class DIContainer:
         self._llm_provider = None
         self._orchestrator_analyzer = None
         self._rag_service = None
+        self._auth_service = None
         self._chat_service = None
         self._message_service = None
         self._recontextualizer = None
@@ -128,6 +130,14 @@ class DIContainer:
             )
 
         return self._rag_service
+
+    def get_auth_service(self) -> AuthService:
+        """Get auth service as singleton (stateless, no db parameter)."""
+        if self._auth_service is None:
+            # Create ONCE - singleton
+            self._auth_service = AuthService()
+
+        return self._auth_service
 
     def get_orchestrator_analyzer(self) -> OrchestratorQueryAnalyzer:
         """Get orchestrator query analyzer instance (singleton)."""
