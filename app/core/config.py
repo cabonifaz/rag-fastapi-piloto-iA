@@ -75,6 +75,10 @@ class Settings(BaseSettings):
 
     # DynamoDB Configuration
     dynamodb_table_messages: str
+    dynamodb_table_upload_knowledge: str
+
+    # S3 Configuration
+    s3_pdfs_bucket: str
     
     
     @field_validator('aws_region')

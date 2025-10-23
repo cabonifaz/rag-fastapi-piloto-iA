@@ -1,10 +1,10 @@
 """Repository for DynamoDB message operations."""
 
-import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 from typing import Optional, List, Dict, Any
 import logging
 from app.core.config import settings
+from app.core.aws_clients import get_dynamodb_table
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +23,8 @@ class MessageRepository:
     """
 
     def __init__(self):
-        """Initialize DynamoDB client using AWS profile from settings"""
-        session = boto3.Session(
-            profile_name=settings.aws_profile,
-            region_name=settings.aws_region
-        )
-        self.dynamodb = session.resource('dynamodb')
-        self.table = self.dynamodb.Table(settings.dynamodb_table_messages)
+        """Initialize DynamoDB table using centralized AWS client"""
+        self.table = get_dynamodb_table(settings.dynamodb_table_messages)
         self.table_name = settings.dynamodb_table_messages
 
     def create_message(
@@ -54,14 +49,6 @@ class MessageRepository:
             Exception: If message save fails
         """
         try:
-            # Initialize DynamoDB client
-            session = boto3.Session(
-                profile_name=settings.aws_profile,
-                region_name=settings.aws_region
-            )
-            dynamodb = session.resource('dynamodb')
-            table = dynamodb.Table(settings.dynamodb_table_messages)
-
             # Convert chat_id to DynamoDB format: "chat-{id}"
             chat_id_str = f"chat-{chat_id}"
 
@@ -77,7 +64,7 @@ class MessageRepository:
                 'message': message
             }
 
-            table.put_item(Item=item)
+            self.table.put_item(Item=item)
 
         except Exception as e:
             logger.error(f"Error saving message for chat_id {chat_id}: {e}")
@@ -190,7 +177,7 @@ class MessageRepository:
         try:
             response = self.table.query(
                 KeyConditionExpression=Key('chat_id').eq(chat_id),
-                FilterExpression=boto3.dynamodb.conditions.Attr('id_estado_registro').eq(id_estado_registro),
+                FilterExpression=Attr('id_estado_registro').eq(id_estado_registro),
                 Select='COUNT'
             )
 
