@@ -95,14 +95,14 @@ class UserRepository:
                             columns = [desc[0] for desc in cursor.description]
                             rows = cursor.fetchall()
 
-                            if result_set_num == 3 and rows:  # User data
+                            if result_set_num == 2 and rows:
                                 user_row = rows[0]
                                 user_data = dict(zip(columns, user_row))
-                            elif result_set_num == 4 and rows:  # Role data
+                            elif result_set_num == 3 and rows:
                                 for row in rows:
                                     role_dict = dict(zip(columns, row))
                                     roles_data.append(role_dict)
-                            elif result_set_num == 5 and rows:  # Company Areas data
+                            elif result_set_num == 4 and rows:
                                 for row in rows:
                                     area_dict = dict(zip(columns, row))
                                     company_areas_data.append(area_dict)
@@ -174,64 +174,23 @@ class UserRepository:
     # Direct Table Query Operations
     # =============================================
 
-    def get_user_by_id(self, user_id: int) -> Optional[Usuario]:
+    def update_connection_status(self, user_id: int) -> None:
         """
-        Query USUARIO table by ID
+        Update user connection status using SP_USUARIO_LOGOUT
 
         Args:
             user_id: User identifier
-
-        Returns:
-            Usuario model instance or None
         """
         try:
-            user = self.db.query(Usuario).filter(Usuario.ID_USUARIO == user_id).first()
-            return user
+            query = text("""
+                EXEC SP_USUARIO_LOGOUT
+                @ID_USUARIO = :user_id
+            """)
+
+            self.db.execute(query, {'user_id': user_id})
+            self.db.commit()
+
         except Exception as e:
-            logger.error(f"Error querying user by ID {user_id}: {e}")
-            raise
-
-    def get_active_user_by_id(self, user_id: int) -> Optional[Usuario]:
-        """
-        Query USUARIO table by ID with active status filter
-
-        Args:
-            user_id: User identifier
-
-        Returns:
-            Usuario model instance or None
-        """
-        try:
-            user = self.db.query(Usuario).filter(
-                and_(
-                    Usuario.ID_USUARIO == user_id,
-                    Usuario.ID_ESTADO_REGISTRO == 1
-                )
-            ).first()
-            return user
-        except Exception as e:
-            logger.error(f"Error querying active user by ID {user_id}: {e}")
-            raise
-
-    def update_connection_status(self, user_id: int, connected: bool) -> bool:
-        """
-        Update user connection status in USUARIO table
-
-        Args:
-            user_id: User identifier
-            connected: True for logged in, False for logged out
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            user = self.db.query(Usuario).filter(Usuario.ID_USUARIO == user_id).first()
-            if user:
-                user.ID_CONECTADO = connected
-                self.db.commit()
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error updating connection status for user {user_id}: {e}")
+            logger.error(f"Error executing SP_USUARIO_LOGOUT for user {user_id}: {e}")
             self.db.rollback()
             raise

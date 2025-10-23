@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.container import container
 from app.services.auth_service import AuthService
-from app.models.user_models import LoginRequest, LoginResponse, UserInfo
+from app.models.user_models import LoginRequest, LoginResponse
 from app.models.response_models import create_success_response, create_error_response
 from app.utils.jwt_auth import get_current_user
 from pydantic import ValidationError
@@ -124,81 +124,6 @@ async def logout_endpoint(
         
     except Exception as e:
         logger.error(f"Unexpected error in logout endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(
-            status_code=500,
-            detail={"result": error_response.model_dump()}
-        )
-
-
-@router.get("/user/{user_id}", response_model=UserInfo)
-async def get_user_info_endpoint(
-    user_id: int,
-    auth_service: AuthService = Depends(get_auth_service),
-    db: Session = Depends(get_db)
-):
-    """
-    Get user information endpoint
-
-    Retrieves user details by user ID.
-
-    Args:
-        user_id: ID of the user to retrieve
-
-    Returns:
-        UserInfo with user details
-
-    Raises:
-        HTTPException: 404 if user not found, 500 for server errors
-    """
-    try:
-        user_info = await auth_service.get_user_info(db, user_id)
-        
-        if not user_info:
-            error_response = create_error_response("Usuario no encontrado")
-            raise HTTPException(
-                status_code=404,
-                detail={"result": error_response.model_dump()}
-            )
-        
-        return user_info
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
-        raise
-        
-    except Exception as e:
-        logger.error(f"Unexpected error in get user info endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(
-            status_code=500,
-            detail={"result": error_response.model_dump()}
-        )
-
-
-@router.get("/validate")
-async def validate_jwt_endpoint(
-    current_user: Dict[str, Any] = Depends(get_current_user)
-):
-    """
-    JWT validation endpoint for route guarding.
-
-    Simply validates that the JWT cookie is present and valid.
-    Returns user info if valid, 401 if not.
-
-    This is used by GuardRoute to protect frontend routes.
-    """
-    try:
-
-        success_response = create_success_response("JWT válido")
-        return {
-            "valid": True,
-            "user_id": current_user.get('ID_USUARIO'),
-            "result": success_response.model_dump()
-        }
-
-    except Exception as e:
-        logger.error(f"Unexpected error in validate endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,

@@ -88,7 +88,7 @@ class AuthService:
     
     async def logout_user(self, db: Session, user_id: int) -> bool:
         """
-        Update user connection status on logout
+        Logout user using SP_USUARIO_LOGOUT
 
         Args:
             db: Database session
@@ -99,58 +99,12 @@ class AuthService:
         """
         try:
             user_repo = UserRepository(db)
-            return user_repo.update_connection_status(user_id, connected=False)
+            user_repo.update_connection_status(user_id)
+            return True
         except Exception as e:
             logger.error(f"Error during logout for user {user_id}: {e}")
             return False
-    
-    async def get_user_info(self, db: Session, user_id: int) -> Optional[UserInfo]:
-        """
-        Get user information by ID
 
-        Args:
-            db: Database session
-            user_id: ID of the user
-
-        Returns:
-            UserInfo object if found, None otherwise
-        """
-        try:
-            user_repo = UserRepository(db)
-            user = user_repo.get_active_user_by_id(user_id)
-
-            if user:
-                return UserInfo(
-                    id_usuario=user.ID_USUARIO,
-                    usuario=user.USUARIO,
-                    nombres=user.NOMBRES,
-                    apellidos=user.APELLIDOS,
-                    email=user.EMAIL,
-                    ultimo_ingreso=user.ULTIMO_INGRESO,
-                    id_estado_registro=user.ID_ESTADO_REGISTRO
-                )
-            return None
-        except Exception as e:
-            logger.error(f"Error getting user info for ID {user_id}: {e}")
-            return None
-
-
-    async def get_user_data_by_id(self, db: Session, user_id: int) -> Optional[dict]:
-        """Get user data by user ID (similar to get_user_data but by ID)"""
-        try:
-            user_repo = UserRepository(db)
-            # Get user from database
-            user = user_repo.get_active_user_by_id(user_id)
-
-            if not user:
-                return None
-
-            # Get user data using the stored procedure with username
-            return await self.get_user_data(db, user.USUARIO)
-
-        except Exception as e:
-            logger.error(f"Error getting user data by ID {user_id}: {e}")
-            return None
 
     async def get_user_company_areas(self, db: Session, user_id: int, role_id: int) -> Optional[list]:
         """Get user company areas using SP_USUARIO_EMPR_AREA_LST"""
