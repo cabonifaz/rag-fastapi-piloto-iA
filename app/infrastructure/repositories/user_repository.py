@@ -170,13 +170,31 @@ class UserRepository:
             logger.error(f"Error executing SP_USUARIO_EMPR_AREA_LST: {e}")
             raise
 
-    # =============================================
-    # Direct Table Query Operations
-    # =============================================
 
-    def update_connection_status(self, user_id: int) -> None:
+    def update_login_status(self, user_id: int) -> None:
         """
-        Update user connection status using SP_USUARIO_LOGOUT
+        Update user login status using SP_USUARIO_LOGIN_STATUS
+
+        Args:
+            user_id: User identifier
+        """
+        try:
+            query = text("""
+                EXEC SP_USUARIO_LOGIN_STATUS
+                @ID_USUARIO = :user_id
+            """)
+
+            self.db.execute(query, {'user_id': user_id})
+            self.db.commit()
+
+        except Exception as e:
+            logger.error(f"Error executing SP_USUARIO_LOGIN_STATUS for user {user_id}: {e}")
+            self.db.rollback()
+            raise
+
+    def update_logout_status(self, user_id: int) -> None:
+        """
+        Update user logout status using SP_USUARIO_LOGOUT
 
         Args:
             user_id: User identifier

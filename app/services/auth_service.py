@@ -72,7 +72,11 @@ class AuthService:
                 logger.error(f"Failed to get user data for: {login_request.usuario}")
                 return None
 
-            # Create JWT token
+            # Step 3: Update login status
+            user_repo = UserRepository(db)
+            user_repo.update_login_status(user_data.get('ID_USUARIO'))
+
+            # Step 4: Create JWT token
             jwt_token = JWTAuth.create_jwt_token(user_data)
 
             # Return response with JWT token
@@ -99,7 +103,7 @@ class AuthService:
         """
         try:
             user_repo = UserRepository(db)
-            user_repo.update_connection_status(user_id)
+            user_repo.update_logout_status(user_id)
             return True
         except Exception as e:
             logger.error(f"Error during logout for user {user_id}: {e}")
