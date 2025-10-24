@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import List, Dict, Any, Optional
-import boto3
+import aioboto3
 from botocore.exceptions import ClientError
 
 from app.infrastructure.task_decomposition.orchestrator_factory import OrchestratorConfigFactory
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class OrchestratorQueryAnalyzer:
     """
-    Orchestrator implementation for query analysis and task generation.
+    Orchestrator implementation for query analysis and task generation using aioboto3 (async).
 
     Supports multiple model families via factory pattern:
     - OpenAI: openai.gpt-oss-20b-1:0, openai.gpt-oss-120b-1:0
@@ -27,16 +27,18 @@ class OrchestratorQueryAnalyzer:
         self.model_config = OrchestratorConfigFactory.get_config(self.model_id)
 
         try:
-            session = boto3.Session(
-                profile_name=settings.aws_profile if settings.aws_profile else None,
-                aws_access_key_id=settings.aws_access_key_id if settings.aws_access_key_id else None,
-                aws_secret_access_key=settings.aws_secret_access_key if settings.aws_secret_access_key else None
-            )
+            # Create aioboto3 session (don't create client yet)
+            session_params = {
+                "region_name": self.region
+            }
 
-            self.bedrock_client = session.client(
-                service_name="bedrock-runtime",
-                region_name=self.region
-            )
+            if settings.aws_profile:
+                session_params["profile_name"] = settings.aws_profile
+            elif settings.aws_access_key_id and settings.aws_secret_access_key:
+                session_params["aws_access_key_id"] = settings.aws_access_key_id
+                session_params["aws_secret_access_key"] = settings.aws_secret_access_key
+
+            self.session = aioboto3.Session(**session_params)
 
             logger.info(f"Orchestrator query analyzer initialized with model: {self.model_id} "
                        f"(Provider: {OrchestratorConfigFactory.get_model_provider(self.model_id)})")
@@ -50,21 +52,23 @@ class OrchestratorQueryAnalyzer:
         user_query: str,
         available_apis: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Analyze user query using orchestrator model and return structured analysis."""
+        """Analyze user query using orchestrator model and return structured analysis (async)."""
         try:
-            # Use model-specific analyze method (handles invoke internally)
-            json_response = self.model_config.analyze(
-                bedrock_client=self.bedrock_client,
-                model_id=self.model_id,
-                user_query=user_query,
-                available_apis=available_apis
-            )
+            # Use aioboto3 async client for Bedrock calls
+            async with self.session.client("bedrock-runtime") as bedrock_client:
+                # Use model-specific analyze method (now async with await)
+                json_response = await self.model_config.analyze(
+                    bedrock_client=bedrock_client,
+                    model_id=self.model_id,
+                    user_query=user_query,
+                    available_apis=available_apis
+                )
 
-            if not json_response.strip():
-                raise ValueError("Empty response from model")
+                if not json_response.strip():
+                    raise ValueError("Empty response from model")
 
-            analysis = json.loads(json_response)
-            return analysis
+                analysis = json.loads(json_response)
+                return analysis
 
         except (ClientError, json.JSONDecodeError) as e:
             logger.error(f"Error in query analysis: {e}")

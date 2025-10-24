@@ -16,9 +16,8 @@ class UploadKnowledgeService:
     """Service for generating presigned URLs and managing upload records."""
 
     def __init__(self):
-        """Initialize service with repository and S3 client."""
+        """Initialize service with repository and bucket name."""
         self.repository = UploadKnowledgeRepository()
-        self.s3_client = get_s3_client()
         self.bucket_name = settings.s3_pdfs_bucket
 
     async def generate_presigned_urls(
@@ -75,11 +74,8 @@ class UploadKnowledgeService:
             # Phase 2: Single batch write to DynamoDB (all records at once, non-blocking)
             created_records = await self.repository.async_batch_create_upload_records(batch_records)
 
-            # Phase 3: Generate presigned URLs and build responses (in thread pool to avoid blocking)
-            loop = asyncio.get_event_loop()
-            response_objects = await loop.run_in_executor(
-                None,
-                self._generate_presigned_urls_sync,
+            # Phase 3: Generate presigned URLs and build responses (truly async with aioboto3)
+            response_objects = await self._generate_presigned_urls_async(
                 created_records,
                 s3_keys_map
             )
@@ -91,15 +87,13 @@ class UploadKnowledgeService:
             logger.error(f"Error generating presigned URLs: {e}")
             raise
 
-    def _generate_presigned_urls_sync(
+    async def _generate_presigned_urls_async(
         self,
         created_records: List[Dict[str, Any]],
         s3_keys_map: Dict[str, str]
     ) -> List[Dict[str, Any]]:
         """
-        Synchronous helper to generate presigned URLs for all records.
-
-        This is run in a thread pool from the async method.
+        Generate presigned URLs for all records using aioboto3 (truly async).
 
         Args:
             created_records: List of created DynamoDB records
@@ -108,37 +102,44 @@ class UploadKnowledgeService:
         Returns:
             List of response objects with presigned URLs
         """
+        from app.core.aws_clients import get_s3_client
+
         response_objects = []
-        for record in created_records:
-            process_id = record['id']
-            pdf_key = s3_keys_map[process_id]
 
-            # Generate presigned PUT URL (5 min expiration)
-            presigned_url = self.s3_client.generate_presigned_url(
-                'put_object',
-                Params={
-                    'Bucket': self.bucket_name,
-                    'Key': pdf_key,
-                    'ContentType': 'application/pdf'
-                },
-                ExpiresIn=300  # 5 min
-            )
+        # Use aioboto3 S3 client for async presigned URL generation
+        async with get_s3_client() as s3_client:
+            for record in created_records:
+                process_id = record['id']
+                pdf_key = s3_keys_map[process_id]
 
-            # Build response object
-            response_obj = {
-                'process_id': process_id,
-                'pdf_key': pdf_key,
-                'presigned_url': presigned_url,
-                'process_stage': record['process_stage'],
-                'is_text_based': True,  # Default assumption
-                'uploaded_by_id': record['uploaded_by_id'],
-                'company_id': record['company_id'],
-                'area_id': record['area_id'],
-                'embedding_model': record['embedding_model'],
-                'created_at': record['created_at']
-            }
+                # Generate presigned PUT URL (5 min expiration) - synchronous call still
+                # aioboto3 doesn't support async presigned URL generation directly
+                # So we use generate_presigned_url synchronously within async context
+                presigned_url = s3_client.generate_presigned_url(
+                    'put_object',
+                    Params={
+                        'Bucket': self.bucket_name,
+                        'Key': pdf_key,
+                        'ContentType': 'application/pdf'
+                    },
+                    ExpiresIn=300  # 5 min
+                )
 
-            response_objects.append(response_obj)
+                # Build response object
+                response_obj = {
+                    'process_id': process_id,
+                    'pdf_key': pdf_key,
+                    'presigned_url': presigned_url,
+                    'process_stage': record['process_stage'],
+                    'is_text_based': True,  # Default assumption
+                    'uploaded_by_id': record['uploaded_by_id'],
+                    'company_id': record['company_id'],
+                    'area_id': record['area_id'],
+                    'embedding_model': record['embedding_model'],
+                    'created_at': record['created_at']
+                }
+
+                response_objects.append(response_obj)
 
         return response_objects
 

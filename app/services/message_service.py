@@ -40,8 +40,8 @@ class MessageService:
             MessageListResponse with a list of messages and pagination info.
         """
         try:
-            # Delegate the database call to the repository
-            response_data = self.repository.get_messages_by_chat(
+            # Delegate the database call to the repository (now awaited)
+            response_data = await self.repository.get_messages_by_chat(
                 chat_id=chat_id,
                 limit=limit,
                 last_evaluated_key=last_evaluated_key
@@ -54,7 +54,7 @@ class MessageService:
             ]
 
             # Get the total count of messages for the entire chat for accurate pagination
-            total_count = self.repository.count_messages(chat_id=chat_id, id_estado_registro=1)
+            total_count = await self.repository.count_messages(chat_id=chat_id, id_estado_registro=1)
 
             return MessageListResponse(
                 messages=messages,
@@ -89,7 +89,7 @@ class MessageService:
             True if successful, False otherwise
         """
         try:
-            self.repository.create_message(
+            await self.repository.create_message(
                 chat_id=chat_id,
                 created_at=created_at,
                 sender=sender,
@@ -119,8 +119,8 @@ class MessageService:
             List of MessageResponse (ordered from oldest to newest)
         """
         try:
-            # Use get_last_n_messages_by_chat instead of get_last_n_messages
-            response_data = self.repository.get_last_n_messages_by_chat(
+            # Use get_last_n_messages_by_chat instead of get_last_n_messages (now awaited)
+            response_data = await self.repository.get_last_n_messages_by_chat(
                 chat_id=chat_id,
                 limit=n
             )

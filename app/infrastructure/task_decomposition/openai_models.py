@@ -190,12 +190,12 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
         return ""
 
     @staticmethod
-    def analyze(bedrock_client, model_id: str, user_query: str, available_apis: Dict[str, Any]) -> str:
+    async def analyze(bedrock_client, model_id: str, user_query: str, available_apis: Dict[str, Any]) -> str:
         """
-        Analyze query using OpenAI model with Converse API.
+        Analyze query using OpenAI model with Converse API (async).
 
         Args:
-            bedrock_client: AWS Bedrock client instance
+            bedrock_client: AWS Bedrock async client instance (aioboto3)
             model_id: Model identifier
             user_query: User's query text
             available_apis: Dictionary of available API endpoints
@@ -206,8 +206,8 @@ Respond with JSON object only. No markdown code blocks, no additional text or ex
         # Build converse request parameters
         request_params = OpenAIConfig.get_converse_request(user_query, available_apis)
 
-        # Call Converse API
-        response = bedrock_client.converse(**request_params)
+        # Call Converse API (now awaited)
+        response = await bedrock_client.converse(**request_params)
 
         # Extract and clean
         json_response = OpenAIConfig.extract_response(response)

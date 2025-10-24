@@ -1,21 +1,20 @@
-"""Centralized AWS client management - Singleton pattern for boto3 resources."""
+"""Centralized async AWS client management using aioboto3."""
 
-import boto3
+import aioboto3
 import logging
-from typing import Optional
+from typing import Optional, AsyncGenerator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-class AWSClientManager:
-    """Singleton manager for AWS boto3 clients and resources."""
+class AsyncAWSClientManager:
+    """Singleton manager for async AWS clients using aioboto3."""
 
-    _instance: Optional['AWSClientManager'] = None
-    _session: Optional[boto3.Session] = None
-    _dynamodb_resource = None
-    _s3_client = None
+    _instance: Optional['AsyncAWSClientManager'] = None
+    _session: Optional[aioboto3.Session] = None
 
     def __new__(cls):
         """Ensure only one instance exists (Singleton pattern)."""
@@ -24,12 +23,12 @@ class AWSClientManager:
         return cls._instance
 
     def __init__(self):
-        """Initialize AWS session if not already initialized."""
+        """Initialize async AWS session if not already initialized."""
         if self._session is None:
             self._initialize_session()
 
     def _initialize_session(self):
-        """Create boto3 session with configured credentials."""
+        """Create aioboto3 session with configured credentials."""
         try:
             session_params = {"region_name": settings.aws_region}
 
@@ -40,59 +39,120 @@ class AWSClientManager:
                 session_params["aws_access_key_id"] = settings.aws_access_key_id
                 session_params["aws_secret_access_key"] = settings.aws_secret_access_key
 
-            self._session = boto3.Session(**session_params)
-            logger.info("AWS Session initialized successfully")
+            self._session = aioboto3.Session(**session_params)
+            logger.info("Async AWS Session initialized successfully")
 
         except Exception as e:
-            logger.error(f"Failed to initialize AWS session: {e}")
+            logger.error(f"Failed to initialize async AWS session: {e}")
             raise
 
     @property
-    def session(self) -> boto3.Session:
-        """Get the boto3 session."""
+    def session(self) -> aioboto3.Session:
+        """Get the aioboto3 session."""
         if self._session is None:
             self._initialize_session()
         return self._session
 
-    @property
-    def dynamodb(self):
-        """Get or create DynamoDB resource (cached)."""
-        if self._dynamodb_resource is None:
-            self._dynamodb_resource = self.session.resource('dynamodb')
-            logger.info("DynamoDB resource created")
-        return self._dynamodb_resource
+    @asynccontextmanager
+    async def get_s3_client(self):
+        """Get S3 client as async context manager."""
+        async with self.session.client('s3') as client:
+            logger.debug("S3 client created")
+            yield client
 
-    @property
-    def s3_client(self):
-        """Get or create S3 client (cached)."""
-        if self._s3_client is None:
-            self._s3_client = self.session.client('s3')
-            logger.info("S3 client created")
-        return self._s3_client
+    @asynccontextmanager
+    async def get_dynamodb_resource(self):
+        """Get DynamoDB resource as async context manager."""
+        async with self.session.resource('dynamodb') as resource:
+            logger.debug("DynamoDB resource created")
+            yield resource
 
-    def get_dynamodb_table(self, table_name: str):
-        """Get a specific DynamoDB table resource."""
-        return self.dynamodb.Table(table_name)
+    @asynccontextmanager
+    async def get_bedrock_client(self):
+        """Get Bedrock runtime client as async context manager."""
+        async with self.session.client('bedrock-runtime') as client:
+            logger.debug("Bedrock runtime client created")
+            yield client
+
+    async def get_dynamodb_table(self, table_name: str):
+        """Get a specific DynamoDB table resource.
+
+        WARNING: Returns a table object that must be used within the
+        resource context. Use get_dynamodb_resource() and access
+        table from there in async code.
+
+        Args:
+            table_name: Name of the DynamoDB table
+
+        Returns:
+            DynamoDB table resource
+        """
+        # This is a helper that assumes resource context exists
+        # Better pattern: use get_dynamodb_resource() and access table from it
+        async with self.get_dynamodb_resource() as dynamodb:
+            return await dynamodb.Table(table_name)
 
 
 # Create singleton instance
 @lru_cache(maxsize=1)
-def get_aws_client_manager() -> AWSClientManager:
-    """Get the singleton AWS client manager instance."""
-    return AWSClientManager()
+def get_aws_client_manager() -> AsyncAWSClientManager:
+    """Get the singleton async AWS client manager instance."""
+    return AsyncAWSClientManager()
 
 
-# Convenience functions for direct access
-def get_dynamodb_resource():
-    """Get DynamoDB resource."""
-    return get_aws_client_manager().dynamodb
+# Async convenience functions for direct access
+@asynccontextmanager
+async def get_s3_client():
+    """Get S3 client as async context manager.
+
+    Usage:
+        async with get_s3_client() as client:
+            response = await client.list_objects(Bucket='...')
+    """
+    manager = get_aws_client_manager()
+    async with manager.get_s3_client() as client:
+        yield client
 
 
-def get_s3_client():
-    """Get S3 client."""
-    return get_aws_client_manager().s3_client
+@asynccontextmanager
+async def get_dynamodb_resource():
+    """Get DynamoDB resource as async context manager.
+
+    Usage:
+        async with get_dynamodb_resource() as dynamodb:
+            table = dynamodb.Table('table_name')
+            response = await table.scan()
+    """
+    manager = get_aws_client_manager()
+    async with manager.get_dynamodb_resource() as resource:
+        yield resource
 
 
-def get_dynamodb_table(table_name: str):
-    """Get a specific DynamoDB table."""
-    return get_aws_client_manager().get_dynamodb_table(table_name)
+@asynccontextmanager
+async def get_dynamodb_table(table_name: str):
+    """Get a specific DynamoDB table as async context manager.
+
+    Usage:
+        async with get_dynamodb_table('table_name') as table:
+            response = await table.get_item(Key={'id': '123'})
+
+    Args:
+        table_name: Name of the DynamoDB table
+    """
+    manager = get_aws_client_manager()
+    async with manager.get_dynamodb_resource() as dynamodb:
+        table = await dynamodb.Table(table_name)
+        yield table
+
+
+@asynccontextmanager
+async def get_bedrock_client():
+    """Get Bedrock runtime client as async context manager.
+
+    Usage:
+        async with get_bedrock_client() as client:
+            response = await client.invoke_model(...)
+    """
+    manager = get_aws_client_manager()
+    async with manager.get_bedrock_client() as client:
+        yield client

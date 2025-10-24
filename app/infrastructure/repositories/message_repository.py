@@ -4,14 +4,14 @@ from boto3.dynamodb.conditions import Key, Attr
 from typing import Optional, List, Dict, Any
 import logging
 from app.core.config import settings
-from app.core.aws_clients import get_dynamodb_table
+from app.core.aws_clients import get_dynamodb_resource
 
 logger = logging.getLogger(__name__)
 
 
 class MessageRepository:
     """
-    Repository for DynamoDB MESSAGES table operations.
+    Repository for DynamoDB MESSAGES table operations using aioboto3 (async).
 
     Table structure:
     - chat_id (Partition Key): STRING
@@ -23,11 +23,10 @@ class MessageRepository:
     """
 
     def __init__(self):
-        """Initialize DynamoDB table using centralized AWS client"""
-        self.table = get_dynamodb_table(settings.dynamodb_table_messages)
+        """Initialize DynamoDB table resource name for async access"""
         self.table_name = settings.dynamodb_table_messages
 
-    def create_message(
+    async def create_message(
         self,
         chat_id: int,
         created_at: str,
@@ -36,7 +35,7 @@ class MessageRepository:
         id_estado_registro: int = 1
     ) -> None:
         """
-        Save a message to DynamoDB.
+        Save a message to DynamoDB (async).
 
         Args:
             chat_id: Chat identifier
@@ -64,20 +63,22 @@ class MessageRepository:
                 'message': message
             }
 
-            self.table.put_item(Item=item)
+            async with get_dynamodb_resource() as dynamodb:
+                table = await dynamodb.Table(self.table_name)
+                await table.put_item(Item=item)
 
         except Exception as e:
             logger.error(f"Error saving message for chat_id {chat_id}: {e}")
             raise
 
-    def get_messages_by_chat(
+    async def get_messages_by_chat(
         self,
         chat_id: str,
         limit: int = 20,
         last_evaluated_key: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Get messages for a specific chat with pagination
+        Get messages for a specific chat with pagination (async).
 
         Args:
             chat_id: Chat identifier (e.g., "chat-123")
@@ -104,7 +105,9 @@ class MessageRepository:
             if last_evaluated_key:
                 query_params['ExclusiveStartKey'] = last_evaluated_key
 
-            response = self.table.query(**query_params)
+            async with get_dynamodb_resource() as dynamodb:
+                table = await dynamodb.Table(self.table_name)
+                response = await table.query(**query_params)
 
             return {
                 # Return messages as is (newest to oldest)
@@ -117,13 +120,13 @@ class MessageRepository:
             logger.error(f"Error getting messages for chat_id {chat_id}: {e}")
             return {'messages': [], 'count': 0, 'last_evaluated_key': None}
 
-    def get_last_n_messages_by_chat(
+    async def get_last_n_messages_by_chat(
         self,
         chat_id: str,
         limit: int = 10
     ) -> Dict[str, Any]:
         """
-        Get messages for a specific chat without pagination
+        Get messages for a specific chat without pagination (async).
 
         Args:
             chat_id: Chat identifier (e.g., "chat-123")
@@ -146,7 +149,9 @@ class MessageRepository:
                 'ScanIndexForward': False
             }
 
-            response = self.table.query(**query_params)
+            async with get_dynamodb_resource() as dynamodb:
+                table = await dynamodb.Table(self.table_name)
+                response = await table.query(**query_params)
 
             return {
                 # Return messages as is (newest to oldest)
@@ -159,13 +164,13 @@ class MessageRepository:
             logger.error(f"Error getting messages for chat_id {chat_id}: {e}")
             return {'messages': [], 'count': 0, 'last_evaluated_key': None}
 
-    def count_messages(
+    async def count_messages(
         self,
         chat_id: str,
         id_estado_registro: int = 1
     ) -> int:
         """
-        Count total messages for a chat
+        Count total messages for a chat (async).
 
         Args:
             chat_id: Chat identifier
@@ -175,11 +180,13 @@ class MessageRepository:
             Total count of messages
         """
         try:
-            response = self.table.query(
-                KeyConditionExpression=Key('chat_id').eq(chat_id),
-                FilterExpression=Attr('id_estado_registro').eq(id_estado_registro),
-                Select='COUNT'
-            )
+            async with get_dynamodb_resource() as dynamodb:
+                table = await dynamodb.Table(self.table_name)
+                response = await table.query(
+                    KeyConditionExpression=Key('chat_id').eq(chat_id),
+                    FilterExpression=Attr('id_estado_registro').eq(id_estado_registro),
+                    Select='COUNT'
+                )
 
             return response.get('Count', 0)
 

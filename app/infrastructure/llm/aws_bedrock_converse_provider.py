@@ -1,4 +1,4 @@
-import boto3
+import aioboto3
 import json
 import logging
 import os
@@ -31,7 +31,7 @@ class AWSBedrockConverseProvider(LLMPort):
         aws_secret_access_key: Optional[str] = None,
     ):
         """
-        Initialize AWS Bedrock Converse client.
+        Initialize AWS Bedrock Converse client using aioboto3 (async).
 
         Args:
             region: AWS region
@@ -39,7 +39,7 @@ class AWSBedrockConverseProvider(LLMPort):
             profile_name: AWS profile name
             aws_access_key_id: AWS access key ID
             aws_secret_access_key: AWS secret access key
-            system_prompt: System prompt to use for all conversations
+            role_behavior: System role behavior for the model
         """
         session_params = {"region_name": region}
 
@@ -51,15 +51,17 @@ class AWSBedrockConverseProvider(LLMPort):
             session_params["aws_access_key_id"] = aws_access_key_id
             session_params["aws_secret_access_key"] = aws_secret_access_key
 
-        # Configure boto3 with connection and read timeouts to prevent blocking
+        # Configure botocore with connection and read timeouts to prevent blocking
         boto_config = Config(
             connect_timeout=30,  # 30 seconds to establish connection
             read_timeout=120,    # 2 minutes max for reading response chunks
             retries={'max_attempts': 2, 'mode': 'standard'}  # Retry failed requests
         )
 
-        session = boto3.Session(**session_params)
-        self.client = session.client("bedrock-runtime", config=boto_config)
+        # Create aioboto3 session (don't create client yet, we'll do that in async context)
+        self.session = aioboto3.Session(**session_params)
+        self.region = region
+        self.boto_config = boto_config
         self.model_id = model_id
         self.default_role_behavior = role_behavior
 
@@ -163,49 +165,46 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             # Add system prompt
             request_params["system"] = self._build_system_config(role_behavior)
 
-            # Run the blocking boto3 call in a thread pool to avoid blocking the event loop
-            # This prevents the entire backend from freezing when network is slow
-            response = await asyncio.to_thread(
-                self.client.converse_stream,
-                **request_params
-            )
+            # Use aioboto3 async client for truly non-blocking Bedrock calls
+            async with self.session.client("bedrock-runtime", config=self.boto_config) as client:
+                response = await client.converse_stream(**request_params)
 
-            # Process streaming response - ensure proper cleanup
-            stream = response.get("stream")
-            if stream is None:
-                return
+                # Process streaming response - ensure proper cleanup
+                stream = response.get("stream")
+                if stream is None:
+                    return
 
-            try:
-                yielded_count = 0
+                try:
+                    yielded_count = 0
 
-                # Iterate through stream events in thread pool to avoid blocking
-                # We process events one at a time to maintain streaming behavior
-                for event in stream:
-                    # Handle content block delta (text chunks)
-                    if "contentBlockDelta" in event:
-                        delta = event["contentBlockDelta"].get("delta", {})
-                        if "text" in delta:
-                            text = delta["text"]
-                            # Filter out empty chunks from AWS Bedrock streaming protocol
-                            if text:
-                                yielded_count += 1
-                                yield text
+                    # Iterate through stream events
+                    # We process events one at a time to maintain streaming behavior
+                    async for event in stream:
+                        # Handle content block delta (text chunks)
+                        if "contentBlockDelta" in event:
+                            delta = event["contentBlockDelta"].get("delta", {})
+                            if "text" in delta:
+                                text = delta["text"]
+                                # Filter out empty chunks from AWS Bedrock streaming protocol
+                                if text:
+                                    yielded_count += 1
+                                    yield text
 
-                    # Handle metadata events (optional logging)
-                    elif "metadata" in event:
-                        metadata = event["metadata"]
+                        # Handle metadata events (optional logging)
+                        elif "metadata" in event:
+                            metadata = event["metadata"]
 
-                    # Handle message stop event
-                    elif "messageStop" in event:
-                        stop_reason = event["messageStop"].get("stopReason")
-                        # Yield stop reason info if no content was generated
-                        if yielded_count == 0 and stop_reason == "max_tokens":
-                            yield f"__STOP_REASON__:{stop_reason}"
-                        break
-            finally:
-                # Ensure stream is properly closed to avoid resource leaks
-                if hasattr(stream, 'close'):
-                    stream.close()
+                        # Handle message stop event
+                        elif "messageStop" in event:
+                            stop_reason = event["messageStop"].get("stopReason")
+                            # Yield stop reason info if no content was generated
+                            if yielded_count == 0 and stop_reason == "max_tokens":
+                                yield f"__STOP_REASON__:{stop_reason}"
+                            break
+                finally:
+                    # Ensure stream is properly closed to avoid resource leaks
+                    if hasattr(stream, 'close'):
+                        stream.close()
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
