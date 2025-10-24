@@ -116,23 +116,23 @@ class JWTAuth:
             )
 
     @staticmethod
-    def validate_company_access(token: str, company: str, area: str = None) -> bool:
+    def validate_company_access(token: str, company_id: int, area_id: int = None) -> bool:
         """
         Validate user access to company/area based on role
 
         Args:
             token: JWT token
-            company: Requested company name (matches EMPRESA field in token)
-            area: Requested area name (matches AREA field in token, optional)
+            company_id: Requested company ID (matches ID_EMPRESA field in token)
+            area_id: Requested area ID (matches ID_AREA field in token, optional)
 
         Returns:
             True if access is allowed, False otherwise
         """
         try:
             # Validate input parameters
-            if not company or not company.strip():
+            if not isinstance(company_id, int) or company_id <= 0:
                 return False
-            if area is not None and (not area or not area.strip()):
+            if area_id is not None and (not isinstance(area_id, int) or area_id <= 0):
                 return False
 
             # Extract full payload
@@ -145,17 +145,17 @@ class JWTAuth:
             if role_id == 1:
                 return True
 
-            # Admin (role_id = 2): Validate company exists in any company_areas row
+            # Admin (role_id = 2): Validate company_id exists in any company_areas row
             if role_id == 2:
-                return any(ca.get('EMPRESA') == company for ca in company_areas)
+                return any(ca.get('ID_EMPRESA') == company_id for ca in company_areas)
 
-            # User (role_id = 3): Validate both company and area exist in the same row
+            # User (role_id = 3): Validate both company_id and area_id exist in the same row
             if role_id == 3:
-                if not area:
+                if area_id is None:
                     return False
                 return any(
-                    ca.get('EMPRESA') == company and
-                    ca.get('AREA') == area
+                    ca.get('ID_EMPRESA') == company_id and
+                    ca.get('ID_AREA') == area_id
                     for ca in company_areas
                 )
 
@@ -185,7 +185,7 @@ async def get_current_user_with_company_validation(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
-    """Get current user and validate company/area access from request"""
+    """Get current user and validate company/area access from request by ID_EMPRESA and ID_AREA"""
     from fastapi import Request
 
     if not credentials:
@@ -200,32 +200,29 @@ async def get_current_user_with_company_validation(
     # Verify JWT expiration and get user info
     user_data = JWTAuth.verify_jwt_token(token)
 
-    # Extract company/area from request body
+    # Extract company_id and area_id from request body
     if request.method == "POST":
         content_type = request.headers.get("content-type", "")
 
         if "application/json" in content_type:
-            # For JSON requests (like chat-streaming)
+            # For JSON requests
             body = await request.json()
-            company = body.get("company")
-            area = body.get("area")
-        elif "multipart/form-data" in content_type:
-            # For form requests (like upload)
-            form = await request.form()
-            company = form.get("company_name")
-            area = form.get("area_name")
+            company_id = body.get("company_id")
+            area_id = body.get("area_id")
         else:
             raise HTTPException(status_code=400, detail="Unsupported content type")
 
         # Validate input parameters first
-        if company is not None and (not company or not company.strip()):
-            raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "Company ID cannot be empty"}})
-        if area is not None and (not area or not area.strip()):
-            raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "Area cannot be empty"}})
+        if company_id is None:
+            raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "company_id is required"}})
+        if area_id is None:
+            raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "area_id is required"}})
 
-        # Validate company/area access
-        if company and not JWTAuth.validate_company_access(token, company, area):
-            logger.warning(f"Access denied for user {user_data.get('ID_USUARIO')} to company: {company}, area: {area}")
+        # Validate user has access to the requested company_id and area_id
+        has_access = JWTAuth.validate_company_access(token, company_id, area_id)
+
+        if not has_access:
+            logger.warning(f"Access denied for user {user_data.get('ID_USUARIO')} to company_id: {company_id}, area_id: {area_id}")
             raise HTTPException(
                 status_code=403,
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Acceso denegado"}}

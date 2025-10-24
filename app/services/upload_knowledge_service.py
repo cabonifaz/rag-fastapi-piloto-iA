@@ -2,6 +2,7 @@
 
 import uuid
 import logging
+import asyncio
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
 from app.core.config import settings
@@ -20,7 +21,7 @@ class UploadKnowledgeService:
         self.s3_client = get_s3_client()
         self.bucket_name = settings.s3_pdfs_bucket
 
-    def generate_presigned_urls(
+    async def generate_presigned_urls(
         self,
         company_id: int,
         area_id: int,
@@ -29,7 +30,7 @@ class UploadKnowledgeService:
         pdf_keys: List[str]
     ) -> List[Dict[str, Any]]:
         """
-        Generate presigned URLs for PDF uploads and create DynamoDB records.
+        Generate presigned URLs for PDF uploads and create DynamoDB records in batch.
 
         Args:
             company_id: Company identifier
@@ -42,10 +43,12 @@ class UploadKnowledgeService:
             List of objects containing presigned URLs and metadata
 
         Raises:
-            Exception: If presigned URL generation or DynamoDB write fails
+            Exception: If presigned URL generation or DynamoDB batch write fails
         """
         try:
-            response_objects = []
+            # Phase 1: Prepare all records and S3 keys (no DB writes yet)
+            batch_records = []
+            s3_keys_map = {}  # Map process_id to S3 key for later use
 
             for filename in pdf_keys:
                 # Generate unique UUID for this PDF
@@ -54,52 +57,90 @@ class UploadKnowledgeService:
                 # Construct S3 key: <process_id>/<filename>
                 pdf_key = f"{process_id}/{filename}"
 
-                # Create DynamoDB record with process_stage = 0 (UPLOAD)
-                record = self.repository.create_upload_record(
-                    process_id=process_id,
-                    uploaded_by_id=user_id,
-                    company_id=company_id,
-                    area_id=area_id,
-                    embedding_model=embedding_model,
-                    pdf_key=pdf_key,
-                    process_stage=0,  # UPLOAD stage
-                    is_error=False
-                )
+                # Store for later use
+                s3_keys_map[process_id] = pdf_key
 
-                # Generate presigned PUT URL (5 min expiration)
-                presigned_url = self.s3_client.generate_presigned_url(
-                    'put_object',
-                    Params={
-                        'Bucket': self.bucket_name,
-                        'Key': pdf_key,
-                        'ContentType': 'application/pdf'
-                    },
-                    ExpiresIn=300  # 5 min
-                )
-
-                # Build response object
-                response_obj = {
+                # Add to batch records (not written to DB yet)
+                batch_records.append({
                     'process_id': process_id,
-                    'pdf_key': pdf_key,
-                    'presigned_url': presigned_url,
-                    'process_stage': 0,
-                    'is_text_based': True,  # Default assumption
                     'uploaded_by_id': user_id,
                     'company_id': company_id,
                     'area_id': area_id,
                     'embedding_model': embedding_model,
-                    'created_at': record['created_at']
-                }
+                    'pdf_key': pdf_key,
+                    'process_stage': 0,  # UPLOAD stage
+                    'is_error': False
+                })
 
-                response_objects.append(response_obj)
+            # Phase 2: Single batch write to DynamoDB (all records at once, non-blocking)
+            created_records = await self.repository.async_batch_create_upload_records(batch_records)
 
-                logger.info(f"Generated presigned URL for {filename} with process_id {process_id}")
+            # Phase 3: Generate presigned URLs and build responses (in thread pool to avoid blocking)
+            loop = asyncio.get_event_loop()
+            response_objects = await loop.run_in_executor(
+                None,
+                self._generate_presigned_urls_sync,
+                created_records,
+                s3_keys_map
+            )
 
+            logger.info(f"Generated {len(response_objects)} presigned URLs in batch")
             return response_objects
 
         except Exception as e:
             logger.error(f"Error generating presigned URLs: {e}")
             raise
+
+    def _generate_presigned_urls_sync(
+        self,
+        created_records: List[Dict[str, Any]],
+        s3_keys_map: Dict[str, str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Synchronous helper to generate presigned URLs for all records.
+
+        This is run in a thread pool from the async method.
+
+        Args:
+            created_records: List of created DynamoDB records
+            s3_keys_map: Map of process_id to S3 key
+
+        Returns:
+            List of response objects with presigned URLs
+        """
+        response_objects = []
+        for record in created_records:
+            process_id = record['id']
+            pdf_key = s3_keys_map[process_id]
+
+            # Generate presigned PUT URL (5 min expiration)
+            presigned_url = self.s3_client.generate_presigned_url(
+                'put_object',
+                Params={
+                    'Bucket': self.bucket_name,
+                    'Key': pdf_key,
+                    'ContentType': 'application/pdf'
+                },
+                ExpiresIn=300  # 5 min
+            )
+
+            # Build response object
+            response_obj = {
+                'process_id': process_id,
+                'pdf_key': pdf_key,
+                'presigned_url': presigned_url,
+                'process_stage': record['process_stage'],
+                'is_text_based': True,  # Default assumption
+                'uploaded_by_id': record['uploaded_by_id'],
+                'company_id': record['company_id'],
+                'area_id': record['area_id'],
+                'embedding_model': record['embedding_model'],
+                'created_at': record['created_at']
+            }
+
+            response_objects.append(response_obj)
+
+        return response_objects
 
     def get_upload_status(self, process_id: str) -> Dict[str, Any]:
         """

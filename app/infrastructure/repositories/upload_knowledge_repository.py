@@ -3,6 +3,7 @@
 from boto3.dynamodb.conditions import Key
 from typing import Optional, List, Dict, Any
 import logging
+import asyncio
 from app.core.config import settings
 from app.core.aws_clients import get_dynamodb_table
 from datetime import datetime
@@ -191,3 +192,98 @@ class UploadKnowledgeRepository:
         except Exception as e:
             logger.error(f"Error getting uploads for company {company_id}, area {area_id}: {e}")
             return []
+
+    def batch_create_upload_records(
+        self,
+        records: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Create multiple upload records in DynamoDB using batch write.
+
+        DynamoDB batch_write_item has a limit of 25 items per call,
+        so this method handles batching automatically for larger lists.
+
+        Args:
+            records: List of record dictionaries, each containing:
+                - process_id: Unique UUID for this upload process
+                - uploaded_by_id: User ID who uploaded
+                - company_id: Company identifier
+                - area_id: Area identifier
+                - embedding_model: Model to use for embeddings
+                - pdf_key: S3 key path (<process_id>/<filename>)
+                - process_stage: Current stage (default: 0 = UPLOAD)
+                - is_error: Error flag (default: False)
+
+        Returns:
+            List of created records with timestamps
+
+        Raises:
+            Exception: If batch write fails
+        """
+        try:
+            if not records:
+                return []
+
+            created_at = datetime.utcnow().isoformat()
+            processed_records = []
+
+            # Process records and add timestamps
+            for record in records:
+                item = {
+                    'id': record['process_id'],
+                    'uploaded_by_id': record['uploaded_by_id'],
+                    'company_id': record['company_id'],
+                    'area_id': record['area_id'],
+                    'process_stage': record.get('process_stage', 0),
+                    'is_error': record.get('is_error', False),
+                    'embedding_model': record['embedding_model'],
+                    'pdf_key': record['pdf_key'],
+                    'created_at': created_at
+                }
+                processed_records.append(item)
+
+            # DynamoDB batch_write_item has a limit of 25 items per request
+            # Split into batches of 25 and write each batch
+            batch_size = 25
+            for i in range(0, len(processed_records), batch_size):
+                batch = processed_records[i:i + batch_size]
+
+                with self.table.batch_writer(
+                    batch_size=len(batch),
+                    overwrite_by_pkeys=['id']
+                ) as batch_writer:
+                    for item in batch:
+                        batch_writer.put_item(Item=item)
+
+            logger.info(f"Batch created {len(processed_records)} upload records")
+            return processed_records
+
+        except Exception as e:
+            logger.error(f"Error batch creating upload records: {e}")
+            raise
+
+    async def async_batch_create_upload_records(
+        self,
+        records: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Async wrapper for batch create upload records.
+
+        Runs the synchronous DynamoDB batch write in a thread pool
+        to avoid blocking the event loop.
+
+        Args:
+            records: List of record dictionaries
+
+        Returns:
+            List of created records with timestamps
+
+        Raises:
+            Exception: If batch write fails
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self.batch_create_upload_records,
+            records
+        )
