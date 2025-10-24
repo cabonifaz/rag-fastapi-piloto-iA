@@ -249,7 +249,6 @@ class UploadKnowledgeRepository:
                 batch = processed_records[i:i + batch_size]
 
                 with self.table.batch_writer(
-                    batch_size=len(batch),
                     overwrite_by_pkeys=['id']
                 ) as batch_writer:
                     for item in batch:
@@ -321,7 +320,6 @@ class UploadKnowledgeRepository:
                     batch = processed_records[i:i + batch_size]
 
                     async with table.batch_writer(
-                        batch_size=len(batch),
                         overwrite_by_pkeys=['id']
                     ) as batch_writer:
                         for item in batch:
