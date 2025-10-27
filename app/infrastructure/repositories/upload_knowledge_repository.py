@@ -6,7 +6,7 @@ import logging
 import asyncio
 from app.core.config import settings
 from app.core.aws_clients import get_dynamodb_table
-from datetime import datetime
+from datetime import datetime, UTC
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class UploadKnowledgeRepository:
             Exception: If record creation fails
         """
         try:
-            created_at = datetime.utcnow().isoformat()
+            created_at = datetime.now(UTC).isoformat()
 
             item = {
                 'id': process_id,
@@ -224,7 +224,7 @@ class UploadKnowledgeRepository:
             if not records:
                 return []
 
-            created_at = datetime.utcnow().isoformat()
+            created_at = datetime.now(UTC).isoformat()
             processed_records = []
 
             # Process records and add timestamps
@@ -291,7 +291,7 @@ class UploadKnowledgeRepository:
 
             from app.core.aws_clients import get_dynamodb_resource
 
-            created_at = datetime.utcnow().isoformat()
+            created_at = datetime.now(UTC).isoformat()
             processed_records = []
 
             # Process records and add timestamps

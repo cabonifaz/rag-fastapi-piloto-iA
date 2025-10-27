@@ -112,10 +112,9 @@ class UploadKnowledgeService:
                 process_id = record['id']
                 pdf_key = s3_keys_map[process_id]
 
-                # Generate presigned PUT URL (5 min expiration) - synchronous call still
-                # aioboto3 doesn't support async presigned URL generation directly
-                # So we use generate_presigned_url synchronously within async context
-                presigned_url = s3_client.generate_presigned_url(
+                # Generate presigned PUT URL (5 min expiration)
+                # With aioboto3, generate_presigned_url returns a coroutine and must be awaited
+                presigned_url = await s3_client.generate_presigned_url(
                     'put_object',
                     Params={
                         'Bucket': self.bucket_name,
