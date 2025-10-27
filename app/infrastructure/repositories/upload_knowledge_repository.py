@@ -164,14 +164,52 @@ class UploadKnowledgeRepository:
             logger.error(f"Error getting uploads for user {uploaded_by_id}: {e}")
             return []
 
-    def get_uploads_by_company_area(
+    async def async_get_uploads_by_company(
+        self,
+        company_id: int,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all uploads for a specific company using GSI (async with aioboto3).
+
+        Uses the company_id_area_id_index GSI for efficient querying.
+
+        Args:
+            company_id: Company identifier
+            limit: Maximum number of records to return
+
+        Returns:
+            List of upload records sorted by created_at (most recent first)
+        """
+        try:
+            from app.core.aws_clients import get_dynamodb_resource
+
+            async with get_dynamodb_resource() as dynamodb:
+                table = await dynamodb.Table(self.table_name)
+
+                response = await table.query(
+                    IndexName='company_id_area_id_index',
+                    KeyConditionExpression=Key('company_id').eq(company_id),
+                    Limit=limit,
+                    ScanIndexForward=False  # Sort descending (most recent first)
+                )
+
+                return response.get('Items', [])
+
+        except Exception as e:
+            logger.error(f"Error getting uploads for company {company_id}: {e}")
+            return []
+
+    async def async_get_uploads_by_company_area(
         self,
         company_id: int,
         area_id: int,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
         """
-        Get all uploads for a specific company and area.
+        Get all uploads for a specific company and area using GSI (async with aioboto3).
+
+        Uses the company_id_area_id_index GSI for efficient querying.
 
         Args:
             company_id: Company identifier
@@ -179,12 +217,83 @@ class UploadKnowledgeRepository:
             limit: Maximum number of records to return
 
         Returns:
-            List of upload records
+            List of upload records sorted by created_at (most recent first)
         """
         try:
-            response = self.table.scan(
-                FilterExpression=Key('company_id').eq(company_id) & Key('area_id').eq(area_id),
-                Limit=limit
+            from app.core.aws_clients import get_dynamodb_resource
+
+            async with get_dynamodb_resource() as dynamodb:
+                table = await dynamodb.Table(self.table_name)
+
+                response = await table.query(
+                    IndexName='company_id_area_id_index',
+                    KeyConditionExpression=Key('company_id').eq(company_id) & Key('area_id').eq(area_id),
+                    Limit=limit,
+                    ScanIndexForward=False  # Sort descending (most recent first)
+                )
+
+                return response.get('Items', [])
+
+        except Exception as e:
+            logger.error(f"Error getting uploads for company {company_id}, area {area_id}: {e}")
+            return []
+
+    def get_uploads_by_company(
+        self,
+        company_id: int,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all uploads for a specific company using GSI (sync method).
+
+        Uses the company_id_area_id_index GSI for efficient querying.
+
+        Args:
+            company_id: Company identifier
+            limit: Maximum number of records to return
+
+        Returns:
+            List of upload records sorted by created_at (most recent first)
+        """
+        try:
+            response = self.table.query(
+                IndexName='company_id_area_id_index',
+                KeyConditionExpression=Key('company_id').eq(company_id),
+                Limit=limit,
+                ScanIndexForward=False  # Sort descending (most recent first)
+            )
+
+            return response.get('Items', [])
+
+        except Exception as e:
+            logger.error(f"Error getting uploads for company {company_id}: {e}")
+            return []
+
+    def get_uploads_by_company_area(
+        self,
+        company_id: int,
+        area_id: int,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all uploads for a specific company and area using GSI (sync method).
+
+        Uses the company_id_area_id_index GSI for efficient querying.
+
+        Args:
+            company_id: Company identifier
+            area_id: Area identifier
+            limit: Maximum number of records to return
+
+        Returns:
+            List of upload records sorted by created_at (most recent first)
+        """
+        try:
+            response = self.table.query(
+                IndexName='company_id_area_id_index',
+                KeyConditionExpression=Key('company_id').eq(company_id) & Key('area_id').eq(area_id),
+                Limit=limit,
+                ScanIndexForward=False  # Sort descending (most recent first)
             )
 
             return response.get('Items', [])

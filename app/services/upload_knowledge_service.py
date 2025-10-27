@@ -208,13 +208,35 @@ class UploadKnowledgeService:
             logger.error(f"Error getting uploads for user {user_id}: {e}")
             raise
 
-    def get_company_area_uploads(
+    async def get_company_uploads(
+        self,
+        company_id: int,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all uploads for a company across all areas (async).
+
+        Args:
+            company_id: Company identifier
+            limit: Maximum number of records to return (default: 100)
+
+        Returns:
+            List of upload records sorted by created_at (most recent first)
+        """
+        try:
+            return await self.repository.async_get_uploads_by_company(company_id, limit)
+
+        except Exception as e:
+            logger.error(f"Error getting uploads for company {company_id}: {e}")
+            raise
+
+    async def get_company_area_uploads(
         self,
         company_id: int,
         area_id: int
     ) -> List[Dict[str, Any]]:
         """
-        Get all uploads for a company/area.
+        Get all uploads for a company/area (async).
 
         Args:
             company_id: Company identifier
@@ -224,7 +246,7 @@ class UploadKnowledgeService:
             List of upload records
         """
         try:
-            return self.repository.get_uploads_by_company_area(company_id, area_id)
+            return await self.repository.async_get_uploads_by_company_area(company_id, area_id)
 
         except Exception as e:
             logger.error(f"Error getting uploads for company {company_id}, area {area_id}: {e}")

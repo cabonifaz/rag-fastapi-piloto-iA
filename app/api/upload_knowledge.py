@@ -1,6 +1,6 @@
 """API endpoints for upload knowledge operations."""
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Dict, Any
 import logging
 from app.services.upload_knowledge_service import UploadKnowledgeService
@@ -82,6 +82,60 @@ async def get_presigned_urls_endpoint(
     except Exception as e:
         logger.error(f"Unexpected error in get_presigned_urls endpoint: {e}")
         error_response = create_error_response("Error generating presigned URLs")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.post("/get_company_uploads")
+async def get_company_uploads_endpoint(
+    request: Dict[str, Any],
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation),
+    service: UploadKnowledgeService = Depends(get_upload_knowledge_service)
+):
+    """
+    Get all uploads for a company across all areas.
+
+    Args:
+        request: JSON body with company_id and optional limit
+
+    Returns:
+        List of upload records sorted by created_at (most recent first)
+    """
+    try:
+        company_id = request.get("company_id")
+        limit = request.get("limit", 100)
+
+        # Validate inputs
+        if not company_id:
+            error_response = create_error_response("company_id is required")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Validate limit range
+        if limit < 1 or limit > 500:
+            error_response = create_error_response("limit must be between 1 and 500")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Get uploads for the company (access validation handled by dependency)
+        uploads = await service.get_company_uploads(company_id=company_id, limit=limit)
+
+        logger.info(f"Retrieved {len(uploads)} uploads for company {company_id}")
+
+        return uploads
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error getting uploads for company: {e}")
+        error_response = create_error_response("Error retrieving company uploads")
         raise HTTPException(
             status_code=500,
             detail={"result": error_response.model_dump()}
