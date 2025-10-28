@@ -216,7 +216,7 @@ async def get_current_user_with_company_validation(
         if company_id is None:
             raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "company_id is required"}})
         if area_id is None:
-            area_id = 0  # Default to 0 for company-wide queries
+            raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "area_id is required"}})
 
         # Validate user has access to the requested company_id and area_id
         has_access = JWTAuth.validate_company_access(token, company_id, area_id)

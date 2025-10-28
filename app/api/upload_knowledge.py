@@ -105,11 +105,19 @@ async def get_company_uploads_endpoint(
     """
     try:
         company_id = request.get("company_id")
+        area_id = request.get("area_id")
         limit = request.get("limit", 100)
 
         # Validate inputs
         if not company_id:
             error_response = create_error_response("company_id is required")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        if not area_id:
+            error_response = create_error_response("area_id is required")
             raise HTTPException(
                 status_code=400,
                 detail={"result": error_response.model_dump()}
