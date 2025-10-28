@@ -42,7 +42,15 @@ class Settings(BaseSettings):
     orchestrator_top_p: float
 
     recontextualizer_model_id: str
-    
+
+    # Transcribe Configuration
+    transcribe_language_code: str
+    transcribe_sample_rate: int
+    transcribe_media_encoding: str
+    transcribe_vocabulary_name: Optional[str] = None
+    transcribe_enable_partial_results: bool
+    transcribe_max_speaker_labels: int
+
     weaviate_url: Optional[str] = None
     weaviate_api_key: Optional[str] = None
     weaviate_class_name: str
@@ -171,8 +179,31 @@ class Settings(BaseSettings):
         if v <= 0 or v > 2880:
             raise ValueError("JWT expiration minutes must be between 1 and 1440")
         return v
-    
-    
+
+    @field_validator('transcribe_sample_rate')
+    @classmethod
+    def validate_transcribe_sample_rate(cls, v):
+        valid_rates = [8000, 16000, 44100, 48000]
+        if v not in valid_rates:
+            raise ValueError(f"Transcribe sample rate must be one of {valid_rates}")
+        return v
+
+    @field_validator('transcribe_media_encoding')
+    @classmethod
+    def validate_transcribe_media_encoding(cls, v):
+        valid_encodings = ['pcm', 'ogg-opus', 'flac']
+        if v not in valid_encodings:
+            raise ValueError(f"Transcribe media encoding must be one of {valid_encodings}")
+        return v
+
+    @field_validator('transcribe_language_code')
+    @classmethod
+    def validate_transcribe_language_code(cls, v):
+        if not v or len(v) < 5 or '-' not in v:
+            raise ValueError("Transcribe language code must be in format 'xx-XX' (e.g., 'es-ES', 'en-US')")
+        return v
+
+
     @property
     def vectordb_url(self) -> Optional[str]:
         return self.weaviate_url

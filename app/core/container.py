@@ -11,6 +11,7 @@ from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
+from app.domain.ports.transcribe_port import TranscribePort
 
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
@@ -18,6 +19,7 @@ from app.infrastructure.vectorstores.weaviate_repository import WeaviateReposito
 from app.infrastructure.llm.aws_bedrock_converse_provider import AWSBedrockConverseProvider
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
+from app.infrastructure.transcriber.aws_transcribe_streaming import AWSTranscribeStreaming
 
 
 class DIContainer:
@@ -181,6 +183,32 @@ class DIContainer:
             self._ia_config_service = IaConfigService()
 
         return self._ia_config_service
+
+    def create_transcribe_session(self) -> TranscribePort:
+        """
+        Create NEW transcribe session for a single user/WebSocket connection.
+
+        🚨 CRITICAL: This is a FACTORY method, NOT a singleton getter.
+            → Returns a NEW instance every time it's called
+            → Each WebSocket connection must call this to get its own instance
+            → DO NOT cache or reuse instances across connections
+
+        Returns:
+            TranscribePort: NEW transcribe streaming instance
+        """
+        try:
+            if not settings.aws_region:
+                raise ValueError("AWS region is required for Transcribe service")
+
+            # Create NEW instance - not a singleton!
+            return AWSTranscribeStreaming(
+                region=settings.aws_region,
+                profile_name=settings.aws_profile,
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key
+            )
+        except Exception as e:
+            raise ConnectionError(f"Failed to create transcribe session: {str(e)}")
 
 
 # Global container instance
