@@ -240,41 +240,29 @@ class AWSTranscribeStreaming(TranscribePort):
             # If client requests ogg-opus but we're receiving raw PCM, convert to pcm
             actual_encoding = media_encoding
             if media_encoding == "ogg-opus":
-                print("DEBUG: Client requested ogg-opus, but we're receiving raw PCM from WebSocket")
-                print("DEBUG: Converting to pcm for AWS Transcribe")
+                # Client requests ogg-opus but we're receiving raw PCM, so convert
                 actual_encoding = "pcm"
 
             # CRITICAL FIX: AWS Transcribe with PCM expects specific sample rates
             # Support common rates: 8000, 16000, 44100, 48000
             actual_sample_rate = sample_rate
             if actual_encoding == "pcm" and sample_rate not in [8000, 16000, 44100, 48000]:
-                print(f"DEBUG: Sample rate {sample_rate} not supported by AWS for PCM, converting to 16000")
+                # AWS PCM requires specific sample rates, convert unsupported rates
                 actual_sample_rate = 16000
 
-            print(f"DEBUG: Starting transcription with config:")
-            print(f"  language_code={language_code}")
-            print(f"  sample_rate={sample_rate} (requested by client)")
-            print(f"  actual_sample_rate={actual_sample_rate} (sending to AWS)")
-            print(f"  media_encoding={media_encoding} (requested by client)")
-            print(f"  actual_encoding={actual_encoding} (sending to AWS)")
             logger.info(f"Starting transcription stream: language={language_code}, "
-                       f"sample_rate={sample_rate}, encoding={actual_encoding}")
+                       f"sample_rate={actual_sample_rate}, encoding={actual_encoding}")
 
             # Crear cliente de transcripción
             # El cliente usa automáticamente las credenciales de las variables de entorno
             self.client = TranscribeStreamingClient(region=self.region)
 
             # Iniciar stream de transcripción
-            print(f"DEBUG: Calling start_stream_transcription with:")
-            print(f"  language_code={language_code}")
-            print(f"  media_sample_rate_hz={actual_sample_rate}")
-            print(f"  media_encoding={actual_encoding}")
             stream = await self.client.start_stream_transcription(
                 language_code=language_code,
                 media_sample_rate_hz=actual_sample_rate,
                 media_encoding=actual_encoding,
             )
-            print(f"DEBUG: Stream started successfully!")
 
             # Crear event handler
             self.event_handler = MyEventHandler(stream.output_stream)
