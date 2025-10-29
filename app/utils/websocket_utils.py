@@ -28,7 +28,6 @@ async def audio_stream_from_websocket(websocket: WebSocket) -> AsyncGenerator[by
         bytes: Audio chunks received from WebSocket
     """
     audio_chunk_count = 0
-    print(f"DEBUG: audio_stream_from_websocket started")
     logger.info("Audio stream generator started, waiting for audio chunks from WebSocket")
 
     try:
@@ -49,13 +48,10 @@ async def audio_stream_from_websocket(websocket: WebSocket) -> AsyncGenerator[by
                 # Handle text messages (control signals like stop)
                 elif "text" in msg:
                     text_data = msg["text"]
-                    print(f"DEBUG: Received text message: {text_data}")
                     logger.debug(f"Received text message: {text_data}")
                     # Check for stop signal
                     if "stop" in text_data.lower():
-                        print(f"DEBUG: Stop signal received after {audio_chunk_count} audio chunks, ending audio stream")
                         logger.info(f"Stop signal received after {audio_chunk_count} audio chunks, stopping audio capture")
-                        print(f"DEBUG: AWS will now process remaining audio and generate final summary")
                         logger.info(f"AWS Transcribe will now process remaining audio chunks and generate session summary")
                         break
 

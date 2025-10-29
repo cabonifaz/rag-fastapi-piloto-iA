@@ -208,11 +208,9 @@ async def websocket_transcribe_endpoint(
             )
 
     except WebSocketDisconnect:
-        print(f"DEBUG: WebSocket disconnected: user_id={user_id}")
         logger.info(f"WebSocket disconnected: user_id={user_id}")
 
     except Exception as e:
-        print(f"DEBUG: Unexpected WebSocket error - {type(e).__name__}: {e}")
         logger.error(f"Unexpected WebSocket error: {e}", exc_info=True)
         try:
             await websocket.send_json(
@@ -234,17 +232,14 @@ async def websocket_transcribe_endpoint(
                     f"words={session_summary.get('total_words', 0)}, "
                     f"confidence={session_summary.get('average_confidence', 0):.3f}"
                 )
-                print(f"DEBUG: Session summary: {session_summary}")
 
                 # Send session complete status with summary
                 try:
-                    logger.info(f"Sending final summary to client with {session_summary.get('total_words', 0)} words")
                     await websocket.send_json({
                         "type": "complete",
                         "summary": session_summary
                     })
-                    print(f"DEBUG: Final summary sent to client")
-                    logger.info(f"Final summary sent to client")
+                    logger.info(f"Session summary sent to client with {session_summary.get('total_words', 0)} words")
                 except Exception as send_error:
                     logger.error(f"Error sending final summary to client: {send_error}")
                     pass  # Connection may be closed
