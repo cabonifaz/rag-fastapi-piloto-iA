@@ -53,8 +53,10 @@ async def audio_stream_from_websocket(websocket: WebSocket) -> AsyncGenerator[by
                     logger.debug(f"Received text message: {text_data}")
                     # Check for stop signal
                     if "stop" in text_data.lower():
-                        print(f"DEBUG: Stop signal received after {audio_chunk_count} audio chunks")
-                        logger.info(f"Stop signal received after {audio_chunk_count} audio chunks, ending audio stream")
+                        print(f"DEBUG: Stop signal received after {audio_chunk_count} audio chunks, ending audio stream")
+                        logger.info(f"Stop signal received after {audio_chunk_count} audio chunks, stopping audio capture")
+                        print(f"DEBUG: AWS will now process remaining audio and generate final summary")
+                        logger.info(f"AWS Transcribe will now process remaining audio chunks and generate session summary")
                         break
 
             except Exception as e:

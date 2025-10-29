@@ -176,8 +176,10 @@ async def websocket_transcribe_endpoint(
                 # Send transcription result to client
                 if transcript_result.is_partial:
                     response = create_partial_response(transcript_result)
+                    logger.debug(f"Sending partial result: {transcript_result.transcript[:50]}...")
                 else:
                     response = create_final_response(transcript_result)
+                    logger.info(f"Sending final result: {transcript_result.transcript[:100]}...")
 
                 await websocket.send_json(response.model_dump())
 
@@ -223,21 +225,28 @@ async def websocket_transcribe_endpoint(
         # ALWAYS cleanup resources when WebSocket closes
         if transcribe_service:
             try:
+                logger.info("Waiting for AWS to finish processing remaining audio...")
                 session_summary = await transcribe_service.close_session()
                 logger.info(
                     f"Transcription session closed: "
                     f"user_id={user_id}, "
                     f"duration={session_summary.get('duration_seconds', 0)}s, "
-                    f"words={session_summary.get('total_words', 0)}"
+                    f"words={session_summary.get('total_words', 0)}, "
+                    f"confidence={session_summary.get('average_confidence', 0):.3f}"
                 )
+                print(f"DEBUG: Session summary: {session_summary}")
 
                 # Send session complete status with summary
                 try:
+                    logger.info(f"Sending final summary to client with {session_summary.get('total_words', 0)} words")
                     await websocket.send_json({
                         "type": "complete",
                         "summary": session_summary
                     })
-                except:
+                    print(f"DEBUG: Final summary sent to client")
+                    logger.info(f"Final summary sent to client")
+                except Exception as send_error:
+                    logger.error(f"Error sending final summary to client: {send_error}")
                     pass  # Connection may be closed
 
             except Exception as e:
