@@ -1,7 +1,6 @@
 """WebSocket utility functions for handling connections and streaming."""
 
 from fastapi import WebSocket, WebSocketDisconnect
-import asyncio
 import logging
 from typing import AsyncGenerator
 
@@ -15,6 +14,10 @@ async def audio_stream_from_websocket(websocket: WebSocket) -> AsyncGenerator[by
     Esta función convierte mensajes binarios de WebSocket en un generador
     asíncrono que puede ser consumido por servicios de transcripción.
 
+    Procesa:
+    - Mensajes binarios: Yield audio chunks directamente a AWS Transcribe
+    - Mensajes de texto con "stop": Termina el stream y cierra la conexión
+
     Args:
         websocket: WebSocket connection
 
@@ -24,31 +27,52 @@ async def audio_stream_from_websocket(websocket: WebSocket) -> AsyncGenerator[by
     Yields:
         bytes: Audio chunks received from WebSocket
     """
-    queue = asyncio.Queue()
+    audio_chunk_count = 0
+    logger.info("Audio stream generator started, waiting for audio chunks from WebSocket")
 
-    async def receive_audio():
-        """Receive audio from WebSocket and put in queue."""
-        try:
-            while True:
-                # Receive bytes (audio chunks) from client
-                data = await websocket.receive_bytes()
-                await queue.put(data)
-        except WebSocketDisconnect:
-            logger.info("WebSocket disconnected during audio receive")
-            await queue.put(None)  # Signal end of stream
-        except Exception as e:
-            logger.error(f"Error receiving audio from WebSocket: {e}")
-            await queue.put(None)
-
-    # Start receiving task
-    asyncio.create_task(receive_audio())
-
-    # Generator that yields from queue
-    async def generator():
+    try:
+        # Use low-level receive() to handle both binary and text frames
         while True:
-            data = await queue.get()
-            if data is None:
-                break
-            yield data
-
-    return generator()
+            try:
+                # Try to receive binary data
+                data = await websocket.receive_bytes()
+                if data and len(data) > 0:
+                    audio_chunk_count += 1
+                    logger.debug(f"Received audio chunk {audio_chunk_count}: {len(data)} bytes")
+                    yield data
+            except RuntimeError as e:
+                # receive_bytes() raises RuntimeError if it's a text frame
+                logger.debug(f"RuntimeError receiving bytes: {e}, trying receive_text()")
+                try:
+                    text_data = await websocket.receive_text()
+                    logger.debug(f"Received text message: {text_data[:100]}")
+                    # Check for stop signal
+                    if "stop" in text_data.lower():
+                        logger.info(f"Stop signal received after {audio_chunk_count} audio chunks, ending audio stream")
+                        break
+                except Exception as text_error:
+                    logger.error(f"Error receiving text: {type(text_error).__name__}: {text_error}")
+                    break
+            except KeyError as ke:
+                # KeyError means the message type is not what we expect
+                logger.debug(f"KeyError receiving message: {ke}, getting raw message")
+                try:
+                    msg = await websocket.receive()
+                    if "bytes" in msg:
+                        data = msg["bytes"]
+                        if data and len(data) > 0:
+                            audio_chunk_count += 1
+                            logger.debug(f"Received audio chunk {audio_chunk_count} via raw message: {len(data)} bytes")
+                            yield data
+                    elif "text" in msg:
+                        logger.debug(f"Received text message via raw message: {msg['text'][:100]}")
+                        if "stop" in msg["text"].lower():
+                            logger.info(f"Stop signal received after {audio_chunk_count} audio chunks, ending audio stream")
+                            break
+                except Exception as raw_error:
+                    logger.error(f"Error getting raw message: {type(raw_error).__name__}: {raw_error}")
+                    break
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected during audio receive after {audio_chunk_count} chunks")
+    except Exception as e:
+        logger.error(f"Error receiving audio from WebSocket: {type(e).__name__}: {e}", exc_info=True)

@@ -69,9 +69,8 @@ async def websocket_transcribe_endpoint(
             logger.info(f"User authenticated via WebSocket: user_id={user_id}")
 
             # Send connection confirmation
-            await websocket.send_json(
-                create_status_response("connected").model_dump()
-            )
+            response = create_status_response("connected")
+            await websocket.send_json(response.model_dump())
 
         except HTTPException as e:
             # Send error and close
@@ -118,7 +117,7 @@ async def websocket_transcribe_endpoint(
                 create_status_response("configured").model_dump()
             )
 
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             logger.error("Timeout waiting for config message")
             await websocket.send_json(
                 create_error_response("Configuration timeout").model_dump()
@@ -132,6 +131,14 @@ async def websocket_transcribe_endpoint(
                 create_error_response(f"Invalid configuration: {str(e)}").model_dump()
             )
             await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+            return
+
+        except Exception as e:
+            logger.error(f"Unexpected error in config parsing: {type(e).__name__}: {e}", exc_info=True)
+            await websocket.send_json(
+                create_error_response(f"Error processing configuration: {str(e)}").model_dump()
+            )
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
             return
 
         # Create NEW transcribe session for THIS WebSocket connection
@@ -149,15 +156,18 @@ async def websocket_transcribe_endpoint(
             return
 
         # Create audio stream from WebSocket
-        audio_stream = await audio_stream_from_websocket(websocket)
+        audio_stream = audio_stream_from_websocket(websocket)  # Returns async generator
+        logger.info("Audio stream created successfully")
 
         # Send streaming started status
         await websocket.send_json(
             create_status_response("streaming").model_dump()
         )
+        logger.info("Streaming status sent to client")
 
         # Process audio stream and send transcription results
         try:
+            logger.info("Starting to process audio stream")
             async for transcript_result in transcribe_service.process_audio_stream(
                 audio_stream=audio_stream,
                 config=config,
@@ -196,9 +206,11 @@ async def websocket_transcribe_endpoint(
             )
 
     except WebSocketDisconnect:
+        print(f"DEBUG: WebSocket disconnected: user_id={user_id}")
         logger.info(f"WebSocket disconnected: user_id={user_id}")
 
     except Exception as e:
+        print(f"DEBUG: Unexpected WebSocket error - {type(e).__name__}: {e}")
         logger.error(f"Unexpected WebSocket error: {e}", exc_info=True)
         try:
             await websocket.send_json(

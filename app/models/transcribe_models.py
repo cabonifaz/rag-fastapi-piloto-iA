@@ -111,9 +111,9 @@ class TranscriptResult(BaseModel):
         default=None,
         description="Nivel de confianza promedio (0.0-1.0), solo en resultados finales"
     )
-    alternatives: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Transcripciones alternativas"
+    alternatives: Optional[List[Any]] = Field(
+        default=None,
+        description="Transcripciones alternativas (puede ser lista de dicts o objetos AWS)"
     )
     speaker_label: Optional[str] = Field(
         default=None,

@@ -65,6 +65,37 @@ class MyEventHandler(TranscriptResultStreamHandler):
                         if confidences:
                             confidence = sum(confidences) / len(confidences)
 
+                # Convert AWS Alternative objects to dictionaries for JSON serialization
+                alternatives_list = []
+                try:
+                    for alt in result.alternatives:
+                        # Convert items (AWS Item objects) to dictionaries
+                        items_list = []
+                        if hasattr(alt, 'items') and alt.items:
+                            try:
+                                for item in alt.items:
+                                    item_dict = {
+                                        "type": item.type if hasattr(item, 'type') else None,
+                                        "value": item.value if hasattr(item, 'value') else None,
+                                        "start_time": float(item.start_time) if hasattr(item, 'start_time') and item.start_time else None,
+                                        "end_time": float(item.end_time) if hasattr(item, 'end_time') and item.end_time else None,
+                                        "confidence": float(item.confidence) if hasattr(item, 'confidence') and item.confidence else None,
+                                        "stable": item.stable if hasattr(item, 'stable') else None
+                                    }
+                                    items_list.append(item_dict)
+                            except Exception as e:
+                                logger.debug(f"Error converting items: {e}")
+
+                        alt_dict = {
+                            "transcript": alt.transcript if hasattr(alt, 'transcript') else "",
+                            "confidence": float(alt.confidence) if hasattr(alt, 'confidence') and alt.confidence else None,
+                            "items": items_list if items_list else None
+                        }
+                        alternatives_list.append(alt_dict)
+                except Exception as e:
+                    logger.debug(f"Error converting alternatives: {e}")
+                    alternatives_list = []
+
                 # Crear resultado procesado
                 processed_result = {
                     "transcript": transcript_text,
@@ -72,7 +103,7 @@ class MyEventHandler(TranscriptResultStreamHandler):
                     "start_time": start_time,
                     "end_time": end_time,
                     "confidence": confidence,
-                    "alternatives": result.alternatives,
+                    "alternatives": alternatives_list,
                     "speaker_label": None  # TODO: Agregar soporte para speaker diarization
                 }
 
@@ -205,19 +236,45 @@ class AWSTranscribeStreaming(TranscribePort):
             Dict con resultados de transcripción procesados
         """
         try:
+            # CRITICAL FIX: Client sends raw PCM Int16 bytes, not ogg-opus
+            # If client requests ogg-opus but we're receiving raw PCM, convert to pcm
+            actual_encoding = media_encoding
+            if media_encoding == "ogg-opus":
+                print("DEBUG: Client requested ogg-opus, but we're receiving raw PCM from WebSocket")
+                print("DEBUG: Converting to pcm for AWS Transcribe")
+                actual_encoding = "pcm"
+
+            # CRITICAL FIX: AWS Transcribe with PCM expects specific sample rates
+            # Support common rates: 8000, 16000, 44100, 48000
+            actual_sample_rate = sample_rate
+            if actual_encoding == "pcm" and sample_rate not in [8000, 16000, 44100, 48000]:
+                print(f"DEBUG: Sample rate {sample_rate} not supported by AWS for PCM, converting to 16000")
+                actual_sample_rate = 16000
+
+            print(f"DEBUG: Starting transcription with config:")
+            print(f"  language_code={language_code}")
+            print(f"  sample_rate={sample_rate} (requested by client)")
+            print(f"  actual_sample_rate={actual_sample_rate} (sending to AWS)")
+            print(f"  media_encoding={media_encoding} (requested by client)")
+            print(f"  actual_encoding={actual_encoding} (sending to AWS)")
             logger.info(f"Starting transcription stream: language={language_code}, "
-                       f"sample_rate={sample_rate}, encoding={media_encoding}")
+                       f"sample_rate={sample_rate}, encoding={actual_encoding}")
 
             # Crear cliente de transcripción
             # El cliente usa automáticamente las credenciales de las variables de entorno
             self.client = TranscribeStreamingClient(region=self.region)
 
             # Iniciar stream de transcripción
+            print(f"DEBUG: Calling start_stream_transcription with:")
+            print(f"  language_code={language_code}")
+            print(f"  media_sample_rate_hz={actual_sample_rate}")
+            print(f"  media_encoding={actual_encoding}")
             stream = await self.client.start_stream_transcription(
                 language_code=language_code,
-                media_sample_rate_hz=sample_rate,
-                media_encoding=media_encoding,
+                media_sample_rate_hz=actual_sample_rate,
+                media_encoding=actual_encoding,
             )
+            print(f"DEBUG: Stream started successfully!")
 
             # Crear event handler
             self.event_handler = MyEventHandler(stream.output_stream)
@@ -225,42 +282,70 @@ class AWSTranscribeStreaming(TranscribePort):
             # Tarea para manejar eventos de transcripción
             async def handle_events():
                 try:
-                    await asyncio.gather(self.event_handler.handle_events())
+                    await self.event_handler.handle_events()
                 except Exception as e:
-                    logger.error(f"Error handling events: {e}", exc_info=True)
+                    error_message = str(e)
+                    # Check if it's the expected AWS timeout (normal end of stream)
+                    if "timed out because no new audio was received" in error_message.lower():
+                        logger.info(f"AWS Transcribe timeout (normal end of stream): {e}")
+                    else:
+                        logger.error(f"Error handling events: {e}", exc_info=True)
                 finally:
                     await self.event_handler.signal_done()
-
-            # Iniciar manejo de eventos en background
-            event_task = asyncio.create_task(handle_events())
 
             # Tarea para enviar audio
             async def send_audio():
                 try:
+                    logger.info("Starting audio send task")
+                    audio_chunk_count = 0
+
                     async for audio_chunk in audio_stream:
                         if audio_chunk and len(audio_chunk) > 0:
-                            await stream.input_stream.send_audio_event(audio_bytes=audio_chunk)
-                    # Señalar fin del audio
-                    await stream.input_stream.end_stream()
+                            try:
+                                result = await asyncio.wait_for(
+                                    stream.input_stream.send_audio_event(audio_chunk=audio_chunk),
+                                    timeout=5
+                                )
+                                audio_chunk_count += 1
+                                if audio_chunk_count % 10 == 0:
+                                    logger.debug(f"Sent {audio_chunk_count} audio chunks to AWS")
+                            except asyncio.TimeoutError:
+                                logger.error("Timeout sending audio event to AWS")
+                                break
+                            except Exception as e:
+                                logger.error(f"Error in send_audio_event: {type(e).__name__}: {e}")
+                                break
+
+                    # Audio stream ended, signal end to AWS
+                    logger.info(f"Audio stream ended after {audio_chunk_count} chunks, sending end_stream signal to AWS")
+                    try:
+                        await asyncio.wait_for(stream.input_stream.end_stream(), timeout=5)
+                        logger.info("end_stream signal sent successfully")
+                    except asyncio.TimeoutError:
+                        logger.error("Timeout sending end_stream to AWS")
                 except Exception as e:
                     logger.error(f"Error sending audio: {e}", exc_info=True)
 
-            # Iniciar envío de audio en background
+            # Iniciar ambas tareas concurrentemente
+            event_task = asyncio.create_task(handle_events())
             audio_task = asyncio.create_task(send_audio())
 
             try:
-                # Consumir resultados de la cola
+                # Consumir resultados de la cola mientras se procesan audio y eventos
+                logger.info("Starting to consume transcription results from queue")
                 while True:
                     result = await self.event_handler.result_queue.get()
 
                     if result is None:
                         # No más resultados
+                        logger.info("Received end-of-stream signal from event handler")
                         break
 
                     yield result
 
             finally:
-                # Esperar a que terminen las tareas
+                # Esperar a que terminen ambas tareas concurrentemente
+                logger.info("Waiting for audio_task and event_task to complete")
                 await asyncio.gather(audio_task, event_task, return_exceptions=True)
                 logger.info("Transcription stream completed")
 
