@@ -70,18 +70,26 @@ class AnthropicModelConfig:
 
     def build_rag_prompt(self, message: str, context_text: str) -> str:
         """Build RAG prompt optimized for Claude models."""
-        return f"""Answer the user's question based on the following context. Do not search on the internet. Answer in the same language as the question. Present the answer on markdown format.
+        return f"""Answer the user's question based on the following:
 
-If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted Markdown table. Include all source references used in the answer with document title and page numbers.
+- If the question is about a specific context provided, answer only using that context.
+- If the user asks for a summary or review, use the conversation history to generate the summary.
+- Do not search online or make assumptions beyond what is provided in the context or conversation history.
 
-If the data comes from an API call, the context will include an "API Call". In this case, interpret the response JSON (usually an array of objects) as a table. Present that data in Markdown format, but do not include document or page references for API data.
+# Output rules
+- Give a **clear and informative answer**, focused directly on the question.
+- Include the **main details or explanations** from the context, but avoid unnecessary length.
+- Keep a **balanced tone**: neither too short nor overly elaborate.
+- If the context includes document excerpts, **cite titles or page numbers briefly** when relevant.
+- Do **not invent** or add information not present in the context.
 
-Question: {message}
+Question:
+{message}
 
 Context:
 {context_text}
 
-Please provide a clear, accurate response based solely on the provided context. Only what the user ask."""
+Return only the final answer that addresses the question clearly and completely."""
 
 
 class Claude3HaikuConfig(AnthropicModelConfig):

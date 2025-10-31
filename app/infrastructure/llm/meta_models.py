@@ -51,16 +51,26 @@ class MetaModelConfig:
 
     def build_rag_prompt(self, message: str, context_text: str) -> str:
         """Build RAG prompt optimized for Llama models."""
-        return f"""IMPORTANT: Respond in the SAME LANGUAGE as the question.
+        return f"""Answer the user's question based on the following:
 
-Present the data provided below. Show ALL entries exactly as provided. Do not make assumptions or add information not in the data. If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted table.
+- If the question is about a specific context provided, answer only using that context.
+- If the user asks for a summary or review, use the conversation history to generate the summary.
+- Do not search online or make assumptions beyond what is provided in the context or conversation history.
 
-Data:
+# Output rules
+- Give a **clear and informative answer**, focused directly on the question.
+- Include the **main details or explanations** from the context, but avoid unnecessary length.
+- Keep a **balanced tone**: neither too short nor overly elaborate.
+- If the context includes document excerpts, **cite titles or page numbers briefly** when relevant.
+- Do **not invent** or add information not present in the context.
+
+Question:
+{message}
+
+Context:
 {context_text}
 
-Question: {message}
-
-Answer showing ALL the data in the same language as the question:"""
+Return only the final answer that addresses the question clearly and completely."""
 
 
 class Llama3_8BConfig(MetaModelConfig):
@@ -98,20 +108,35 @@ class Llama31_405BConfig(MetaModelConfig):
         super().__init__("meta.llama3-1-405b-instruct-v1:0")
 
 
+class Llama4_Maverick17BConfig(MetaModelConfig):
+    """Specific configuration for Llama 4 Maverick 17B - focused on request/response formatting."""
+
+    def __init__(self):
+        super().__init__("meta.llama4-maverick-17b-instruct-v1:0")
+
+
 def get_meta_config(model_id: str) -> MetaModelConfig:
     """Factory function to get the appropriate Meta model configuration."""
     model_id_lower = model_id.lower()
 
-    if "llama3-1-8b" in model_id_lower:
+    # Llama 4 models
+    if "llama4-maverick-17b" in model_id_lower or "llama4-maverick" in model_id_lower:
+        return Llama4_Maverick17BConfig()
+
+    # Llama 3.1 models
+    elif "llama3-1-8b" in model_id_lower:
         return Llama31_8BConfig()
     elif "llama3-1-70b" in model_id_lower:
         return Llama31_70BConfig()
     elif "llama3-1-405b" in model_id_lower:
         return Llama31_405BConfig()
+
+    # Llama 3 models
     elif "llama3-8b" in model_id_lower:
         return Llama3_8BConfig()
     elif "llama3-70b" in model_id_lower:
         return Llama3_70BConfig()
+
     else:
         # Default to generic Meta config for unknown models
         return MetaModelConfig(model_id)
