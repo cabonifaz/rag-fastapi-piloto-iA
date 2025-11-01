@@ -8,17 +8,65 @@ from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnect
 from botocore.config import Config
 from app.domain.ports.llm_port import LLMPort
 from app.infrastructure.llm.model_factory import ModelConfigFactory
+from app.infrastructure.llm.model_saturation_tracker import ModelSaturationTracker
 from app.core.config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Global saturation tracker - shared across all provider instances
+_saturation_tracker: Optional[ModelSaturationTracker] = None
+
+# Hardcoded list of 3 models with max tokens
+MODELS = [
+    {"model_id": "us.meta.llama4-maverick-17b-instruct-v1:0", "max_tokens": 4096},
+    {"model_id": "qwen.qwen3-32b-v1:0", "max_tokens": 16384},
+    {"model_id": "us.amazon.nova-premier-v1:0", "max_tokens": 16000},
+]
+
+
+def get_saturation_tracker() -> ModelSaturationTracker:
+    """Get or create the global saturation tracker instance."""
+    global _saturation_tracker
+    if _saturation_tracker is None:
+        timeout_minutes = getattr(settings, 'llm_saturation_timeout_minutes', 60)
+        _saturation_tracker = ModelSaturationTracker(
+            saturation_timeout_minutes=timeout_minutes
+        )
+    return _saturation_tracker
+
 
 class AWSBedrockConverseProvider(LLMPort):
     """
     AWS Bedrock LLM provider using the Converse API.
+
     Provides unified interface for all supported models (Claude, Llama, OpenAI, etc.)
-    with built-in system prompt support.
+    with built-in system prompt support and automatic fallback on model saturation.
+
+    Features:
+    - Automatic fallback to alternative models when primary is saturated (429 errors)
+    - Circuit breaker pattern to track saturated models globally
+    - Configurable fallback chains per model
+    - Support for per-request model selection via fallback_models parameter
+    - Transparent error handling with saturation detection
+
+    Usage:
+        provider = AWSBedrockConverseProvider(
+            region="us-east-1",
+            model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
+            role_behavior="You are a helpful assistant"
+        )
+
+        # Generate with automatic fallback
+        async for chunk in provider.generate_stream(prompt="What is AI?"):
+            print(chunk, end="", flush=True)
+
+        # Or with custom fallback models
+        async for chunk in provider.generate_stream(
+            prompt="What is AI?",
+            fallback_models=["meta.llama3-1-70b-instruct-v1:0"]
+        ):
+            print(chunk, end="", flush=True)
     """
 
     def __init__(
@@ -31,15 +79,15 @@ class AWSBedrockConverseProvider(LLMPort):
         aws_secret_access_key: Optional[str] = None,
     ):
         """
-        Initialize AWS Bedrock Converse client.
+        Initialize AWS Bedrock Converse client with saturation tracking.
 
         Args:
             region: AWS region
             model_id: Bedrock model ID
-            profile_name: AWS profile name
-            aws_access_key_id: AWS access key ID
-            aws_secret_access_key: AWS secret access key
-            system_prompt: System prompt to use for all conversations
+            role_behavior: Role behavior instructions for the model
+            profile_name: AWS profile name (optional)
+            aws_access_key_id: AWS access key ID (optional)
+            aws_secret_access_key: AWS secret access key (optional)
         """
         session_params = {"region_name": region}
 
@@ -61,10 +109,17 @@ class AWSBedrockConverseProvider(LLMPort):
         session = boto3.Session(**session_params)
         self.client = session.client("bedrock-runtime", config=boto_config)
         self.model_id = model_id
+        self.region = region
         self.default_role_behavior = role_behavior
+        self.profile_name = profile_name
+        self.aws_access_key_id = aws_access_key_id
+        self.aws_secret_access_key = aws_secret_access_key
 
         # Get model-specific configuration for optimized prompts
         self.model_config = ModelConfigFactory.get_model_config(model_id)
+
+        # Get reference to global saturation tracker
+        self.saturation_tracker = get_saturation_tracker()
 
     def set_system_prompt(self, system_prompt: str):
         """Update the system prompt for this provider instance."""
@@ -96,25 +151,150 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         max_tokens: int = 2048,
         temperature: float = 0.3,
         role_behavior: Optional[str] = None,
-        messages: Optional[List[Dict[str, Any]]] = None
+        messages: Optional[List[Dict[str, Any]]] = None,
+        fallback_models: Optional[List[str]] = None
     ) -> AsyncGenerator[str, None]:
         """
-        Generate text using AWS Bedrock Converse Stream API.
+        Generate text using AWS Bedrock Converse Stream API with automatic fallback.
+
+        Attempts to generate using the primary model. If the model is saturated
+        (rate limit/quota exceeded), automatically tries fallback models.
 
         Uses asyncio.to_thread to run blocking boto3 calls in a thread pool,
         preventing the FastAPI event loop from blocking on slow network connections.
 
         Args:
             prompt: User prompt (used if messages is None)
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for sampling
+            max_tokens: Maximum tokens to generate (default: 2048)
+            temperature: Temperature for sampling (default: 0.3)
             role_behavior: Optional role behavior (overrides instance system_prompt)
             messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                      If provided, prompt will be ignored and messages will be used instead
+            fallback_models: Optional list of fallback model IDs to try if primary is saturated.
+                           If not provided, uses config default fallback chain.
 
         Yields:
             Text chunks as they are generated
         """
+        # Build list of models to try
+        models_to_try = [self.model_id]
+        if fallback_models:
+            models_to_try.extend(fallback_models)
+        else:
+            # Use hardcoded MODELS list as fallback (all models except current one)
+            fallback_list = [m["model_id"] for m in MODELS if m["model_id"] != self.model_id]
+            models_to_try.extend(fallback_list)
+
+        # Filter out saturated models
+        available_models = []
+        for model_id in models_to_try:
+            if not await self.saturation_tracker.is_saturated(model_id):
+                available_models.append(model_id)
+            else:
+                logger.debug(f"⏭️ Skipping {model_id} (currently marked as saturated)")
+
+        if not available_models:
+            saturated = await self.saturation_tracker.get_active_saturated_models()
+            raise ConnectionError(
+                f"All models saturated: {', '.join(saturated)}. Please try again in a few minutes."
+            )
+
+        # Try each available model
+        last_error = None
+        for attempt, current_model in enumerate(available_models):
+            try:
+                logger.info(
+                    f"🔄 Generating with {current_model} "
+                    f"(attempt {attempt + 1}/{len(available_models)})"
+                )
+
+                # Stream from this model
+                async for chunk in self._stream_from_model(
+                    model_id=current_model,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    role_behavior=role_behavior,
+                    messages=messages
+                ):
+                    yield chunk
+
+                # Success - exit
+                logger.info(f"✅ Successfully generated with {current_model}")
+                return
+
+            except ConnectionError as e:
+                error_msg = str(e).lower()
+                last_error = str(e)
+
+                # Check if this is a saturation error
+                saturation_patterns = getattr(settings, 'llm_saturation_patterns', [
+                    "rate limit",
+                    "throttling",
+                    "quota exceeded",
+                    "too many requests",
+                    "service quota"
+                ])
+                is_saturation = any(p.lower() in error_msg for p in saturation_patterns)
+
+                if is_saturation:
+                    # Mark model as saturated
+                    await self.saturation_tracker.mark_saturated(current_model)
+
+                    if attempt < len(available_models) - 1:
+                        # Try next available model
+                        next_model = available_models[attempt + 1]
+                        logger.warning(
+                            f"Model {current_model} is SATURATED. "
+                            f"Falling back to {next_model}"
+                        )
+                        continue
+                    else:
+                        # No more fallbacks
+                        logger.error(f"Model {current_model} is saturated and no fallbacks available")
+                        raise
+
+                else:
+                    # Not saturation error - don't retry
+                    logger.error(f"Non-recoverable error from {current_model}: {error_msg}")
+                    raise
+
+            except Exception as e:
+                # Unexpected error - don't try fallback
+                logger.error(f"Unexpected error from {current_model}: {str(e)}")
+                raise
+
+        # Should not reach here
+        raise ConnectionError(f"All models exhausted. Last error: {last_error}")
+
+    async def _stream_from_model(
+        self,
+        model_id: str,
+        prompt: str = None,
+        max_tokens: int = 2048,
+        temperature: float = 0.3,
+        role_behavior: Optional[str] = None,
+        messages: Optional[List[Dict[str, Any]]] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream from a specific model (internal helper).
+
+        This contains the original generate_stream logic.
+        Called by generate_stream for each model attempt.
+
+        Args:
+            model_id: The specific model ID to use for this attempt
+            prompt: User prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Temperature for sampling
+            role_behavior: Optional role behavior override
+            messages: Optional conversation history
+
+        Yields:
+            Text chunks as they are generated
+        """
+        logger.info(f"📍 Using model: {model_id}")
+        print(f"📍 Using model: {model_id}")
         try:
             # Build messages array - use provided messages or create from prompt
             if messages is not None:
@@ -144,9 +324,12 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
                     }
                 ]
 
+            # Get model-specific config for this attempt
+            model_config = ModelConfigFactory.get_model_config(model_id)
+
             # Build request parameters
             request_params = {
-                "modelId": self.model_id,
+                "modelId": model_id,
                 "messages": converse_messages,
                 "inferenceConfig": {
                     "maxTokens": max_tokens,
@@ -156,8 +339,8 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             }
 
             # Configure model-specific additional parameters (e.g., OpenAI reasoning)
-            if hasattr(self.model_config, 'get_converse_additional_fields'):
-                additional_fields = self.model_config.get_converse_additional_fields()
+            if hasattr(model_config, 'get_converse_additional_fields'):
+                additional_fields = model_config.get_converse_additional_fields()
                 request_params["additionalModelRequestFields"] = additional_fields
 
             # Add system prompt
@@ -209,40 +392,40 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
-            logger.error(f"AWS ClientError in generate_stream: {error_code} - {e}")
+            logger.error(f"AWS ClientError in _stream_from_model ({model_id}): {error_code} - {e}")
             if error_code == 'ValidationException':
-                raise ValueError(f"Invalid parameters for model {self.model_id}: {str(e)}")
+                raise ValueError(f"Invalid parameters for model {model_id}: {str(e)}")
             elif error_code == 'ThrottlingException':
-                raise ConnectionError(f"Rate limit exceeded for model {self.model_id}")
+                raise ConnectionError(f"Rate limit exceeded for model {model_id}")
             elif error_code == 'ServiceQuotaExceededException':
-                raise ConnectionError(f"Service quota exceeded for model {self.model_id}")
+                raise ConnectionError(f"Service quota exceeded for model {model_id}")
             elif error_code == 'ModelNotReadyException':
-                raise ValueError(f"Model {self.model_id} is not ready")
+                raise ValueError(f"Model {model_id} is not ready")
             elif error_code == 'ResourceNotFoundException':
-                raise ValueError(f"Model {self.model_id} not found or not accessible")
+                raise ValueError(f"Model {model_id} not found or not accessible")
             else:
                 raise ConnectionError(f"AWS Bedrock error: {error_code}")
 
         except NoCredentialsError as e:
-            logger.error(f"AWS credentials error in generate_stream: {e}")
+            logger.error(f"AWS credentials error in _stream_from_model ({model_id}): {e}")
             raise ConnectionError("AWS credentials not configured or invalid")
 
         except EndpointConnectionError as e:
-            logger.error(f"AWS endpoint connection error in generate_stream: {e}")
+            logger.error(f"AWS endpoint connection error in _stream_from_model ({model_id}): {e}")
             raise ConnectionError("Unable to connect to AWS Bedrock service - check internet connection")
 
         except asyncio.TimeoutError as e:
-            logger.error(f"Timeout error in generate_stream: {e}")
+            logger.error(f"Timeout error in _stream_from_model ({model_id}): {e}")
             raise ConnectionError("AWS Bedrock request timed out - network may be slow or unstable")
 
         except Exception as e:
             # Check if it's a botocore timeout exception
             error_message = str(e)
             if "timed out" in error_message.lower() or "timeout" in error_message.lower():
-                logger.error(f"Timeout error in generate_stream: {e}")
+                logger.error(f"Timeout error in _stream_from_model ({model_id}): {e}")
                 raise ConnectionError(f"Request timed out after waiting for response: {str(e)}")
 
-            logger.error(f"Unexpected error in generate_stream: {e}")
+            logger.error(f"Unexpected error in _stream_from_model ({model_id}): {e}")
             raise ConnectionError(f"LLM streaming service error: {str(e)}")
 
     def get_model_config(self):
