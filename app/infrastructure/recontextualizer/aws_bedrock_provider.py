@@ -9,6 +9,7 @@ from botocore.config import Config
 from app.core.config import settings
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
 from app.infrastructure.recontextualizer.nova_models import NovaRecontextualizerConfig
+from app.infrastructure.recontextualizer.model_factory import ModelFactory
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -70,8 +71,8 @@ class QueryRecontextualizer(RecontextualizerPort):
             session = boto3.Session(**session_params)
             self.client = session.client("bedrock-runtime", config=boto_config)
 
-            # Get model-specific configuration
-            self.model_config = NovaRecontextualizerConfig
+            # Get model-specific configuration based on model_id
+            self.model_config = ModelFactory.get_model_config(self.model_id)
 
             logger.info(f"QueryRecontextualizer initialized with model: {self.model_id}")
         except Exception as e:
