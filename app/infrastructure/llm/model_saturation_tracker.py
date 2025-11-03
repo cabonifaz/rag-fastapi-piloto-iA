@@ -69,6 +69,9 @@ class ModelSaturationTracker:
                 f"({self.timeout_minutes} minute timeout)"
             )
 
+            print("📊 Current saturated_models dictionary:")
+            print(self.saturated_models)
+
     async def is_saturated(self, model_id: str) -> bool:
         """
         Check if a model is currently marked as saturated.
