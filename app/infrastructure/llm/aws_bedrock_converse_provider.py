@@ -101,9 +101,9 @@ class AWSBedrockConverseProvider(LLMPort):
 
         # Configure boto3 with connection and read timeouts to prevent blocking
         boto_config = Config(
-            connect_timeout=30,  # 30 seconds to establish connection
-            read_timeout=120,    # 2 minutes max for reading response chunks
-            retries={'max_attempts': 2, 'mode': 'standard'}  # Retry failed requests
+            connect_timeout=30,
+            read_timeout=120,
+            retries={'max_attempts': 2, 'mode': 'standard'}
         )
 
         session = boto3.Session(**session_params)
@@ -229,11 +229,10 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
 
                 # Check if this is a saturation error
                 saturation_patterns = getattr(settings, 'llm_saturation_patterns', [
-                    "rate limit",
                     "throttling",
                     "quota exceeded",
-                    "too many requests",
-                    "service quota"
+                    "service quota",
+                    "read timeout"
                 ])
                 is_saturation = any(p.lower() in error_msg for p in saturation_patterns)
 
@@ -293,8 +292,6 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         Yields:
             Text chunks as they are generated
         """
-        logger.info(f"📍 Using model: {model_id}")
-        print(f"📍 Using model: {model_id}")
         try:
             # Build messages array - use provided messages or create from prompt
             if messages is not None:
