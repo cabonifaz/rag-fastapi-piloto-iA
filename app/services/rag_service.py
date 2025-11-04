@@ -297,7 +297,7 @@ class RagService:
             try:
                 messages_response = await self.message_service.get_last_n_messages(
                     chat_id=f"chat-{chat_id}",
-                    n=16
+                    n=20
                 )
                 # Format messages for context
                 conversation_history = [
@@ -309,7 +309,20 @@ class RagService:
                 ]
                 # Reverse the list so messages are in correct chronological order (oldest first)
                 conversation_history.reverse()
-                logger.info(f"Retrieved {len(conversation_history)} messages from chat history")
+                filtered_history = []
+                for i, msg in enumerate(conversation_history):
+                    if i > 0 and msg["role"] == "user" and conversation_history[i-1]["role"] == "user":
+                        # Si hay dos usuarios seguidos, saltar el primero (ya fue añadido)
+                        # No añadimos el actual y mantenemos el que ya está en filtered_history
+                        continue
+                    else:
+                        filtered_history.append(msg)
+                if filtered_history:
+                    if filtered_history[0]["role"] != "user":
+                        removed_msg = filtered_history.pop(0)
+                    if filtered_history and filtered_history[-1]["role"] == "user":
+                        removed_msg = filtered_history.pop()
+                conversation_history = filtered_history[-16:]
             except Exception as e:
                 logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
                 conversation_history = []

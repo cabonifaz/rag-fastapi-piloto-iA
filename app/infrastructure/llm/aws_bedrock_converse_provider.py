@@ -105,7 +105,7 @@ class AWSBedrockConverseProvider(LLMPort):
         self.boto_config = Config(
             connect_timeout=30,
             read_timeout=120,
-            retries={'max_attempts': 0}  # Disable boto3 retries to use our fallback logic
+            retries={'max_attempts': 0}
         )
 
         self.model_id = model_id

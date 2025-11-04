@@ -2,6 +2,7 @@
 
 from typing import Optional, AsyncGenerator, Dict, Any
 import logging
+import io
 from datetime import datetime
 
 from app.domain.ports.transcribe_port import TranscribePort
@@ -17,10 +18,6 @@ class TranscribeService:
     """
     Service for transcription operations.
     Handles business logic for real-time audio transcription.
-
-    🚨 IMPORTANTE: Este servicio NO debe ser singleton.
-        → Cada instancia maneja UNA sesión de transcripción
-        → Crear NUEVA instancia por cada WebSocket connection
     """
 
     def __init__(self, transcribe_port: TranscribePort):
@@ -288,4 +285,5 @@ class TranscribeService:
                 'duration_seconds': 0,
                 'total_words': self.total_words
             }
+
 

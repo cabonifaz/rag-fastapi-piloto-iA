@@ -12,6 +12,7 @@ from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
 from app.domain.ports.transcribe_port import TranscribePort
+from app.domain.ports.file_transcribe_port import FileTranscribePort
 
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
@@ -20,6 +21,7 @@ from app.infrastructure.llm.aws_bedrock_converse_provider import AWSBedrockConve
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 from app.infrastructure.transcriber.aws_transcribe_streaming import AWSTranscribeStreaming
+from app.infrastructure.transcriber.openai_transcribe import OpenAITranscribe
 
 
 class DIContainer:
@@ -184,7 +186,7 @@ class DIContainer:
 
         return self._ia_config_service
 
-    def create_transcribe_session(self) -> TranscribePort:
+    def create_transcribe_session(self, provider: str = None) -> TranscribePort:
         """
         Create NEW transcribe session for a single user/WebSocket connection.
 
@@ -193,22 +195,55 @@ class DIContainer:
             → Each WebSocket connection must call this to get its own instance
             → DO NOT cache or reuse instances across connections
 
+        Args:
+            provider: Transcription provider ("aws" or "openai"). If None, uses settings.transcribe_provider
+
         Returns:
             TranscribePort: NEW transcribe streaming instance
         """
         try:
-            if not settings.aws_region:
-                raise ValueError("AWS region is required for Transcribe service")
+            # Use provider from settings if not specified
+            selected_provider = provider or getattr(settings, 'transcribe_provider', 'aws')
 
-            # Create NEW instance - not a singleton!
-            return AWSTranscribeStreaming(
-                region=settings.aws_region,
-                profile_name=settings.aws_profile,
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key
-            )
+            if selected_provider == "aws":
+                if not settings.aws_region:
+                    raise ValueError("AWS region is required for AWS Transcribe service")
+
+                # Create NEW AWS Transcribe instance - not a singleton!
+                return AWSTranscribeStreaming(
+                    region=settings.aws_region,
+                    profile_name=settings.aws_profile,
+                    aws_access_key_id=settings.aws_access_key_id,
+                    aws_secret_access_key=settings.aws_secret_access_key
+                )
+            else:
+                raise ValueError(f"Unsupported transcribe provider: {selected_provider}. Use create_file_transcribe_session() for OpenAI.")
         except Exception as e:
             raise ConnectionError(f"Failed to create transcribe session: {str(e)}")
+
+    def create_file_transcribe_session(self) -> FileTranscribePort:
+        """
+        Create NEW file-based transcribe session for file uploads (OpenAI).
+
+        This is for batch file transcription (not streaming WebSocket).
+        Use this for frontend file uploads.
+
+        Returns:
+            FileTranscribePort: NEW OpenAI Transcribe instance for file processing
+        """
+        try:
+            if not settings.openai_api_key:
+                raise ValueError("OpenAI API key is required for OpenAI Transcribe service")
+
+            # Create NEW OpenAI Transcribe instance - not a singleton!
+            return OpenAITranscribe(
+                api_key=settings.openai_api_key,
+                base_url=settings.openai_base_url or "https://api.openai.com/v1",
+                model=settings.openai_transcribe_model or "gpt-4o-mini-transcribe",
+                timeout=settings.openai_transcribe_timeout or 60
+            )
+        except Exception as e:
+            raise ConnectionError(f"Failed to create file transcribe session: {str(e)}")
 
 
 # Global container instance

@@ -44,12 +44,18 @@ class Settings(BaseSettings):
     recontextualizer_model_id: str
 
     # Transcribe Configuration
+    transcribe_provider: str = "aws"
     transcribe_language_code: str
     transcribe_sample_rate: int
     transcribe_media_encoding: str
     transcribe_vocabulary_name: Optional[str] = None
     transcribe_enable_partial_results: bool
     transcribe_max_speaker_labels: int
+
+    openai_api_key: Optional[str] = None
+    openai_base_url: Optional[str] = None
+    openai_transcribe_model: Optional[str] = None
+    openai_transcribe_timeout: Optional[int] = None
 
     weaviate_url: Optional[str] = None
     weaviate_api_key: Optional[str] = None
