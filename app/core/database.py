@@ -16,8 +16,8 @@ engine = create_engine(
     pool_pre_ping=False,  # Don't test immediately during startup
     pool_recycle=3600,   # Recycle connections every hour
     connect_args={
-        "timeout": 10,        # 10 second connection timeout
-        "login_timeout": 5    # 5 second SQL Server login timeout
+        "timeout": 30,        # 30 second connection timeout
+        "login_timeout": 30    # 30 second SQL Server login timeout
     }
 )
 

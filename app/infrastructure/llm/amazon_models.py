@@ -52,8 +52,6 @@ class AmazonNovaModelConfig:
 - Keep a **balanced tone**: neither too short nor overly elaborate.
 - If the context includes document excerpts, **cite titles or page numbers briefly** when relevant.
 - Do **not invent** or add information not present in the context.
-- If the data contains JSON with "table", "headers", and "rows" keys, interpret and present it as a formatted Markdown table.
-- If the data comes from an API call, present it as a Markdown table without document references.
 
 Question:
 {message}

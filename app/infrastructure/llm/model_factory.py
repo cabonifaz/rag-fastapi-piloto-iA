@@ -7,13 +7,15 @@ from app.infrastructure.llm.anthropic_models import AnthropicModelConfig, get_an
 from app.infrastructure.llm.meta_models import MetaModelConfig, get_meta_config
 from app.infrastructure.llm.openai_models import OpenAIModelConfig, get_openai_config
 from app.infrastructure.llm.amazon_models import AmazonNovaModelConfig, get_amazon_config
+from app.infrastructure.llm.qwen_models import QwenModelConfig, get_qwen_config
+from app.infrastructure.llm.cohere_models import CohereModelConfig, get_cohere_config
 
 
 class ModelConfigFactory:
     """Factory to get the appropriate model configuration for a given model ID."""
 
     @staticmethod
-    def get_model_config(model_id: str) -> Union[AnthropicModelConfig, MetaModelConfig, OpenAIModelConfig, AmazonNovaModelConfig]:
+    def get_model_config(model_id: str) -> Union[AnthropicModelConfig, MetaModelConfig, OpenAIModelConfig, AmazonNovaModelConfig, QwenModelConfig, CohereModelConfig]:
         """
         Return the appropriate model configuration based on model ID.
 
@@ -40,6 +42,14 @@ class ModelConfigFactory:
         # Check for Amazon Nova models
         elif "nova" in model_id_lower or "amazon." in model_id:
             return get_amazon_config(model_id)
+
+        # Check for Alibaba Qwen models
+        elif "qwen" in model_id_lower or "alibaba." in model_id:
+            return get_qwen_config(model_id)
+
+        # Check for Cohere models
+        elif "command" in model_id_lower or "cohere." in model_id:
+            return get_cohere_config(model_id)
 
         else:
             # Default to Claude format for unknown models
@@ -70,6 +80,18 @@ class ModelConfigFactory:
         return "nova" in model_id_lower or "amazon." in model_id
 
     @staticmethod
+    def is_qwen_model(model_id: str) -> bool:
+        """Check if the model is an Alibaba Qwen model."""
+        model_id_lower = model_id.lower()
+        return "qwen" in model_id_lower or "alibaba." in model_id
+
+    @staticmethod
+    def is_cohere_model(model_id: str) -> bool:
+        """Check if the model is a Cohere model."""
+        model_id_lower = model_id.lower()
+        return "command" in model_id_lower or "cohere." in model_id
+
+    @staticmethod
     def get_model_provider(model_id: str) -> str:
         """Get the provider name for a given model ID."""
         if ModelConfigFactory.is_anthropic_model(model_id):
@@ -80,5 +102,9 @@ class ModelConfigFactory:
             return "openai"
         elif ModelConfigFactory.is_amazon_model(model_id):
             return "amazon"
+        elif ModelConfigFactory.is_qwen_model(model_id):
+            return "qwen"
+        elif ModelConfigFactory.is_cohere_model(model_id):
+            return "cohere"
         else:
             return "unknown"
