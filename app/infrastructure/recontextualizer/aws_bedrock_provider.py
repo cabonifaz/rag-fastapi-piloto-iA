@@ -8,7 +8,7 @@ from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnect
 from botocore.config import Config
 from app.core.config import settings
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
-from app.infrastructure.recontextualizer.nova_models import NovaRecontextualizerConfig
+from app.infrastructure.recontextualizer.model_factory import ModelFactory
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -21,7 +21,9 @@ class QueryRecontextualizer(RecontextualizerPort):
     2. Include necessary context from previous messages
     3. Create standalone, self-contained queries for better RAG retrieval
 
-    Uses AWS Bedrock Converse API (non-streaming version) with Nova models.
+    Uses AWS Bedrock Converse API (non-streaming version).
+    Supports multiple models: Claude (Anthropic), Llama (Meta), Nova (Amazon), GPT (OpenAI).
+    Model configuration is automatically selected based on model_id.
     """
 
     def __init__(
@@ -70,8 +72,8 @@ class QueryRecontextualizer(RecontextualizerPort):
             # Create aioboto3 session (don't create client yet)
             self.session = aioboto3.Session(**session_params)
 
-            # Get model-specific configuration
-            self.model_config = NovaRecontextualizerConfig
+            # Get model-specific configuration based on model_id
+            self.model_config = ModelFactory.get_model_config(self.model_id)
 
             logger.info(f"QueryRecontextualizer initialized with model: {self.model_id}")
         except Exception as e:

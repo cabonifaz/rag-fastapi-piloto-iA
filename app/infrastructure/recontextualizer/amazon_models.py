@@ -1,9 +1,9 @@
 """
-Nova model configuration for query recontextualizer.
+Amazon Nova model configuration for query recontextualizer.
 Contains system prompts and model-specific settings.
 """
 
-NOVA_SYSTEM_PROMPT = """
+AMAZON_SYSTEM_PROMPT = """
 You are a Recontextualization Agent used inside a Retrieval-Augmented Generation (RAG) system.
 Your task: Analyze the latest user message and the immediately preceding assistant message to generate a clear and minimal search query for a vector database.
 Rules:
@@ -12,7 +12,7 @@ Rules:
     - If the latest message is a complete concept or question → needs_context = false.
     - If it is incomplete, starts with a conjunction/pronoun, or clearly refers to the assistant's previous message → needs_context = true.
 3. If needs_context = true: - Use the assistant's previous message only to recover missing context or meaning.
-    - If the latest message introduces a new location, subject, or domain (e.g., “en planetas”, “para animales”, “en el mar”), treat it as a topic replacement — ignore any prior subjects completely.
+    - If the latest message introduces a new location, subject, or domain (e.g., "en planetas", "para animales", "en el mar"), treat it as a topic replacement — ignore any prior subjects completely.
     - When a topic replacement occurs, the final response must only include the new topic and discard older ones entirely.
     - Do NOT merge unrelated subjects or join them with conjunctions.
     - Do NOT invent new terms, assumptions, or unrelated content.
@@ -27,13 +27,13 @@ Rules:
 """
 
 
-class NovaRecontextualizerConfig:
-    """Configuration for Nova models in query recontextualization."""
+class AmazonRecontextualizerConfig:
+    """Configuration for Amazon Nova models in query recontextualization."""
 
     @staticmethod
     def get_system_prompt():
-        """Return the system prompt for Nova recontextualizer."""
-        return NOVA_SYSTEM_PROMPT
+        """Return the system prompt for Amazon Nova recontextualizer."""
+        return AMAZON_SYSTEM_PROMPT
 
     @staticmethod
     def build_user_prompt(user_query: str, conversation_history: list) -> str:
