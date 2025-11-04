@@ -203,7 +203,6 @@ class Settings(BaseSettings):
             raise ValueError("Transcribe language code must be in format 'xx-XX' (e.g., 'es-ES', 'en-US')")
         return v
 
-
     @property
     def vectordb_url(self) -> Optional[str]:
         return self.weaviate_url

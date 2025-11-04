@@ -1,6 +1,6 @@
 """WebSocket endpoint for real-time speech-to-text transcription."""
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, status
 from typing import Optional, Dict, Any
 import asyncio
 import json
@@ -26,10 +26,7 @@ router = APIRouter()
 
 
 @router.websocket("/ws/transcribe")
-async def websocket_transcribe_endpoint(
-    websocket: WebSocket,
-    token: str = Query(..., description="JWT token for authentication")
-):
+async def websocket_transcribe_endpoint(websocket: WebSocket):
     """
     WebSocket endpoint for real-time audio transcription.
 
@@ -50,13 +47,18 @@ async def websocket_transcribe_endpoint(
 
     Args:
         websocket: WebSocket connection
-        token: JWT token for authentication
     """
     transcribe_session = None
     transcribe_service = None
     user_id = None
 
     try:
+        # Extract JWT token from query parameters
+        token = websocket.query_params.get("token")
+        if not token:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing authentication token")
+            return
+
         # Accept WebSocket connection
         await websocket.accept()
         logger.info("WebSocket connection accepted")
@@ -174,14 +176,19 @@ async def websocket_transcribe_endpoint(
                 user_id=user_id
             ):
                 # Send transcription result to client
-                if transcript_result.is_partial:
-                    response = create_partial_response(transcript_result)
-                    logger.debug(f"Sending partial result: {transcript_result.transcript[:50]}...")
-                else:
-                    response = create_final_response(transcript_result)
-                    logger.info(f"Sending final result: {transcript_result.transcript[:100]}...")
+                try:
+                    if transcript_result.is_partial:
+                        response = create_partial_response(transcript_result)
+                        logger.debug(f"Sending partial result: {transcript_result.transcript[:50]}...")
+                    else:
+                        response = create_final_response(transcript_result)
+                        logger.info(f"Sending final result: {transcript_result.transcript[:100]}...")
 
-                await websocket.send_json(response.model_dump())
+                    await websocket.send_json(response.model_dump())
+                except (WebSocketDisconnect, RuntimeError) as e:
+                    # Client disconnected - stop processing
+                    logger.info(f"Client disconnected while sending results: {e}")
+                    break
 
                 # Small delay to prevent overwhelming the client
                 await asyncio.sleep(0)
@@ -189,23 +196,36 @@ async def websocket_transcribe_endpoint(
         except ValueError as e:
             # Configuration error
             logger.error(f"Transcription configuration error: {e}")
-            await websocket.send_json(
-                create_error_response(f"Configuration error: {str(e)}").model_dump()
-            )
+            try:
+                await websocket.send_json(
+                    create_error_response(f"Configuration error: {str(e)}").model_dump()
+                )
+            except (WebSocketDisconnect, RuntimeError):
+                pass  # Connection already closed
 
         except ConnectionError as e:
             # AWS connection error
             logger.error(f"AWS Transcribe connection error: {e}")
-            await websocket.send_json(
-                create_error_response("Transcription service temporarily unavailable").model_dump()
-            )
+            try:
+                await websocket.send_json(
+                    create_error_response("Transcription service temporarily unavailable").model_dump()
+                )
+            except (WebSocketDisconnect, RuntimeError):
+                pass  # Connection already closed
+
+        except WebSocketDisconnect:
+            # Client disconnected during processing
+            logger.info(f"Client disconnected during transcription: user_id={user_id}")
 
         except Exception as e:
             # Unexpected error
             logger.error(f"Unexpected error during transcription: {e}", exc_info=True)
-            await websocket.send_json(
-                create_error_response("Internal transcription error").model_dump()
-            )
+            try:
+                await websocket.send_json(
+                    create_error_response("Internal transcription error").model_dump()
+                )
+            except (WebSocketDisconnect, RuntimeError):
+                pass  # Connection already closed
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: user_id={user_id}")
@@ -225,12 +245,17 @@ async def websocket_transcribe_endpoint(
             try:
                 logger.info("Waiting for AWS to finish processing remaining audio...")
                 session_summary = await transcribe_service.close_session()
+
+                # Safely format confidence value
+                avg_confidence = session_summary.get('average_confidence', 0)
+                confidence_str = f"{avg_confidence:.3f}" if avg_confidence is not None else "N/A"
+
                 logger.info(
                     f"Transcription session closed: "
                     f"user_id={user_id}, "
                     f"duration={session_summary.get('duration_seconds', 0)}s, "
                     f"words={session_summary.get('total_words', 0)}, "
-                    f"confidence={session_summary.get('average_confidence', 0):.3f}"
+                    f"confidence={confidence_str}"
                 )
 
                 # Send session complete status with summary
@@ -240,9 +265,9 @@ async def websocket_transcribe_endpoint(
                         "summary": session_summary
                     })
                     logger.info(f"Session summary sent to client with {session_summary.get('total_words', 0)} words")
-                except Exception as send_error:
-                    logger.error(f"Error sending final summary to client: {send_error}")
-                    pass  # Connection may be closed
+                except (WebSocketDisconnect, RuntimeError) as send_error:
+                    # Connection may be closed by client
+                    logger.debug(f"Could not send final summary (client disconnected): {send_error}")
 
             except Exception as e:
                 logger.error(f"Error closing transcription session: {e}")
