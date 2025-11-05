@@ -1,32 +1,16 @@
 """REST API endpoint for file-based audio transcription (OpenAI)."""
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
-from typing import Optional
 import logging
 
 from app.core.container import container
 from app.services.file_transcribe_service import FileTranscribeService
 from app.utils.jwt_auth import JWTAuth, get_current_user
-from pydantic import BaseModel
+from app.models.file_transcribe_models import TranscribeFileRequest, TranscribeFileResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-class TranscribeFileResponse(BaseModel):
-    """Response model for file transcription."""
-    transcript: str
-    language: str
-    duration: float
-    confidence: Optional[float] = None
-    model: str
-    file_size: int
-
-
-class TranscribeFileRequest(BaseModel):
-    """Request model for file transcription metadata."""
-    language_code: str = "es-ES"
 
 
 @router.post("/transcribe/file", response_model=TranscribeFileResponse)

@@ -74,7 +74,6 @@ class TranscribeService:
                 language_code=config.language_code,
                 sample_rate=config.sample_rate,
                 media_encoding=config.media_encoding,
-                vocabulary_name=config.vocabulary_name,
                 show_speaker_label=config.show_speaker_label,
                 enable_channel_identification=config.enable_channel_identification,
                 number_of_channels=config.number_of_channels
@@ -197,10 +196,6 @@ class TranscribeService:
         try:
             # Filtrar resultados vacíos
             if not result.get('transcript') or not result['transcript'].strip():
-                return None
-
-            # Filtrar resultados parciales si están deshabilitados
-            if result.get('is_partial') and not config.enable_partial_results:
                 return None
 
             # Crear TranscriptResult con validación Pydantic

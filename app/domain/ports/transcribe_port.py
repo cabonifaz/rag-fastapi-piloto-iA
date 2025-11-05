@@ -19,7 +19,6 @@ class TranscribePort(ABC):
         language_code: str = "es-ES",
         sample_rate: int = 16000,
         media_encoding: str = "pcm",
-        vocabulary_name: Optional[str] = None,
         show_speaker_label: bool = False,
         enable_channel_identification: bool = False,
         number_of_channels: Optional[int] = None,
@@ -32,7 +31,6 @@ class TranscribePort(ABC):
             language_code: Código de idioma (ej: 'en-US', 'es-US', 'pt-BR')
             sample_rate: Frecuencia de muestreo en Hz (8000 o 16000)
             media_encoding: Formato de codificación de audio ('pcm', 'ogg-opus', 'flac')
-            vocabulary_name: Nombre de vocabulario personalizado (opcional)
             show_speaker_label: Habilitar identificación de hablantes
             enable_channel_identification: Habilitar identificación de canales
             number_of_channels: Número de canales de audio (1 o 2)

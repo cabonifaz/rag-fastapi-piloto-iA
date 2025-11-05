@@ -186,7 +186,7 @@ class DIContainer:
 
         return self._ia_config_service
 
-    def create_transcribe_session(self, provider: str = None) -> TranscribePort:
+    def create_transcribe_session(self) -> TranscribePort:
         """
         Create NEW transcribe session for a single user/WebSocket connection.
 
@@ -195,29 +195,22 @@ class DIContainer:
             → Each WebSocket connection must call this to get its own instance
             → DO NOT cache or reuse instances across connections
 
-        Args:
-            provider: Transcription provider ("aws" or "openai"). If None, uses settings.transcribe_provider
+        Uses AWS Transcribe Streaming for real-time WebSocket transcription.
 
         Returns:
-            TranscribePort: NEW transcribe streaming instance
+            TranscribePort: NEW AWS Transcribe streaming instance
         """
         try:
-            # Use provider from settings if not specified
-            selected_provider = provider or getattr(settings, 'transcribe_provider', 'aws')
+            if not settings.aws_region:
+                raise ValueError("AWS region is required for AWS Transcribe service")
 
-            if selected_provider == "aws":
-                if not settings.aws_region:
-                    raise ValueError("AWS region is required for AWS Transcribe service")
-
-                # Create NEW AWS Transcribe instance - not a singleton!
-                return AWSTranscribeStreaming(
-                    region=settings.aws_region,
-                    profile_name=settings.aws_profile,
-                    aws_access_key_id=settings.aws_access_key_id,
-                    aws_secret_access_key=settings.aws_secret_access_key
-                )
-            else:
-                raise ValueError(f"Unsupported transcribe provider: {selected_provider}. Use create_file_transcribe_session() for OpenAI.")
+            # Create NEW AWS Transcribe instance - not a singleton!
+            return AWSTranscribeStreaming(
+                region=settings.aws_region,
+                profile_name=settings.aws_profile,
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key
+            )
         except Exception as e:
             raise ConnectionError(f"Failed to create transcribe session: {str(e)}")
 

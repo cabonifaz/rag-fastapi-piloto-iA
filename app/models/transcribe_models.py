@@ -28,14 +28,6 @@ class TranscribeConfig(BaseModel):
         default="pcm",
         description="Formato de codificación de audio (pcm, ogg-opus, flac)"
     )
-    vocabulary_name: Optional[str] = Field(
-        default=None,
-        description="Nombre de vocabulario personalizado de AWS Transcribe"
-    )
-    enable_partial_results: bool = Field(
-        default=True,
-        description="Habilitar resultados parciales durante la transcripción"
-    )
     show_speaker_label: bool = Field(
         default=False,
         description="Habilitar identificación de hablantes (speaker diarization)"
