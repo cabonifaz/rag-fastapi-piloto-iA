@@ -76,12 +76,6 @@ class Settings(BaseSettings):
     
     # CORS Configuration
     cors_origins: str
-    
-    # Document Processing Configuration
-    carga_conocimiento_path: Optional[str] = None
-    processing_venv_path: Optional[str] = None
-    processing_timeout_seconds: Optional[int] = None
-    upload_directory: Optional[str] = None
 
     # DynamoDB Configuration
     dynamodb_table_messages: str
