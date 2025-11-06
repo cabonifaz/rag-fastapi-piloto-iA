@@ -35,3 +35,10 @@ class MessageListResponse(BaseModel):
 class MessageUpdate(BaseModel):
     """Request to update a message (soft delete)"""
     id_estado_registro: int  # Set to 0 for soft delete
+
+
+class GetMessagesByChat(BaseModel):
+    """Request to get messages for a specific chat"""
+    chat_id: str
+    company_id: int
+    area_id: int

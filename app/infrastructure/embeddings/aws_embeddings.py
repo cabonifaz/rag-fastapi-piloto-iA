@@ -1,4 +1,4 @@
-import boto3
+import aioboto3
 import json
 import logging
 import os
@@ -43,33 +43,33 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
         aws_secret_access_key: Optional[str] = None,
     ):
         """
-        Inicializa el cliente de AWS Bedrock.
+        Initialize AWS Bedrock embeddings client using aioboto3 (async).
 
-        :param region: región de AWS (ej. "us-east-1")
-        :param model_id: ID del modelo de embeddings (ej. "amazon.titan-embed-text-v1" o "cohere.embed-english-v3")
-        :param profile_name: AWS profile name (opcional si usas IAM Role)
-        :param aws_access_key_id: AWS access key ID (opcional, usado si no hay profile)
-        :param aws_secret_access_key: AWS secret access key (opcional, usado si no hay profile)
+        :param region: AWS region (ej. "us-east-1")
+        :param model_id: Embedding model ID (ej. "amazon.titan-embed-text-v1" or "cohere.embed-english-v3")
+        :param profile_name: AWS profile name (optional if using IAM Role)
+        :param aws_access_key_id: AWS access key ID (optional, used if no profile)
+        :param aws_secret_access_key: AWS secret access key (optional, used if no profile)
         """
         session_params = {"region_name": region}
 
-        # Solo usar profile en desarrollo local, no en producción con IAM Role
+        # Use profile only in development, not in production with IAM Role
         if profile_name and os.getenv('ENVIRONMENT', '').lower() != 'production':
             session_params["profile_name"] = profile_name
-        # Si no hay profile, usar credenciales directas si están disponibles
+        # If no profile, use direct credentials if available
         elif aws_access_key_id and aws_secret_access_key:
             session_params["aws_access_key_id"] = aws_access_key_id
             session_params["aws_secret_access_key"] = aws_secret_access_key
 
-        session = boto3.Session(**session_params)
-        self.client = session.client("bedrock-runtime")
+        # Create aioboto3 session (don't create client yet)
+        self.session = aioboto3.Session(**session_params)
+        self.region = region
         self.model_id = model_id
         self.model_config = get_embedding_config(model_id)
 
     async def embed(self, text: str) -> List[float]:
         """
-        Genera embeddings desde un modelo de AWS Bedrock.
-        Uses asyncio.to_thread to run blocking boto3 calls without blocking the event loop.
+        Generate embeddings from AWS Bedrock using aioboto3 (truly async).
         """
         try:
             if not text or not text.strip():
@@ -78,18 +78,18 @@ class AWSBedrockEmbeddingsProvider(EmbeddingsPort):
             # Use model-specific configuration to format request
             body = self.model_config.format_request(text)
 
-            # Run the blocking boto3 call in a thread pool to avoid blocking the event loop
-            # This prevents the entire backend from freezing when network is slow
-            response = await asyncio.to_thread(
-                self.client.invoke_model,
-                modelId=self.model_id,
-                body=body,
-                accept="application/json",
-                contentType="application/json"
-            )
+            # Use aioboto3 async client for truly non-blocking Bedrock calls
+            async with self.session.client("bedrock-runtime") as client:
+                response = await client.invoke_model(
+                    modelId=self.model_id,
+                    body=body,
+                    accept="application/json",
+                    contentType="application/json"
+                )
 
-            # Read and parse response body
-            response_body = json.loads(response["body"].read())
+                # Read and parse response body (aioboto3 returns async StreamingBody)
+                response_body_bytes = await response["body"].read()
+                response_body = json.loads(response_body_bytes)
 
             # Use model-specific configuration to extract embedding
             embedding = self.model_config.extract_embedding(response_body)

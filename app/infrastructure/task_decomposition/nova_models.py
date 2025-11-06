@@ -145,15 +145,15 @@ JSON only. No additional text."""
         return content
 
     @staticmethod
-    def analyze(bedrock_client, model_id: str, user_query: str, available_apis: Dict[str, Any]) -> str:
+    async def analyze(bedrock_client, model_id: str, user_query: str, available_apis: Dict[str, Any]) -> str:
         """
-        Analyze query using Nova model with TWO invocations.
+        Analyze query using Nova model with TWO invocations (async).
 
         Step 1: Detect needs and identify APIs (no params)
         Step 2: Build parameters for identified APIs
 
         Args:
-            bedrock_client: AWS Bedrock client instance
+            bedrock_client: AWS Bedrock async client instance (aioboto3)
             model_id: Model identifier
             user_query: User's query text
             available_apis: Dictionary of available API endpoints
@@ -180,14 +180,16 @@ JSON only. No additional text."""
             }
         }
 
-        step1_response = bedrock_client.invoke_model(
+        step1_response = await bedrock_client.invoke_model(
             modelId=model_id,
             body=json.dumps(step1_body),
             contentType="application/json",
             accept="application/json"
         )
 
-        step1_response_body = json.loads(step1_response["body"].read())
+        # Read and parse response body (aioboto3 returns async StreamingBody)
+        step1_response_body_bytes = await step1_response["body"].read()
+        step1_response_body = json.loads(step1_response_body_bytes)
         step1_json = NovaConfig.extract_response(step1_response_body)
         step1_result = json.loads(step1_json)
 
@@ -216,14 +218,16 @@ JSON only. No additional text."""
             }
         }
 
-        step2_response = bedrock_client.invoke_model(
+        step2_response = await bedrock_client.invoke_model(
             modelId=model_id,
             body=json.dumps(step2_body),
             contentType="application/json",
             accept="application/json"
         )
 
-        step2_response_body = json.loads(step2_response["body"].read())
+        # Read and parse response body (aioboto3 returns async StreamingBody)
+        step2_response_body_bytes = await step2_response["body"].read()
+        step2_response_body = json.loads(step2_response_body_bytes)
         step2_json = NovaConfig.extract_response(step2_response_body)
         step2_result = json.loads(step2_json)
 

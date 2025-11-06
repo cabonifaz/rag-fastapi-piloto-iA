@@ -91,15 +91,23 @@ class NovaMicroConfig(AmazonNovaModelConfig):
 
 
 def get_amazon_config(model_id: str) -> AmazonNovaModelConfig:
-    """Factory function to get the appropriate Amazon Nova model configuration."""
+    """
+    Factory function to get the appropriate Amazon Nova model configuration.
+
+    Supports both regional (us.amazon.nova-*) and standard (amazon.nova-*) formats.
+    """
     model_id_lower = model_id.lower()
 
+    # Premier models (with or without regional prefix like "us.")
     if "nova-premier" in model_id_lower:
         return NovaPremierConfig()
+    # Pro models (with or without regional prefix like "us.")
     elif "nova-pro" in model_id_lower:
         return NovaProConfig()
+    # Lite models
     elif "nova-lite" in model_id_lower:
         return NovaLiteConfig()
+    # Micro models
     elif "nova-micro" in model_id_lower:
         return NovaMicroConfig()
     else:
