@@ -17,7 +17,7 @@ engine = create_engine(
     pool_recycle=3600,   # Recycle connections every hour
     connect_args={
         "timeout": 30,        # 30 second connection timeout
-        "login_timeout": 30    # 30 second SQL Server login timeout
+        "login_timeout": 30   # 30 second SQL Server login timeout
     }
 )
 
@@ -35,10 +35,16 @@ def get_db() -> Session:
         yield db
     except Exception as e:
         logger.error(f"Database session error: {e}")
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception as rollback_error:
+            logger.error(f"Error rolling back transaction: {rollback_error}")
         raise
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception as close_error:
+            logger.error(f"Error closing database session: {close_error}")
 
 
 async def init_database():

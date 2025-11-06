@@ -1,4 +1,4 @@
-import boto3
+import aioboto3
 import json
 import logging
 import os
@@ -38,7 +38,7 @@ def get_saturation_tracker() -> ModelSaturationTracker:
 
 class AWSBedrockConverseProvider(LLMPort):
     """
-    AWS Bedrock LLM provider using the Converse API.
+    AWS Bedrock LLM provider using the Converse API with aioboto3.
 
     Provides unified interface for all supported models (Claude, Llama, OpenAI, etc.)
     with built-in system prompt support and automatic fallback on model saturation.
@@ -49,6 +49,7 @@ class AWSBedrockConverseProvider(LLMPort):
     - Configurable fallback chains per model
     - Support for per-request model selection via fallback_models parameter
     - Transparent error handling with saturation detection
+    - Fully async with aioboto3 (no thread pool blocking)
 
     Usage:
         provider = AWSBedrockConverseProvider(
@@ -89,25 +90,24 @@ class AWSBedrockConverseProvider(LLMPort):
             aws_access_key_id: AWS access key ID (optional)
             aws_secret_access_key: AWS secret access key (optional)
         """
-        session_params = {"region_name": region}
+        self.session_params = {"region_name": region}
 
         # Use profile only in development, not in production with IAM roles
         if profile_name and os.getenv('ENVIRONMENT', '').lower() != 'production':
-            session_params["profile_name"] = profile_name
+            self.session_params["profile_name"] = profile_name
         # If no profile, use direct credentials if available
         elif aws_access_key_id and aws_secret_access_key:
-            session_params["aws_access_key_id"] = aws_access_key_id
-            session_params["aws_secret_access_key"] = aws_secret_access_key
+            self.session_params["aws_access_key_id"] = aws_access_key_id
+            self.session_params["aws_secret_access_key"] = aws_secret_access_key
 
-        # Configure boto3 with connection and read timeouts to prevent blocking
-        boto_config = Config(
+        # Configure boto3 with connection and read timeouts
+        # IMPORTANT: Disable retries - we handle retries via fallback logic
+        self.boto_config = Config(
             connect_timeout=30,
             read_timeout=120,
-            retries={'max_attempts': 2, 'mode': 'standard'}
+            retries={'max_attempts': 0}
         )
 
-        session = boto3.Session(**session_params)
-        self.client = session.client("bedrock-runtime", config=boto_config)
         self.model_id = model_id
         self.region = region
         self.default_role_behavior = role_behavior
@@ -160,8 +160,7 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         Attempts to generate using the primary model. If the model is saturated
         (rate limit/quota exceeded), automatically tries fallback models.
 
-        Uses asyncio.to_thread to run blocking boto3 calls in a thread pool,
-        preventing the FastAPI event loop from blocking on slow network connections.
+        Uses aioboto3 for fully async, non-blocking AWS API calls.
 
         Args:
             prompt: User prompt (used if messages is None)
@@ -171,7 +170,7 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                      If provided, prompt will be ignored and messages will be used instead
             fallback_models: Optional list of fallback model IDs to try if primary is saturated.
-                           If not provided, uses config default fallback chain.
+                           If not provided, uses hardcoded MODELS list.
 
         Yields:
             Text chunks as they are generated
@@ -232,7 +231,8 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
                     "throttling",
                     "quota exceeded",
                     "service quota",
-                    "read timeout"
+                    "read timeout",
+                    "rate limit"
                 ])
                 is_saturation = any(p.lower() in error_msg for p in saturation_patterns)
 
@@ -278,7 +278,7 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         """
         Stream from a specific model (internal helper).
 
-        This contains the original generate_stream logic.
+        This contains the core streaming logic using aioboto3.
         Called by generate_stream for each model attempt.
 
         Args:
@@ -343,49 +343,47 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             # Add system prompt
             request_params["system"] = self._build_system_config(role_behavior)
 
-            # Run the blocking boto3 call in a thread pool to avoid blocking the event loop
-            # This prevents the entire backend from freezing when network is slow
-            response = await asyncio.to_thread(
-                self.client.converse_stream,
-                **request_params
-            )
+            # Use aioboto3 async client for truly non-blocking Bedrock calls
+            session = aioboto3.Session(**self.session_params)
+            async with session.client("bedrock-runtime", config=self.boto_config) as client:
+                # Fully async API call - no thread pool needed!
+                response = await client.converse_stream(**request_params)
 
-            # Process streaming response - ensure proper cleanup
-            stream = response.get("stream")
-            if stream is None:
-                return
+                # Process streaming response - ensure proper cleanup
+                stream = response.get("stream")
+                if stream is None:
+                    return
 
-            try:
-                yielded_count = 0
+                try:
+                    yielded_count = 0
 
-                # Iterate through stream events in thread pool to avoid blocking
-                # We process events one at a time to maintain streaming behavior
-                for event in stream:
-                    # Handle content block delta (text chunks)
-                    if "contentBlockDelta" in event:
-                        delta = event["contentBlockDelta"].get("delta", {})
-                        if "text" in delta:
-                            text = delta["text"]
-                            # Filter out empty chunks from AWS Bedrock streaming protocol
-                            if text:
-                                yielded_count += 1
-                                yield text
+                    # Iterate through stream events asynchronously
+                    async for event in stream:
+                        # Handle content block delta (text chunks)
+                        if "contentBlockDelta" in event:
+                            delta = event["contentBlockDelta"].get("delta", {})
+                            if "text" in delta:
+                                text = delta["text"]
+                                # Filter out empty chunks from AWS Bedrock streaming protocol
+                                if text:
+                                    yielded_count += 1
+                                    yield text
 
-                    # Handle metadata events (optional logging)
-                    elif "metadata" in event:
-                        metadata = event["metadata"]
+                        # Handle metadata events (optional logging)
+                        elif "metadata" in event:
+                            metadata = event["metadata"]
 
-                    # Handle message stop event
-                    elif "messageStop" in event:
-                        stop_reason = event["messageStop"].get("stopReason")
-                        # Yield stop reason info if no content was generated
-                        if yielded_count == 0 and stop_reason == "max_tokens":
-                            yield f"__STOP_REASON__:{stop_reason}"
-                        break
-            finally:
-                # Ensure stream is properly closed to avoid resource leaks
-                if hasattr(stream, 'close'):
-                    stream.close()
+                        # Handle message stop event
+                        elif "messageStop" in event:
+                            stop_reason = event["messageStop"].get("stopReason")
+                            # Yield stop reason info if no content was generated
+                            if yielded_count == 0 and stop_reason == "max_tokens":
+                                yield f"__STOP_REASON__:{stop_reason}"
+                            break
+                finally:
+                    # Ensure stream is properly closed to avoid resource leaks
+                    if hasattr(stream, 'close'):
+                        stream.close()
 
         except ClientError as e:
             error_code = e.response['Error']['Code']

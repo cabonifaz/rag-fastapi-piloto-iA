@@ -6,16 +6,15 @@ from typing import Union
 from app.infrastructure.llm.anthropic_models import AnthropicModelConfig, get_anthropic_config
 from app.infrastructure.llm.meta_models import MetaModelConfig, get_meta_config
 from app.infrastructure.llm.openai_models import OpenAIModelConfig, get_openai_config
-from app.infrastructure.llm.amazon_models import AmazonNovaModelConfig, get_amazon_config
 from app.infrastructure.llm.qwen_models import QwenModelConfig, get_qwen_config
-from app.infrastructure.llm.cohere_models import CohereModelConfig, get_cohere_config
+from app.infrastructure.llm.amazon_models import AmazonNovaModelConfig, get_amazon_config
 
 
 class ModelConfigFactory:
     """Factory to get the appropriate model configuration for a given model ID."""
 
     @staticmethod
-    def get_model_config(model_id: str) -> Union[AnthropicModelConfig, MetaModelConfig, OpenAIModelConfig, AmazonNovaModelConfig, QwenModelConfig, CohereModelConfig]:
+    def get_model_config(model_id: str) -> Union[AnthropicModelConfig, MetaModelConfig, OpenAIModelConfig, QwenModelConfig, AmazonNovaModelConfig]:
         """
         Return the appropriate model configuration based on model ID.
 
@@ -39,17 +38,13 @@ class ModelConfigFactory:
         elif "gpt" in model_id_lower or "openai." in model_id:
             return get_openai_config(model_id)
 
-        # Check for Amazon Nova models
-        elif "nova" in model_id_lower or "amazon." in model_id:
-            return get_amazon_config(model_id)
-
-        # Check for Alibaba Qwen models
+        # Check for Qwen models (Alibaba)
         elif "qwen" in model_id_lower or "alibaba." in model_id:
             return get_qwen_config(model_id)
 
-        # Check for Cohere models
-        elif "command" in model_id_lower or "cohere." in model_id:
-            return get_cohere_config(model_id)
+        # Check for Amazon Nova models
+        elif "nova" in model_id_lower or "amazon." in model_id:
+            return get_amazon_config(model_id)
 
         else:
             # Default to Claude format for unknown models
@@ -74,22 +69,16 @@ class ModelConfigFactory:
         return "gpt" in model_id_lower or "openai." in model_id
 
     @staticmethod
-    def is_amazon_model(model_id: str) -> bool:
-        """Check if the model is an Amazon Nova model."""
-        model_id_lower = model_id.lower()
-        return "nova" in model_id_lower or "amazon." in model_id
-
-    @staticmethod
     def is_qwen_model(model_id: str) -> bool:
-        """Check if the model is an Alibaba Qwen model."""
+        """Check if the model is a Qwen (Alibaba) model."""
         model_id_lower = model_id.lower()
         return "qwen" in model_id_lower or "alibaba." in model_id
 
     @staticmethod
-    def is_cohere_model(model_id: str) -> bool:
-        """Check if the model is a Cohere model."""
+    def is_amazon_model(model_id: str) -> bool:
+        """Check if the model is an Amazon Nova model."""
         model_id_lower = model_id.lower()
-        return "command" in model_id_lower or "cohere." in model_id
+        return "nova" in model_id_lower or "amazon." in model_id
 
     @staticmethod
     def get_model_provider(model_id: str) -> str:
@@ -100,11 +89,9 @@ class ModelConfigFactory:
             return "meta"
         elif ModelConfigFactory.is_openai_model(model_id):
             return "openai"
-        elif ModelConfigFactory.is_amazon_model(model_id):
-            return "amazon"
         elif ModelConfigFactory.is_qwen_model(model_id):
             return "qwen"
-        elif ModelConfigFactory.is_cohere_model(model_id):
-            return "cohere"
+        elif ModelConfigFactory.is_amazon_model(model_id):
+            return "amazon"
         else:
             return "unknown"

@@ -317,8 +317,12 @@ class RagService:
                         continue
                     else:
                         filtered_history.append(msg)
+                if filtered_history:
+                    if filtered_history[0]["role"] != "user":
+                        removed_msg = filtered_history.pop(0)
+                    if filtered_history and filtered_history[-1]["role"] == "user":
+                        removed_msg = filtered_history.pop()
                 conversation_history = filtered_history[-16:]
-                logger.info(f"Retrieved {len(conversation_history)} messages from chat history")
             except Exception as e:
                 logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
                 conversation_history = []

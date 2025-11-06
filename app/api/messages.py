@@ -9,10 +9,11 @@ from app.services.message_service import MessageService
 from app.models.message_models import (
     MessageCreate,
     MessageResponse,
-    MessageListResponse
+    MessageListResponse,
+    GetMessagesByChat
 )
 from app.models.response_models import create_success_response, create_error_response
-from app.utils.jwt_auth import get_current_user
+from app.utils.jwt_auth import get_current_user_with_company_validation
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,12 @@ def get_message_service() -> MessageService:
     return MessageService()
 
 
-@router.get("/chat/{chat_id}", response_model=MessageListResponse)
+@router.post("/chat", response_model=MessageListResponse)
 async def get_messages_by_chat_endpoint(
-    chat_id: str,
+    request: GetMessagesByChat,
     limit: int = Query(50, ge=1, le=100, description="Maximum messages to return"),
     last_evaluated_key: Optional[str] = Query(None, description="Pagination key (JSON string)"),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation),
     message_service: MessageService = Depends(get_message_service)
 ):
     """
@@ -37,8 +38,12 @@ async def get_messages_by_chat_endpoint(
 
     Requires JWT authentication. Returns messages ordered from oldest to newest.
 
+    Request Body Parameters:
+        - chat_id: Chat identifier
+        - company_id: Company identifier
+        - area_id: Area identifier
+
     Query Parameters:
-        - chat_id: Chat identifier (path parameter)
         - limit: Maximum messages to return (default: 50, min: 1, max: 100)
         - last_evaluated_key: For pagination, pass the last_evaluated_key from previous response
 
@@ -46,7 +51,7 @@ async def get_messages_by_chat_endpoint(
         MessageListResponse with messages list and pagination info
 
     Raises:
-        HTTPException: 500 for server errors
+        HTTPException: 400 for invalid parameters, 500 for server errors
     """
     try:
         # Parse last_evaluated_key if provided
@@ -62,7 +67,7 @@ async def get_messages_by_chat_endpoint(
                 )
 
         message_list = await message_service.get_messages_by_chat(
-            chat_id=chat_id,
+            chat_id=request.chat_id,
             limit=limit,
             last_evaluated_key=last_key
         )

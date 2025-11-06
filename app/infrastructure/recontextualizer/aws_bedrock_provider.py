@@ -1,4 +1,4 @@
-import boto3
+import aioboto3
 import json
 import logging
 import os
@@ -8,7 +8,6 @@ from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnect
 from botocore.config import Config
 from app.core.config import settings
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
-from app.infrastructure.recontextualizer.nova_models import NovaRecontextualizerConfig
 from app.infrastructure.recontextualizer.model_factory import ModelFactory
 
 # Configure logging
@@ -22,7 +21,9 @@ class QueryRecontextualizer(RecontextualizerPort):
     2. Include necessary context from previous messages
     3. Create standalone, self-contained queries for better RAG retrieval
 
-    Uses AWS Bedrock Converse API (non-streaming version) with Nova models.
+    Uses AWS Bedrock Converse API (non-streaming version).
+    Supports multiple models: Claude (Anthropic), Llama (Meta), Nova (Amazon), GPT (OpenAI).
+    Model configuration is automatically selected based on model_id.
     """
 
     def __init__(
@@ -34,7 +35,7 @@ class QueryRecontextualizer(RecontextualizerPort):
         aws_secret_access_key: Optional[str] = None,
     ):
         """
-        Initialize AWS Bedrock Converse client for query recontextualization.
+        Initialize AWS Bedrock Converse client using aioboto3 (async) for query recontextualization.
 
         Args:
             region: AWS region (defaults to settings.aws_region)
@@ -60,16 +61,16 @@ class QueryRecontextualizer(RecontextualizerPort):
                 session_params["aws_access_key_id"] = access_key
                 session_params["aws_secret_access_key"] = secret_key
 
-        # Configure boto3 with connection and read timeouts to prevent blocking
-        boto_config = Config(
+        # Configure botocore with connection and read timeouts
+        self.boto_config = Config(
             connect_timeout=30,  # 30 seconds to establish connection
             read_timeout=120,    # 2 minutes max for reading response
             retries={'max_attempts': 2, 'mode': 'standard'}  # Retry failed requests
         )
 
         try:
-            session = boto3.Session(**session_params)
-            self.client = session.client("bedrock-runtime", config=boto_config)
+            # Create aioboto3 session (don't create client yet)
+            self.session = aioboto3.Session(**session_params)
 
             # Get model-specific configuration based on model_id
             self.model_config = ModelFactory.get_model_config(self.model_id)
@@ -90,10 +91,7 @@ class QueryRecontextualizer(RecontextualizerPort):
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, any]:
         """
-        Asynchronously recontextualizes the user query using conversation history.
-
-        Uses asyncio.to_thread to run blocking boto3 calls in a thread pool,
-        preventing the FastAPI event loop from blocking.
+        Asynchronously recontextualizes the user query using conversation history with aioboto3 (truly async).
 
         Args:
             user_query: The user's query text.
@@ -146,14 +144,12 @@ class QueryRecontextualizer(RecontextualizerPort):
                 }
             }
 
-            # Run the blocking boto3 call in a thread pool to avoid blocking the event loop
-            response = await asyncio.to_thread(
-                self.client.converse,
-                **request_params
-            )
+            # Use aioboto3 async client for truly non-blocking Bedrock calls
+            async with self.session.client("bedrock-runtime", config=self.boto_config) as client:
+                response = await client.converse(**request_params)
 
-            # Extract the recontextualized query result
-            result = self._extract_result(response)
+                # Extract the recontextualized query result
+                result = self._extract_result(response)
 
             if result:
                 logger.info(

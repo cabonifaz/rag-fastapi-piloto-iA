@@ -33,10 +33,9 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    """Response model for successful login - JWT token plus chats data for TanStack"""
+    """Response model for successful login"""
     token: str  # JWT token containing user information
     status: str = "success"
-    chats: List[Dict[str, Any]] = []  # User's chats data for TanStack storage
 
 
 class UserInfo(BaseModel):
