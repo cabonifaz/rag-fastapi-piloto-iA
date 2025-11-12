@@ -64,10 +64,7 @@ class Settings(BaseSettings):
 
 
     log_level: str
-    log_format: str
-    
-    rate_limit_requests_per_minute: int
-    
+
     environment: str
     
     # JWT Configuration

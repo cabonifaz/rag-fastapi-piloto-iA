@@ -413,7 +413,6 @@ class RagService:
         # Yield metadata early (before processing) so frontend can show "Pensando..." placeholder
         yield {
             "type": "metadata",
-            "llm_model_used": settings.llm_model_id,
             "chat_id": chat_id
         }
 
@@ -501,7 +500,13 @@ class RagService:
 
         # Send assistant_metadata BEFORE starting LLM streaming
         # This gives frontend time to render the empty "Pensando..." placeholder
-        assistant_timestamp = str(int(time.time() * 1000))
+        assistant_timestamp_ms = int(time.time() * 1000)
+        user_timestamp_ms = int(created_at)
+
+        if assistant_timestamp_ms < user_timestamp_ms:
+            assistant_timestamp = str(user_timestamp_ms + 1000)
+        else:
+            assistant_timestamp = str(assistant_timestamp_ms)
         yield {
             "type": "assistant_metadata",
             "sender": 1,
