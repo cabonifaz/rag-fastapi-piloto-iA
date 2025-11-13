@@ -1,0 +1,78 @@
+"""Service for managing company operations following hexagonal architecture."""
+
+from typing import List, Dict, Any
+import logging
+from sqlalchemy.orm import Session
+from app.infrastructure.repositories.company_repository import CompanyRepository
+
+logger = logging.getLogger(__name__)
+
+
+class CompanyService:
+    """
+    Service for company operations.
+    Handles business logic for creating companies and related entities.
+    """
+
+    def __init__(self):
+        """Initialize stateless CompanyService - no db parameter."""
+        pass
+
+    async def create_company(
+        self,
+        db: Session,
+        id_usuario: int,
+        ruc: str,
+        razon_social: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Create a new company base with associated roles and areas using stored procedure.
+
+        Args:
+            db: Database session
+            id_usuario: User ID creating the company
+            ruc: RUC identifier (max 30 chars)
+            razon_social: Company name (max 255 chars)
+
+        Returns:
+            List of dictionaries containing:
+            - id_rol: Role ID
+            - message: Status message
+            - id_company: Company ID
+            - id_area: Area ID
+            Empty list if creation failed
+        """
+        try:
+            # Create repository for this request
+            repository = CompanyRepository(db)
+
+            # Validate input
+            if not ruc or len(ruc.strip()) == 0:
+                logger.error("RUC cannot be empty")
+                return []
+
+            if not razon_social or len(razon_social.strip()) == 0:
+                logger.error("RAZON_SOCIAL cannot be empty")
+                return []
+
+            # Trim inputs to match database constraints
+            ruc = ruc.strip()[:30]
+            razon_social = razon_social.strip()[:255]
+
+            # Use repository to create company with SP_CREATE_EMPRESA_BASE
+            results = repository.create_company(
+                id_usuario=id_usuario,
+                ruc=ruc,
+                razon_social=razon_social
+            )
+
+            if results:
+                logger.info(f"Company created successfully: RUC={ruc}, Results count={len(results)}")
+            else:
+                logger.warning(f"Company creation returned no results: RUC={ruc}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in create_company service: {e}")
+            raise
