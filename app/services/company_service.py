@@ -76,3 +76,32 @@ class CompanyService:
         except Exception as e:
             logger.error(f"Error in create_company service: {e}")
             raise
+
+    async def get_companies(self, db: Session) -> List[Dict[str, Any]]:
+        """
+        Get all companies using stored procedure SP_EMPRESAS_LST.
+
+        Args:
+            db: Database session
+
+        Returns:
+            List of dictionaries containing company data
+            Empty list if fetch failed
+        """
+        try:
+            # Create repository for this request
+            repository = CompanyRepository(db)
+
+            # Get companies from repository
+            companies = repository.get_companies()
+
+            if companies:
+                logger.info(f"Retrieved {len(companies)} companies")
+            else:
+                logger.warning("No companies found")
+
+            return companies
+
+        except Exception as e:
+            logger.error(f"Error in get_companies service: {e}")
+            raise

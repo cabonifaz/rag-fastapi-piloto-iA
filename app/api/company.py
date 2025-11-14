@@ -3,33 +3,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List
-from pydantic import BaseModel, Field
 import logging
 
 from app.core.database import get_db
 from app.core.container import container
 from app.services.company_service import CompanyService
 from app.models.response_models import create_success_response, create_error_response
+from app.models.company_models import CompanyCreateRequest
 from app.utils.jwt_auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# Request Models
-class CompanyCreateRequest(BaseModel):
-    """Request model for creating a company."""
-    ruc: str = Field(..., min_length=1, max_length=30, description="Company RUC identifier")
-    razon_social: str = Field(..., min_length=1, max_length=255, description="Company name")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "ruc": "20123456789",
-                "razon_social": "Empresa Demo SAC"
-            }
-        }
 
 
 def get_company_service() -> CompanyService:
@@ -63,12 +48,20 @@ async def create_company_endpoint(
     """
     try:
         user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
 
         if not user_id:
             error_response = create_error_response("Informacion de usuario incompleta en el token")
             raise HTTPException(
                 status_code=400,
                 detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1)
+        if role_id != 1:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
             )
 
         # Create company using service
@@ -86,6 +79,18 @@ async def create_company_endpoint(
                 detail={"result": error_response.model_dump()}
             )
 
+        # Check if the stored procedure returned an error
+        # ID_TIPO_MENSAJE = 1 indicates an error
+        if results and 'ID_TIPO_MENSAJE' in results[0]:
+            tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
+            mensaje = results[0].get('MENSAJE', 'Error desconocido')
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+
         success_response = create_success_response("Empresa creada exitosamente")
         return {
             "results": results,
@@ -98,6 +103,58 @@ async def create_company_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in create_company endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.get("/get_companies")
+async def get_companies_endpoint(
+    company_service: CompanyService = Depends(get_company_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Get all companies endpoint.
+
+    Fetches all companies using SP_EMPRESAS_LST.
+    Requires JWT authentication.
+
+    Returns:
+        Dict with:
+        - companies: List of company dictionaries
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 500 for server errors
+    """
+    try:
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        # Check if user is SuperAdmin (role_id = 1)
+        if role_id != 1:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
+        # Get companies using service
+        companies = await company_service.get_companies(db=db)
+
+        success_response = create_success_response("Empresas obtenidas exitosamente")
+        return {
+            "companies": companies,
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_companies endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,
