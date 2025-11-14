@@ -68,10 +68,6 @@ class CompanyRepository:
                             columns = [desc[0] for desc in cursor.description]
                             rows = cursor.fetchall()
 
-                            print(f"SP_CREATE_EMPRESA_BASE - Result set {result_set_num}:")
-                            print(f"Columns: {columns}")
-                            print(f"Rows: {rows}")
-
                             # Check if this result set contains the message columns
                             has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
 
@@ -83,7 +79,6 @@ class CompanyRepository:
                                     if 'ID_TIPO_MENSAJE' in result_dict:
                                         result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
                                     results.append(result_dict)
-                                    print(f"Result dict: {result_dict}")
 
                     except Exception as fetch_error:
                         logger.error(f"Fetch error: {fetch_error}")
