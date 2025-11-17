@@ -24,7 +24,7 @@ from app.core.config import settings
 from app.core.database import init_database, close_database
 
 # Then import the heavy modules
-from app.api import rag, auth, external_login, chats, messages, upload_knowledge, transcribe, file_transcribe, company
+from app.api import rag, auth, external_login, chats, messages, upload_knowledge, transcribe, file_transcribe, company, area
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ app.include_router(upload_knowledge.router, prefix="/api/v1/uploads", tags=["kno
 app.include_router(transcribe.router, prefix="/api/v1/transcribe", tags=["transcription"])
 app.include_router(file_transcribe.router, prefix="/api/v1", tags=["file-transcription"])
 app.include_router(company.router, prefix="/api/v1/company", tags=["company-management"])
+app.include_router(area.router, prefix="/api/v1/area", tags=["area-management"])
 
 
 @app.exception_handler(HTTPException)

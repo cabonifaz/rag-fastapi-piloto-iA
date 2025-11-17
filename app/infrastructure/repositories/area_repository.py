@@ -100,3 +100,76 @@ class AreaRepository:
             logger.error(f"Error creating area base with SP: {e}")
             self.db.rollback()
             return []
+
+    def get_areas(self, id_empresa: int) -> List[Dict[str, Any]]:
+        """
+        Get all areas for a company using stored procedure SP_AREAS_LST
+
+        Args:
+            id_empresa: Company ID
+
+        Returns:
+            List of dictionaries containing area information
+            Empty list if query failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_AREAS_LST @ID_EMPRESA = ?",
+                    id_empresa
+                )
+
+                results = []
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            if rows:
+                                # Convert rows to dictionaries
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for numeric IDs
+                                    if 'ID_AREA' in result_dict:
+                                        result_dict['ID_AREA'] = int(result_dict['ID_AREA'])
+                                    if 'ID_EMPRESA' in result_dict:
+                                        result_dict['ID_EMPRESA'] = int(result_dict['ID_EMPRESA'])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_areas: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error getting areas with SP_AREAS_LST: {e}")
+            self.db.rollback()
+            return []

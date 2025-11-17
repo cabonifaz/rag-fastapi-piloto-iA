@@ -69,3 +69,47 @@ class AreaService:
         except Exception as e:
             logger.error(f"Error in create_area service: {e}")
             raise
+
+    async def get_areas(
+        self,
+        db: Session,
+        id_empresa: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all areas for a company using stored procedure.
+
+        Args:
+            db: Database session
+            id_empresa: Company ID
+
+        Returns:
+            List of dictionaries containing area information:
+            - ID_AREA: Area ID
+            - ID_EMPRESA: Company ID
+            - AREA: Area name
+            - FCHCRE: Creation date
+            - ID_ESTADO_REGISTRO: Record status
+            Empty list if query failed
+        """
+        try:
+            # Create repository for this request
+            repository = AreaRepository(db)
+
+            # Validate input
+            if not isinstance(id_empresa, int) or id_empresa <= 0:
+                logger.error(f"Invalid id_empresa: {id_empresa}")
+                return []
+
+            # Use repository to get areas with SP_AREAS_LST
+            results = repository.get_areas(id_empresa=id_empresa)
+
+            if results:
+                logger.info(f"Areas retrieved successfully: Company={id_empresa}, Count={len(results)}")
+            else:
+                logger.info(f"No areas found for company: {id_empresa}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in get_areas service: {e}")
+            raise

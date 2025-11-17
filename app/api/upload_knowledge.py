@@ -6,7 +6,7 @@ import logging
 from app.services.upload_knowledge_service import UploadKnowledgeService
 from app.models.response_models import create_success_response, create_error_response
 from app.models.upload_models import PresignedUrlRequest, PresignedUrlResponse
-from app.utils.jwt_auth import get_current_user_with_company_validation
+from app.utils.jwt_auth import get_current_user_with_company_area_validation
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ def get_upload_knowledge_service() -> UploadKnowledgeService:
 @router.post("/get_presigned_urls", response_model=List[PresignedUrlResponse])
 async def get_presigned_urls_endpoint(
     request: PresignedUrlRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation),
     service: UploadKnowledgeService = Depends(get_upload_knowledge_service)
 ):
     """
@@ -91,7 +91,7 @@ async def get_presigned_urls_endpoint(
 @router.post("/get_company_uploads")
 async def get_company_uploads_endpoint(
     request: Dict[str, Any],
-    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation),
     service: UploadKnowledgeService = Depends(get_upload_knowledge_service)
 ):
     """
