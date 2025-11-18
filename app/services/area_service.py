@@ -70,6 +70,137 @@ class AreaService:
             logger.error(f"Error in create_area service: {e}")
             raise
 
+    async def update_area_status(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_empresa: int,
+        id_area: int,
+        status: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update area status (activate or deactivate).
+
+        Args:
+            db: Database session
+            id_usuario: User ID performing the update
+            id_empresa: Company ID
+            id_area: Area ID to update
+            status: New status value (0 = inactive, 1 = active)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = AreaRepository(db)
+
+            # Validate input
+            if not isinstance(id_area, int) or id_area <= 0:
+                logger.error(f"Invalid id_area: {id_area}")
+                return []
+
+            if not isinstance(id_usuario, int) or id_usuario <= 0:
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not isinstance(id_empresa, int) or id_empresa <= 0:
+                logger.error(f"Invalid id_empresa: {id_empresa}")
+                return []
+
+            if status not in [0, 1]:
+                logger.error(f"Invalid status: {status}. Must be 0 or 1")
+                return []
+
+            # Use repository to update area status
+            results = repository.update_area_status(
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                id_area=id_area,
+                status=status
+            )
+
+            if results:
+                logger.info(f"Area status updated successfully: ID_AREA={id_area}, STATUS={status}, ID_USUARIO={id_usuario}, ID_EMPRESA={id_empresa}, Results count={len(results)}")
+            else:
+                logger.warning(f"Area status update returned no results: ID_AREA={id_area}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_area_status service: {e}")
+            raise
+
+    async def update_area_nombre(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_empresa: int,
+        id_area: int,
+        area: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Update area name.
+
+        Args:
+            db: Database session
+            id_usuario: User ID performing the update
+            id_empresa: Company ID
+            id_area: Area ID to update
+            area: New area name (max 200 chars)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = AreaRepository(db)
+
+            # Validate input
+            if not isinstance(id_area, int) or id_area <= 0:
+                logger.error(f"Invalid id_area: {id_area}")
+                return []
+
+            if not isinstance(id_usuario, int) or id_usuario <= 0:
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not isinstance(id_empresa, int) or id_empresa <= 0:
+                logger.error(f"Invalid id_empresa: {id_empresa}")
+                return []
+
+            if not area or len(area.strip()) == 0:
+                logger.error("Area name cannot be empty")
+                return []
+
+            # Trim area name to match database constraints
+            area = area.strip()[:200]
+
+            # Use repository to update area name
+            results = repository.update_area_nombre(
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                id_area=id_area,
+                area=area
+            )
+
+            if results:
+                logger.info(f"Area name updated successfully: ID_AREA={id_area}, AREA={area}, ID_USUARIO={id_usuario}, ID_EMPRESA={id_empresa}, Results count={len(results)}")
+            else:
+                logger.warning(f"Area name update returned no results: ID_AREA={id_area}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_area_nombre service: {e}")
+            raise
+
     async def get_areas(
         self,
         db: Session,

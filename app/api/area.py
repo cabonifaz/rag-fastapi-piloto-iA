@@ -9,7 +9,7 @@ from app.core.database import get_db
 from app.core.container import container
 from app.services.area_service import AreaService
 from app.models.response_models import create_success_response, create_error_response
-from app.models.area_models import AreaCreateRequest
+from app.models.area_models import AreaCreateRequest, AreaUpdateStatusRequest, AreaUpdateNameRequest
 from app.utils.jwt_auth import get_current_user_with_company_validation
 
 logger = logging.getLogger(__name__)
@@ -104,6 +104,186 @@ async def create_area_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in create_area endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.post("/update_area_status")
+async def update_area_status_endpoint(
+    http_request: Request,
+    request: AreaUpdateStatusRequest,
+    area_service: AreaService = Depends(get_area_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Update area status endpoint.
+
+    Updates an area's status (activate/deactivate) using SP_UPDATE_AREA_STATUS.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: AreaUpdateStatusRequest with id_empresa, id_area, and status
+
+    Returns:
+        Dict with area update results including:
+        - results: List of dictionaries with ID_TIPO_MENSAJE, MENSAJE
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
+        # Update area status using service
+        results = await area_service.update_area_status(
+            db=db,
+            id_usuario=user_id,
+            id_empresa=request.id_empresa,
+            id_area=request.id_area,
+            status=request.status
+        )
+
+        if not results:
+            error_response = create_error_response("Error al actualizar el estado del area")
+            raise HTTPException(
+                status_code=500,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if the stored procedure returned an error
+        # ID_TIPO_MENSAJE = 1 indicates an error
+        if results and 'ID_TIPO_MENSAJE' in results[0]:
+            tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
+            mensaje = results[0].get('MENSAJE', 'Error desconocido')
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+
+        success_response = create_success_response("Estado del area actualizado exitosamente")
+        return {
+            "results": results,
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in update_area_status endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.post("/update_area_name")
+async def update_area_name_endpoint(
+    http_request: Request,
+    request: AreaUpdateNameRequest,
+    area_service: AreaService = Depends(get_area_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Update area name endpoint.
+
+    Updates an area's name using SP_UPDATE_AREA_NOMBRE.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: AreaUpdateNameRequest with id_empresa, id_area, and area
+
+    Returns:
+        Dict with area update results including:
+        - results: List of dictionaries with ID_TIPO_MENSAJE, MENSAJE
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
+        # Update area name using service
+        results = await area_service.update_area_nombre(
+            db=db,
+            id_usuario=user_id,
+            id_empresa=request.id_empresa,
+            id_area=request.id_area,
+            area=request.area
+        )
+
+        if not results:
+            error_response = create_error_response("Error al actualizar el nombre del area")
+            raise HTTPException(
+                status_code=500,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if the stored procedure returned an error
+        # ID_TIPO_MENSAJE = 1 indicates an error
+        if results and 'ID_TIPO_MENSAJE' in results[0]:
+            tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
+            mensaje = results[0].get('MENSAJE', 'Error desconocido')
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+
+        success_response = create_success_response("Nombre del area actualizado exitosamente")
+        return {
+            "results": results,
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in update_area_name endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,

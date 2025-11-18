@@ -101,6 +101,182 @@ class AreaRepository:
             self.db.rollback()
             return []
 
+    def update_area_status(
+        self,
+        id_usuario: int,
+        id_empresa: int,
+        id_area: int,
+        status: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update area status using stored procedure SP_UPDATE_AREA_STATUS
+
+        Args:
+            id_usuario: User ID performing the update
+            id_empresa: Company ID
+            id_area: Area ID
+            status: New status value (0 = inactive, 1 = active)
+
+        Returns:
+            List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
+            Empty list if update failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_AREA_STATUS @ID_USUARIO = ?, @ID_EMPRESA = ?, @ID_AREA = ?, @STATUS = ?",
+                    id_usuario,
+                    id_empresa,
+                    id_area,
+                    status
+                )
+
+                results = []
+                result_set_num = 1
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            if has_message_columns and rows:
+                                # This is the result set we want to capture
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for ID_TIPO_MENSAJE
+                                    if 'ID_TIPO_MENSAJE' in result_dict:
+                                        result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                        result_set_num += 1
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_area_status: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating area status with SP: {e}")
+            self.db.rollback()
+            return []
+
+    def update_area_nombre(
+        self,
+        id_usuario: int,
+        id_empresa: int,
+        id_area: int,
+        area: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Update area name using stored procedure SP_UPDATE_AREA_NOMBRE
+
+        Args:
+            id_usuario: User ID performing the update
+            id_empresa: Company ID
+            id_area: Area ID
+            area: New area name (max 200 chars)
+
+        Returns:
+            List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
+            Empty list if update failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_AREA_NOMBRE @ID_USUARIO = ?, @ID_EMPRESA = ?, @ID_AREA = ?, @AREA = ?",
+                    id_usuario,
+                    id_empresa,
+                    id_area,
+                    area
+                )
+
+                results = []
+                result_set_num = 1
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            if has_message_columns and rows:
+                                # This is the result set we want to capture
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for ID_TIPO_MENSAJE
+                                    if 'ID_TIPO_MENSAJE' in result_dict:
+                                        result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                        result_set_num += 1
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_area_nombre: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating area name with SP: {e}")
+            self.db.rollback()
+            return []
+
     def get_areas(self, id_empresa: int) -> List[Dict[str, Any]]:
         """
         Get all areas for a company using stored procedure SP_AREAS_LST
