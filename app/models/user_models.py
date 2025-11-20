@@ -47,3 +47,14 @@ class UserInfo(BaseModel):
     email: Optional[str] = None
     ultimo_ingreso: Optional[datetime] = None
     id_estado_registro: int
+
+
+class CreateUserRequest(BaseModel):
+    """Request model for creating a new user"""
+    nuevo_usuario: str
+    password: str
+    nombres: str
+    apellidos: str
+    id_tipo_rol: int
+    id_empresa: int
+    areas_string: str
