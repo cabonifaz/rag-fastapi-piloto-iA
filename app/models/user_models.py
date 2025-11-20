@@ -55,6 +55,26 @@ class CreateUserRequest(BaseModel):
     password: str
     nombres: str
     apellidos: str
-    id_tipo_rol: int
+    nuevo_rol: int
     id_empresa: int
     areas_string: str
+
+
+class UpdateUserRequest(BaseModel):
+    """Request model for updating user data"""
+    id_usuario: int
+    usuario: str
+    nombres: str
+    apellidos: str
+
+
+class UpdateUserStatusRequest(BaseModel):
+    """Request model for updating user status"""
+    id_usuario: int
+    status: int
+
+
+class UpdateUserPasswordRequest(BaseModel):
+    """Request model for updating user password"""
+    id_usuario: int
+    clave_acceso: str

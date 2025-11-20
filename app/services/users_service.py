@@ -71,11 +71,12 @@ class UsersService:
     async def create_usuario(
         self,
         db: Session,
+        id_usuario: int,
         nuevo_usuario: str,
         password: str,
         nombres: str,
         apellidos: str,
-        id_tipo_rol: int,
+        nuevo_rol: int,
         id_empresa: int,
         areas_string: str
     ) -> List[Dict[str, Any]]:
@@ -84,11 +85,12 @@ class UsersService:
 
         Args:
             db: Database session
+            id_usuario: User ID
             nuevo_usuario: Username (max 100 chars)
             password: Password (max 100 chars)
             nombres: First names (max 100 chars)
             apellidos: Last names (max 100 chars)
-            id_tipo_rol: Role type ID (1=Super Admin, 2=Admin, 3=User)
+            nuevo_rol: Role type ID (1=Super Admin, 2=Admin, 3=User)
             id_empresa: Company ID
             areas_string: Comma-separated area IDs (max 100 chars)
 
@@ -103,6 +105,10 @@ class UsersService:
             repository = UsersRepository(db)
 
             # Validate input
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
             if not nuevo_usuario or len(nuevo_usuario.strip()) == 0:
                 logger.error("Username cannot be empty")
                 return []
@@ -119,8 +125,8 @@ class UsersService:
                 logger.error("Last names cannot be empty")
                 return []
 
-            if not isinstance(id_tipo_rol, int) or id_tipo_rol <= 0:
-                logger.error(f"Invalid id_tipo_rol: {id_tipo_rol}")
+            if not isinstance(nuevo_rol, int) or nuevo_rol <= 0:
+                logger.error(f"Invalid nuevo_rol: {nuevo_rol}")
                 return []
 
             if not isinstance(id_empresa, int) or id_empresa <= 0:
@@ -138,13 +144,14 @@ class UsersService:
             apellidos = apellidos.strip()[:100]
             areas_string = areas_string.strip()[:100]
 
-            # Use repository to create user with SP_USUARIO_CREATE
+            # Use repository to create user with SP_CREATE_USUARIO
             results = repository.create_usuario(
+                id_usuario=id_usuario,
                 nuevo_usuario=nuevo_usuario,
                 password=password,
                 nombres=nombres,
                 apellidos=apellidos,
-                id_tipo_rol=id_tipo_rol,
+                nuevo_rol=nuevo_rol,
                 id_empresa=id_empresa,
                 areas_string=areas_string
             )
@@ -158,4 +165,198 @@ class UsersService:
 
         except Exception as e:
             logger.error(f"Error in create_usuario service: {e}")
+            raise
+
+    async def update_usuario(
+        self,
+        db: Session,
+        id_admin: int,
+        id_usuario: int,
+        usuario: str,
+        nombres: str,
+        apellidos: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Update user data using stored procedure.
+
+        Args:
+            db: Database session
+            id_admin: Admin user ID performing the update
+            id_usuario: User ID to update
+            usuario: New username (max 200 chars)
+            nombres: New first names (max 200 chars)
+            apellidos: New last names (max 200 chars)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = UsersRepository(db)
+
+            # Validate input
+            if not isinstance(id_admin, int):
+                logger.error(f"Invalid id_admin: {id_admin}")
+                return []
+
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not usuario or len(usuario.strip()) == 0:
+                logger.error("Username cannot be empty")
+                return []
+
+            if not nombres or len(nombres.strip()) == 0:
+                logger.error("First names cannot be empty")
+                return []
+
+            if not apellidos or len(apellidos.strip()) == 0:
+                logger.error("Last names cannot be empty")
+                return []
+
+            # Trim inputs to match database constraints
+            usuario = usuario.strip()[:200]
+            nombres = nombres.strip()[:200]
+            apellidos = apellidos.strip()[:200]
+
+            # Use repository to update user with SP_UPDATE_DATOS_USUARIO
+            results = repository.update_usuario(
+                id_admin=id_admin,
+                id_usuario=id_usuario,
+                usuario=usuario,
+                nombres=nombres,
+                apellidos=apellidos
+            )
+
+            if results:
+                logger.info(f"User updated successfully: Usuario={usuario}, ID_USUARIO={id_usuario}, Results count={len(results)}")
+            else:
+                logger.warning(f"User update returned no results: ID_USUARIO={id_usuario}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_usuario service: {e}")
+            raise
+
+    async def update_usuario_status(
+        self,
+        db: Session,
+        id_admin: int,
+        id_usuario: int,
+        status: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update user status using stored procedure.
+
+        Args:
+            db: Database session
+            id_admin: Admin user ID performing the update
+            id_usuario: User ID to update
+            status: New status (0 = inactive, 1 = active)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = UsersRepository(db)
+
+            # Validate input
+            if not isinstance(id_admin, int):
+                logger.error(f"Invalid id_admin: {id_admin}")
+                return []
+
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not isinstance(status, int) or status not in [0, 1]:
+                logger.error(f"Invalid status: {status}. Must be 0 (inactive) or 1 (active)")
+                return []
+
+            # Use repository to update user status with SP_UPDATE_USUARIO_STATUS
+            results = repository.update_usuario_status(
+                id_admin=id_admin,
+                id_usuario=id_usuario,
+                status=status
+            )
+
+            if results:
+                status_text = "active" if status == 1 else "inactive"
+                logger.info(f"User status updated successfully: ID_USUARIO={id_usuario}, Status={status_text}, Results count={len(results)}")
+            else:
+                logger.warning(f"User status update returned no results: ID_USUARIO={id_usuario}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_usuario_status service: {e}")
+            raise
+
+    async def update_usuario_password(
+        self,
+        db: Session,
+        id_admin: int,
+        id_usuario: int,
+        clave_acceso: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Update user password using stored procedure.
+
+        Args:
+            db: Database session
+            id_admin: Admin user ID performing the update
+            id_usuario: User ID to update
+            clave_acceso: New password (max 100 chars)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = UsersRepository(db)
+
+            # Validate input
+            if not isinstance(id_admin, int):
+                logger.error(f"Invalid id_admin: {id_admin}")
+                return []
+
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not clave_acceso or len(clave_acceso.strip()) == 0:
+                logger.error("Password cannot be empty")
+                return []
+
+            # Trim input to match database constraints
+            clave_acceso = clave_acceso.strip()[:100]
+
+            # Use repository to update user password with SP_UPDATE_USUARIO_PASSWORD
+            results = repository.update_usuario_password(
+                id_admin=id_admin,
+                id_usuario=id_usuario,
+                clave_acceso=clave_acceso
+            )
+
+            if results:
+                logger.info(f"User password updated successfully: ID_USUARIO={id_usuario}, Results count={len(results)}")
+            else:
+                logger.warning(f"User password update returned no results: ID_USUARIO={id_usuario}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_usuario_password service: {e}")
             raise

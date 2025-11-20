@@ -86,9 +86,18 @@ async def create_area_endpoint(
             tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
             mensaje = results[0].get('MENSAJE', 'Error desconocido')
 
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje}: {mensaje}")
+
             if tipo_mensaje == 1:
                 raise HTTPException(
                     status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
                     detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
                 )
 
@@ -176,9 +185,18 @@ async def update_area_status_endpoint(
             tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
             mensaje = results[0].get('MENSAJE', 'Error desconocido')
 
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje}: {mensaje}")
+
             if tipo_mensaje == 1:
                 raise HTTPException(
                     status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
                     detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
                 )
 
@@ -266,9 +284,18 @@ async def update_area_name_endpoint(
             tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
             mensaje = results[0].get('MENSAJE', 'Error desconocido')
 
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje}: {mensaje}")
+
             if tipo_mensaje == 1:
                 raise HTTPException(
                     status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
                     detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
                 )
 
