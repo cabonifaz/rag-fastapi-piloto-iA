@@ -360,3 +360,77 @@ class UsersService:
         except Exception as e:
             logger.error(f"Error in update_usuario_password service: {e}")
             raise
+
+    async def update_usuario_access(
+        self,
+        db: Session,
+        id_admin: int,
+        id_usuario: int,
+        nuevo_rol: int,
+        id_empresa: int,
+        areas_string: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Update user role and areas access using stored procedure.
+
+        Args:
+            db: Database session
+            id_admin: Admin user ID performing the update
+            id_usuario: User ID to update
+            nuevo_rol: New role type ID (1=Super Admin, 2=Admin, 3=User)
+            id_empresa: Company ID
+            areas_string: Comma-separated area IDs (max 100 chars)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = UsersRepository(db)
+
+            # Validate input
+            if not isinstance(id_admin, int):
+                logger.error(f"Invalid id_admin: {id_admin}")
+                return []
+
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not isinstance(nuevo_rol, int) or nuevo_rol <= 0:
+                logger.error(f"Invalid nuevo_rol: {nuevo_rol}")
+                return []
+
+            if not isinstance(id_empresa, int) or id_empresa <= 0:
+                logger.error(f"Invalid id_empresa: {id_empresa}")
+                return []
+
+            if not areas_string or len(areas_string.strip()) == 0:
+                logger.error("Areas string cannot be empty")
+                return []
+
+            # Trim input to match database constraints
+            areas_string = areas_string.strip()[:100]
+
+            # Use repository to update user access with SP_UPDATE_USUARIO_ACCESS
+            results = repository.update_usuario_access(
+                id_admin=id_admin,
+                id_usuario=id_usuario,
+                nuevo_rol=nuevo_rol,
+                id_empresa=id_empresa,
+                areas_string=areas_string
+            )
+
+            if results:
+                logger.info(f"User access updated successfully: ID_USUARIO={id_usuario}, NUEVO_ROL={nuevo_rol}, AREAS={areas_string}, Results count={len(results)}")
+            else:
+                logger.warning(f"User access update returned no results: ID_USUARIO={id_usuario}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_usuario_access service: {e}")
+            raise

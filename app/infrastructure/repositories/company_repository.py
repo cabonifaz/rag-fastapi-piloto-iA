@@ -58,7 +58,6 @@ class CompanyRepository:
                 )
 
                 results = []
-                result_set_num = 1
 
                 # Iterate through all result sets
                 while True:
@@ -87,7 +86,6 @@ class CompanyRepository:
                     try:
                         if not cursor.nextset():
                             break
-                        result_set_num += 1
                     except Exception as nextset_error:
                         # Transaction error is expected when SP manages its own transactions
                         if "Transaction count after EXECUTE" in str(nextset_error):

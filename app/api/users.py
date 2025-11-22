@@ -9,7 +9,7 @@ from app.core.database import get_db
 from app.core.container import container
 from app.services.users_service import UsersService
 from app.models.response_models import create_success_response, create_error_response
-from app.models.user_models import CreateUserRequest, UpdateUserRequest, UpdateUserStatusRequest, UpdateUserPasswordRequest
+from app.models.user_models import CreateUserRequest, UpdateUserRequest, UpdateUserStatusRequest, UpdateUserPasswordRequest, UpdateUserAccessRequest
 from app.utils.jwt_auth import get_current_user_with_company_validation
 
 logger = logging.getLogger(__name__)
@@ -465,6 +465,108 @@ async def update_usuario_password_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in update_usuario_password endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.put("/update_usuario_access")
+async def update_usuario_access_endpoint(
+    http_request: Request,
+    request: UpdateUserAccessRequest,
+    users_service: UsersService = Depends(get_users_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Update user role and areas access endpoint.
+
+    Updates user role and assigned areas using SP_UPDATE_USUARIO_ACCESS.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: UpdateUserAccessRequest with id_usuario, nuevo_rol, and areas_string
+
+    Returns:
+        Dict with user access update results including:
+        - results: List of dictionaries with ID_TIPO_MENSAJE, MENSAJE
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+        # Get company ID from request body (frontend sends it)
+        id_empresa = request.id_empresa
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
+        # Validate company ID from request
+        if not id_empresa or id_empresa <= 0:
+            error_response = create_error_response("ID de empresa inválido")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Update user access using service (user_id is the admin performing the update)
+        results = await users_service.update_usuario_access(
+            db=db,
+            id_admin=user_id,
+            id_usuario=request.id_usuario,
+            nuevo_rol=request.nuevo_rol,
+            id_empresa=id_empresa,
+            areas_string=request.areas_string
+        )
+
+        # Check if the stored procedure returned an error message
+        if results and 'ID_TIPO_MENSAJE' in results[0]:
+            tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
+            mensaje = results[0].get('MENSAJE', 'Error desconocido')
+
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje} in update_usuario_access: {mensaje}")
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+
+        success_response = create_success_response("Acceso del usuario actualizado exitosamente")
+        return {
+            "results": results if results else [],
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in update_usuario_access endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,

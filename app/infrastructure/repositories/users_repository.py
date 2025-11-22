@@ -143,7 +143,6 @@ class UsersRepository:
                 )
 
                 results = []
-                result_set_num = 1
 
                 # Iterate through all result sets
                 while True:
@@ -172,7 +171,6 @@ class UsersRepository:
                     try:
                         if not cursor.nextset():
                             break
-                        result_set_num += 1
                     except Exception as nextset_error:
                         # Transaction error is expected when SP manages its own transactions
                         if "Transaction count after EXECUTE" in str(nextset_error):
@@ -234,7 +232,6 @@ class UsersRepository:
                 )
 
                 results = []
-                result_set_num = 1
 
                 # Iterate through all result sets
                 while True:
@@ -263,7 +260,6 @@ class UsersRepository:
                     try:
                         if not cursor.nextset():
                             break
-                        result_set_num += 1
                     except Exception as nextset_error:
                         # Transaction error is expected when SP manages its own transactions
                         if "Transaction count after EXECUTE" in str(nextset_error):
@@ -319,7 +315,6 @@ class UsersRepository:
                 )
 
                 results = []
-                result_set_num = 1
 
                 # Iterate through all result sets
                 while True:
@@ -348,7 +343,6 @@ class UsersRepository:
                     try:
                         if not cursor.nextset():
                             break
-                        result_set_num += 1
                     except Exception as nextset_error:
                         # Transaction error is expected when SP manages its own transactions
                         if "Transaction count after EXECUTE" in str(nextset_error):
@@ -404,7 +398,6 @@ class UsersRepository:
                 )
 
                 results = []
-                result_set_num = 1
 
                 # Iterate through all result sets
                 while True:
@@ -433,7 +426,6 @@ class UsersRepository:
                     try:
                         if not cursor.nextset():
                             break
-                        result_set_num += 1
                     except Exception as nextset_error:
                         # Transaction error is expected when SP manages its own transactions
                         if "Transaction count after EXECUTE" in str(nextset_error):
@@ -454,5 +446,94 @@ class UsersRepository:
 
         except Exception as e:
             logger.error(f"Error updating usuario password with SP_UPDATE_USUARIO_PASSWORD: {e}")
+            self.db.rollback()
+            return []
+
+    def update_usuario_access(
+        self,
+        id_admin: int,
+        id_usuario: int,
+        nuevo_rol: int,
+        id_empresa: int,
+        areas_string: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Update user role and areas access using stored procedure SP_UPDATE_USUARIO_ACCESS
+
+        Args:
+            id_admin: Admin user ID performing the update
+            id_usuario: User ID to update
+            nuevo_rol: New role type ID
+            id_empresa: Company ID
+            areas_string: Comma-separated area IDs (max 100 chars)
+
+        Returns:
+            List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
+            Empty list if update failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_USUARIO_ACCESS @ID_ADMIN = ?, @ID_USUARIO = ?, @NUEVO_ROL = ?, @ID_EMPRESA = ?, @AREAS_STRING = ?",
+                    id_admin,
+                    id_usuario,
+                    nuevo_rol,
+                    id_empresa,
+                    areas_string
+                )
+
+                results = []
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            if has_message_columns and rows:
+                                # This is the result set we want to capture
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for ID_TIPO_MENSAJE
+                                    if 'ID_TIPO_MENSAJE' in result_dict:
+                                        result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_usuario_access: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating usuario access with SP_UPDATE_USUARIO_ACCESS: {e}")
             self.db.rollback()
             return []

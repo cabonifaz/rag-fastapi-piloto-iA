@@ -78,3 +78,11 @@ class UpdateUserPasswordRequest(BaseModel):
     """Request model for updating user password"""
     id_usuario: int
     clave_acceso: str
+
+
+class UpdateUserAccessRequest(BaseModel):
+    """Request model for updating user role and areas access"""
+    id_usuario: int
+    nuevo_rol: int
+    areas_string: str
+    id_empresa: int
