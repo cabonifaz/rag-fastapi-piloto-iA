@@ -154,17 +154,19 @@ class KnowledgeService:
                     HttpMethod='PUT'
                 )
 
-                # Build response object
-                response_obj = {
+                # Build upload object (without results)
+                upload_obj = {
                     'presigned_url': presigned_url,
                     's3_key': s3_key,
                     'document_name': pdf_filename,
-                    'results': db_results
                 }
 
-                response_objects.append(response_obj)
+                response_objects.append(upload_obj)
 
-        return response_objects
+        return {
+            'uploads': response_objects,
+            'results': db_results
+        }
 
     async def update_knowledge_process_state(
         self,

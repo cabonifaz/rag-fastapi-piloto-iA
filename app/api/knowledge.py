@@ -292,7 +292,7 @@ async def batch_upload_knowledge_endpoint(
 
         # Batch upload knowledge using service
         service = KnowledgeService(db)
-        uploads = await service.generate_presigned_urls(
+        response = await service.generate_presigned_urls(
             id_usuario=user_id,
             id_empresa=request.id_empresa,
             id_area=request.id_area,
@@ -300,7 +300,7 @@ async def batch_upload_knowledge_endpoint(
             id_modelo_embedding=request.id_modelo_embedding
         )
 
-        if not uploads:
+        if not response or not response.get('uploads'):
             error_response = create_error_response("Error al generar URLs para los documentos")
             raise HTTPException(
                 status_code=500,
@@ -309,7 +309,8 @@ async def batch_upload_knowledge_endpoint(
 
         success_response = create_success_response("URLs de carga generadas exitosamente")
         return {
-            "uploads": uploads,
+            "uploads": response['uploads'],
+            "results": response['results'],
             "result": success_response.model_dump()
         }
 
