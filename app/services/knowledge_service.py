@@ -198,3 +198,37 @@ class KnowledgeService:
         except Exception as e:
             logger.error(f"Error updating knowledge process state: {e}")
             raise
+
+    async def batch_update_knowledge_state(
+        self,
+        id_usuario: int,
+        id_cargas: List[int],
+        id_estado_proceso: int,
+        usumod: str = "System"
+    ) -> Dict[str, Any]:
+        """
+        Update the process state for multiple knowledge/document records in batch.
+
+        Args:
+            id_usuario: User ID who is updating (for audit purposes)
+            id_cargas: List of knowledge/document IDs to update
+            id_estado_proceso: New process state ID
+            usumod: User who modified the records (max 200 chars, default: "System")
+
+        Returns:
+            Dictionary with ID_TIPO_MENSAJE and MENSAJE from the stored procedure
+        """
+        try:
+            message_result = self.repository.batch_update_knowledge_state(
+                id_usuario=id_usuario,
+                id_cargas=id_cargas,
+                id_estado_proceso=id_estado_proceso,
+                usumod=usumod
+            )
+
+            logger.info(f"Batch updated {len(id_cargas)} knowledge records to state {id_estado_proceso}")
+            return message_result
+
+        except Exception as e:
+            logger.error(f"Error batch updating knowledge process state: {e}")
+            raise

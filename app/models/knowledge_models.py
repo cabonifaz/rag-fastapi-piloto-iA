@@ -20,3 +20,9 @@ class BatchUploadKnowledgeRequest(BaseModel):
     id_area: int
     pdf_keys: List[str]
     id_modelo_embedding: Optional[str] = "4"
+
+
+class BatchUpdateKnowledgeStateRequest(BaseModel):
+    """Request model for batch updating knowledge process state"""
+    id_cargas: List[int]
+    id_estado_proceso: int

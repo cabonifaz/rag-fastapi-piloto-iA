@@ -8,8 +8,8 @@ import logging
 from app.core.database import get_db
 from app.services.knowledge_service import KnowledgeService
 from app.models.response_models import create_success_response, create_error_response
-from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest
-from app.utils.jwt_auth import get_current_user_with_company_validation
+from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest, BatchUpdateKnowledgeStateRequest
+from app.utils.jwt_auth import get_current_user_with_company_validation, get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -308,9 +308,16 @@ async def batch_upload_knowledge_endpoint(
             )
 
         success_response = create_success_response("URLs de carga generadas exitosamente")
+
+        # Extract message_result and created_ids from service response
+        db_response = response['results']
+        message_result = db_response.get('message_result') if isinstance(db_response, dict) else None
+        created_ids = db_response.get('created_ids', []) if isinstance(db_response, dict) else []
+
         return {
             "uploads": response['uploads'],
-            "results": response['results'],
+            "message_result": message_result,
+            "created_ids": created_ids,
             "result": success_response.model_dump()
         }
 
@@ -320,6 +327,102 @@ async def batch_upload_knowledge_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in batch_upload_knowledge endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.patch("/batch_update_knowledge_state")
+async def batch_update_knowledge_state_endpoint(
+    http_request: Request,
+    request: BatchUpdateKnowledgeStateRequest,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Batch update process state for multiple knowledge/documents endpoint.
+
+    Updates the process state for multiple knowledge/document records in a single batch operation.
+    Uses SP_CARGA_CONOC_ESTADO_PROCESO_BATCH_UPD for efficient batch update.
+    Requires JWT authentication.
+
+    Args:
+        request: BatchUpdateKnowledgeStateRequest with id_cargas and id_estado_proceso
+
+    Returns:
+        Dict with:
+        - message_result: Status message from the stored procedure
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
+        # Validate id_cargas parameter
+        if not isinstance(request.id_cargas, list) or len(request.id_cargas) == 0:
+            error_response = create_error_response("Lista de IDs de carga inválida o vacía")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Validate each id_carga is a positive integer
+        for id_carga in request.id_cargas:
+            if not isinstance(id_carga, int) or id_carga <= 0:
+                error_response = create_error_response("IDs de carga inválidos")
+                raise HTTPException(
+                    status_code=422,
+                    detail={"result": error_response.model_dump()}
+                )
+
+        # Validate id_estado_proceso parameter
+        if not isinstance(request.id_estado_proceso, int) or request.id_estado_proceso <= 0:
+            error_response = create_error_response("ID de estado de proceso inválido")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Batch update knowledge process state using service
+        service = KnowledgeService(db)
+        message_result = await service.batch_update_knowledge_state(
+            id_usuario=user_id,
+            id_cargas=request.id_cargas,
+            id_estado_proceso=request.id_estado_proceso,
+            usumod=current_user.get('USUARIO', 'System')
+        )
+
+        success_response = create_success_response("Estados de documentos actualizados exitosamente")
+        return {
+            "message_result": message_result,
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in batch_update_knowledge_state endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,
