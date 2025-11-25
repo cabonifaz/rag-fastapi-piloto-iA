@@ -149,9 +149,9 @@ class KnowledgeService:
                     Params={
                         'Bucket': self.bucket_name,
                         'Key': s3_key,
-                        'ContentType': 'application/pdf'
                     },
-                    ExpiresIn=300  # 5 minutes
+                    ExpiresIn=300,  # 5 minutes
+                    HttpMethod='PUT'
                 )
 
                 # Build response object
