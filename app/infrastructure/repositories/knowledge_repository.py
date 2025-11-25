@@ -50,28 +50,31 @@ class KnowledgeRepository:
                 results = []
 
                 # Iterate through all result sets
+                result_set_num = 0
                 while True:
+                    result_set_num += 1
                     try:
                         # Check if we have columns (indicating data)
                         if cursor.description:
                             columns = [desc[0] for desc in cursor.description]
                             rows = cursor.fetchall()
 
-                            if rows:
+                            # Look for result set with knowledge data (has 'ID_CARGA' or 'documento' column)
+                            has_knowledge_data = any(col in ['ID_CARGA', 'documento', 'NOMBRE_DOCUMENTO'] for col in columns)
+                            if has_knowledge_data and rows:
                                 # Convert rows to dictionaries
                                 for row in rows:
                                     result_dict = dict(zip(columns, row))
-                                    # Convert Decimal to int for numeric IDs
-                                    numeric_fields = [
-                                        'ID_CARGA_CONOCIMIENTO',
-                                        'ID_USUARIO',
-                                        'ID_EMPRESA',
-                                        'ID_AREA',
-                                        'ID_MODELO_EMBEDDING'
-                                    ]
-                                    for field in numeric_fields:
-                                        if field in result_dict and result_dict[field] is not None:
-                                            result_dict[field] = int(result_dict[field])
+
+                                    # The SP already returns lowercase column names, so just use the result_dict as-is
+                                    # Convert numeric IDs to int
+                                    if 'id' in result_dict and result_dict['id'] is not None:
+                                        result_dict['id'] = str(result_dict['id'])
+
+                                    for id_field in ['id_usuario', 'id_empresa', 'id_area', 'id_estado_proceso', 'id_modelo_embedding']:
+                                        if id_field in result_dict and result_dict[id_field] is not None:
+                                            result_dict[id_field] = int(result_dict[id_field])
+
                                     results.append(result_dict)
 
                     except Exception as fetch_error:
