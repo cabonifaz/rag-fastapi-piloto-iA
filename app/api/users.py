@@ -61,7 +61,7 @@ async def get_usuarios_endpoint(
         if role_id not in [1, 2]:
             raise HTTPException(
                 status_code=403,
-                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
             )
 
         # Validate id_empresa parameter
@@ -144,7 +144,7 @@ async def create_usuario_endpoint(
         if role_id not in [1, 2]:
             raise HTTPException(
                 status_code=403,
-                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
             )
 
         # Create user using service (user_id is the current user creating the new user)
@@ -160,6 +160,8 @@ async def create_usuario_endpoint(
             areas_string=request.areas_string
         )
 
+        print(f"[CREATE_USUARIO] SP Response: {results}")
+
         # SP may not return results for now, so we just treat empty results as success
         # Check if the stored procedure returned an error message
         if results and 'ID_TIPO_MENSAJE' in results[0]:
@@ -172,13 +174,13 @@ async def create_usuario_endpoint(
 
             if tipo_mensaje == 1:
                 raise HTTPException(
-                    status_code=403,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    status_code=400,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
             elif tipo_mensaje == 3:
                 raise HTTPException(
                     status_code=422,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
 
         success_response = create_success_response("Usuario creado exitosamente")
@@ -240,7 +242,7 @@ async def update_usuario_endpoint(
         if role_id not in [1, 2]:
             raise HTTPException(
                 status_code=403,
-                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
             )
 
         # Update user using service (user_id is the admin performing the update)
@@ -264,13 +266,13 @@ async def update_usuario_endpoint(
 
             if tipo_mensaje == 1:
                 raise HTTPException(
-                    status_code=403,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    status_code=400,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
             elif tipo_mensaje == 3:
                 raise HTTPException(
                     status_code=422,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
 
         success_response = create_success_response("Usuario actualizado exitosamente")
@@ -332,7 +334,7 @@ async def update_usuario_status_endpoint(
         if role_id not in [1, 2]:
             raise HTTPException(
                 status_code=403,
-                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
             )
 
         # Update user status using service (user_id is the admin performing the update)
@@ -355,12 +357,12 @@ async def update_usuario_status_endpoint(
             if tipo_mensaje == 1:
                 raise HTTPException(
                     status_code=403,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
             elif tipo_mensaje == 3:
                 raise HTTPException(
                     status_code=422,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
 
         success_response = create_success_response("Estado del usuario actualizado exitosamente")
@@ -422,7 +424,7 @@ async def update_usuario_password_endpoint(
         if role_id not in [1, 2]:
             raise HTTPException(
                 status_code=403,
-                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
             )
 
         # Update user password using service (user_id is the admin performing the update)
@@ -445,12 +447,12 @@ async def update_usuario_password_endpoint(
             if tipo_mensaje == 1:
                 raise HTTPException(
                     status_code=403,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
             elif tipo_mensaje == 3:
                 raise HTTPException(
                     status_code=422,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
 
         success_response = create_success_response("Contraseña actualizada exitosamente")
@@ -514,7 +516,7 @@ async def update_usuario_access_endpoint(
         if role_id not in [1, 2]:
             raise HTTPException(
                 status_code=403,
-                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
             )
 
         # Validate company ID from request
@@ -547,12 +549,12 @@ async def update_usuario_access_endpoint(
             if tipo_mensaje == 1:
                 raise HTTPException(
                     status_code=403,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
             elif tipo_mensaje == 3:
                 raise HTTPException(
                     status_code=422,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
                 )
 
         success_response = create_success_response("Acceso del usuario actualizado exitosamente")
