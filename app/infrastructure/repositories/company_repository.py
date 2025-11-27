@@ -148,3 +148,83 @@ class CompanyRepository:
         except Exception as e:
             logger.error(f"Error fetching companies with SP: {e}")
             return []
+
+    def update_company_status(
+        self,
+        id_usuario: int,
+        id_empresa: int,
+        status: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update company status using stored procedure SP_UPDATE_EMPRESA_STATUS
+
+        Args:
+            id_usuario: User ID
+            id_empresa: Company ID
+            status: Status value to set (typically 1=active, 0=deleted)
+
+        Returns:
+            List of dictionaries with result information
+            Empty list if update failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_EMPRESA_STATUS @ID_USUARIO = ?, @ID_EMPRESA = ?, @STATUS = ?",
+                    id_usuario,
+                    id_empresa,
+                    status
+                )
+
+                results = []
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            if rows:
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for numeric IDs
+                                    for key, value in result_dict.items():
+                                        if isinstance(value, type(1.0)) and key.startswith('ID_'):
+                                            result_dict[key] = int(value)
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_company_status: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating company status with SP: {e}")
+            self.db.rollback()
+            return []

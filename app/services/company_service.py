@@ -105,3 +105,54 @@ class CompanyService:
         except Exception as e:
             logger.error(f"Error in get_companies service: {e}")
             raise
+
+    async def update_company_status(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_empresa: int,
+        status: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update company status using stored procedure SP_UPDATE_EMPRESA_STATUS.
+
+        Args:
+            db: Database session
+            id_usuario: User ID performing the update
+            id_empresa: Company ID to update
+            status: Status value to set (typically 1=active, 0=deleted)
+
+        Returns:
+            List of dictionaries containing update result information
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = CompanyRepository(db)
+
+            # Validate inputs
+            if id_empresa <= 0:
+                logger.error("Invalid company ID")
+                return []
+
+            if status not in [0, 1]:
+                logger.error(f"Invalid status value: {status}. Expected 0 or 1")
+                return []
+
+            # Update company status via repository
+            results = repository.update_company_status(
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                status=status
+            )
+
+            if results:
+                logger.info(f"Company status updated successfully: ID_EMPRESA={id_empresa}, STATUS={status}, Results count={len(results)}")
+            else:
+                logger.warning(f"Company status update returned no results: ID_EMPRESA={id_empresa}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_company_status service: {e}")
+            raise
