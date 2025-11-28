@@ -168,37 +168,6 @@ class KnowledgeService:
             'results': db_results
         }
 
-    async def update_knowledge_process_state(
-        self,
-        id_carga: int,
-        id_estado_proceso: int,
-        usumod: str = "System"
-    ) -> List[Dict[str, Any]]:
-        """
-        Update the process state for a knowledge/document record.
-
-        Args:
-            id_carga: Knowledge/document ID to update
-            id_estado_proceso: New process state ID
-            usumod: User who modified the record (max 200 chars, default: "System")
-
-        Returns:
-            List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
-        """
-        try:
-            results = self.repository.update_knowledge_process_state(
-                id_carga=id_carga,
-                id_estado_proceso=id_estado_proceso,
-                usumod=usumod
-            )
-
-            logger.info(f"Updated knowledge process state: id_carga={id_carga}, new state={id_estado_proceso}")
-            return results
-
-        except Exception as e:
-            logger.error(f"Error updating knowledge process state: {e}")
-            raise
-
     async def batch_update_knowledge_state(
         self,
         id_usuario: int,
