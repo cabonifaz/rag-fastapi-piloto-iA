@@ -6,6 +6,7 @@ from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
 from app.services.message_service import MessageService
 from app.services.ia_config_service import IaConfigService
+from app.services.ia_models_service import IAModelsService
 from app.services.company_service import CompanyService
 from app.services.area_service import AreaService
 from app.services.users_service import UsersService
@@ -44,6 +45,7 @@ class DIContainer:
         self._message_service = None
         self._recontextualizer = None
         self._ia_config_service = None
+        self._ia_models_service = None
         self._company_service = None
         self._area_service = None
         self._users_service = None
@@ -191,6 +193,14 @@ class DIContainer:
             self._ia_config_service = IaConfigService()
 
         return self._ia_config_service
+
+    def get_ia_models_service(self) -> IAModelsService:
+        """Get IA models service as singleton (stateless, no db parameter)."""
+        if self._ia_models_service is None:
+            # Create ONCE - singleton
+            self._ia_models_service = IAModelsService()
+
+        return self._ia_models_service
 
     def get_company_service(self) -> CompanyService:
         """Get company service as singleton (stateless, no db parameter)."""
