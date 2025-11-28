@@ -47,3 +47,42 @@ class UserInfo(BaseModel):
     email: Optional[str] = None
     ultimo_ingreso: Optional[datetime] = None
     id_estado_registro: int
+
+
+class CreateUserRequest(BaseModel):
+    """Request model for creating a new user"""
+    nuevo_usuario: str
+    password: str
+    nombres: str
+    apellidos: str
+    nuevo_rol: int
+    id_empresa: int
+    areas_string: str
+
+
+class UpdateUserRequest(BaseModel):
+    """Request model for updating user data"""
+    id_usuario: int
+    usuario: str
+    nombres: str
+    apellidos: str
+
+
+class UpdateUserStatusRequest(BaseModel):
+    """Request model for updating user status"""
+    id_usuario: int
+    status: int
+
+
+class UpdateUserPasswordRequest(BaseModel):
+    """Request model for updating user password"""
+    id_usuario: int
+    clave_acceso: str
+
+
+class UpdateUserAccessRequest(BaseModel):
+    """Request model for updating user role and areas access"""
+    id_usuario: int
+    nuevo_rol: int
+    areas_string: str
+    id_empresa: int

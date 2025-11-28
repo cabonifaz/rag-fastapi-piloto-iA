@@ -114,9 +114,20 @@ async def update_chat_titulo_endpoint(
         )
 
         # Check if the operation failed
-        if result.get("ID_TIPO_MENSAJE") == 1:
+        tipo_mensaje = result.get("ID_TIPO_MENSAJE")
+
+        # Log when ID_TIPO_MENSAJE is not 2 (success)
+        if tipo_mensaje and tipo_mensaje != 2:
+            logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje}: {result.get('MENSAJE')}")
+
+        if tipo_mensaje == 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result
+            )
+        elif tipo_mensaje == 3:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=result
             )
 
@@ -162,9 +173,20 @@ async def delete_chat_endpoint(
         result = await chat_service.delete_chat(db=db, chat_id=chat_id)
 
         # Check if the operation failed
-        if result.get("ID_TIPO_MENSAJE") == 1:
+        tipo_mensaje = result.get("ID_TIPO_MENSAJE")
+
+        # Log when ID_TIPO_MENSAJE is not 2 (success)
+        if tipo_mensaje and tipo_mensaje != 2:
+            logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje}: {result.get('MENSAJE')}")
+
+        if tipo_mensaje == 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result
+            )
+        elif tipo_mensaje == 3:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=result
             )
 

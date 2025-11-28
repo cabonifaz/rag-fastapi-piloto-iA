@@ -5,6 +5,7 @@ import logging
 from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import lru_cache
+from botocore.config import Config
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -56,8 +57,10 @@ class AsyncAWSClientManager:
     @asynccontextmanager
     async def get_s3_client(self):
         """Get S3 client as async context manager."""
-        async with self.session.client('s3') as client:
-            logger.debug("S3 client created")
+        # Use Signature Version 4 for presigned URLs
+        config = Config(signature_version='s3v4')
+        async with self.session.client('s3', config=config) as client:
+            logger.debug("S3 client created with s3v4 signature")
             yield client
 
     @asynccontextmanager

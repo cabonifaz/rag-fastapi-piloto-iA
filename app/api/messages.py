@@ -13,7 +13,7 @@ from app.models.message_models import (
     GetMessagesByChat
 )
 from app.models.response_models import create_success_response, create_error_response
-from app.utils.jwt_auth import get_current_user_with_company_validation
+from app.utils.jwt_auth import get_current_user_with_company_area_validation
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ async def get_messages_by_chat_endpoint(
     request: GetMessagesByChat,
     limit: int = Query(50, ge=1, le=100, description="Maximum messages to return"),
     last_evaluated_key: Optional[str] = Query(None, description="Pagination key (JSON string)"),
-    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation),
     message_service: MessageService = Depends(get_message_service)
 ):
     """

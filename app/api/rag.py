@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from sqlalchemy.orm import Session
-from app.utils.jwt_auth import get_current_user, get_current_user_with_company_validation
+from app.utils.jwt_auth import get_current_user, get_current_user_with_company_area_validation
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.services.rag_service import RagService
 from app.domain.ports.llm_port import LLMPort
@@ -44,7 +44,7 @@ async def chat_streaming_endpoint(
     rag_service: RagService = Depends(get_rag_service),
     llm_provider: LLMPort = Depends(get_llm_provider),
     db: Session = Depends(get_db),
-    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation)
 ):
     """
     Streaming chat endpoint with RAG-powered answer generation.
@@ -155,7 +155,7 @@ async def chat_streaming_endpoint(
 #     rag_service: RagService = Depends(get_rag_service),
 #     llm_provider: LLMPort = Depends(get_llm_provider),
 #     db: Session = Depends(get_db),
-#     current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+#     current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation)
 # ):
 #     """
 #     Agent-powered streaming rag endpoint with orchestrator analysis and RAG.

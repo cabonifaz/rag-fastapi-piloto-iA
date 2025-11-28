@@ -121,7 +121,7 @@ class WeaviateRepository(VectorStorePort):
             return_properties: Properties to return in results
             filters: Optional filters to apply
             include_distance: Whether to include distance scores
-            alpha: Balance between vector (1.0) and keyword (0.0) search. Default 0.5 for balanced hybrid.
+            alpha: Balance between vector (1.0) and keyword (0.0) search. General 0.5 for balanced hybrid.
         """
         query_kwargs = {
             "query": query_text,
@@ -410,12 +410,12 @@ class WeaviateRepository(VectorStorePort):
 
             # Build area filter using v4 Filter class
             # Note: No company filter needed - collection itself is scoped to company
-            # Include both the specific area_id AND Default area documents
+            # Include both the specific area_id AND General area documents
             # area_id contains concatenated values like "AREA123"
-            # area contains "Default" for shared documents
+            # area contains "General" for shared documents
             area_filter = (
                 Filter.by_property("area_id").equal(area) |
-                Filter.by_property("area").equal("Default")
+                Filter.by_property("area").equal("General")
             )
 
             filters = area_filter
@@ -518,12 +518,12 @@ class WeaviateRepository(VectorStorePort):
 
             # Build area filter using v4 Filter class
             # Note: No company filter needed - collection itself is scoped to company
-            # Include both the specific area_id AND Default area documents
+            # Include both the specific area_id AND General area documents
             # area_id contains concatenated values like "AREA123"
-            # area contains "Default" for shared documents
+            # area contains "General" for shared documents
             area_filter = (
                 Filter.by_property("area_id").equal(area) |
-                Filter.by_property("area").equal("Default")
+                Filter.by_property("area").equal("General")
             )
 
             filters = area_filter

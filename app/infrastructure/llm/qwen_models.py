@@ -90,12 +90,32 @@ class QwenLongConfig(QwenModelConfig):
         super().__init__("alibaba.qwen2-1b-instruct-v1:0")
 
 
+class Qwen3Config(QwenModelConfig):
+    """Specific configuration for Qwen 3 32B."""
+
+    def __init__(self):
+        super().__init__("qwen.qwen3-32b-v1:0")
+
+
+class Qwen3CoderConfig(QwenModelConfig):
+    """Specific configuration for Qwen 3 Coder 30B."""
+
+    def __init__(self):
+        super().__init__("qwen.qwen3-coder-30b-a3b-v1:0")
+
+
 def get_qwen_config(model_id: str) -> QwenModelConfig:
     """Factory function to get the appropriate Qwen model configuration."""
     model_id_lower = model_id.lower()
 
+    # Qwen 3 models
+    if "qwen3-32b" in model_id_lower or "qwen3-32b-v1" in model_id_lower:
+        return Qwen3Config()
+    elif "qwen3-coder-30b" in model_id_lower or "qwen3-coder-30b-a3b-v1" in model_id_lower:
+        return Qwen3CoderConfig()
+
     # Qwen 2 models
-    if "qwen2-72b" in model_id_lower or "qwen-max" in model_id_lower:
+    elif "qwen2-72b" in model_id_lower or "qwen-max" in model_id_lower:
         return QwenMaxConfig()
     elif "qwen2-1b" in model_id_lower or "qwen-long" in model_id_lower:
         return QwenLongConfig()
