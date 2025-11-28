@@ -1,9 +1,10 @@
 """Repository for IA area configuration operations."""
 
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -69,4 +70,103 @@ class IaConfigRepository:
 
         except Exception as e:
             logger.error(f"Error loading IA area config for id_ia_area={id_ia_area}: {e}")
+            raise
+
+    async def update_ia_area_config(
+        self,
+        id_usuario: int,
+        id_empresa: int,
+        id_area: int,
+        id_embeddings: int,
+        id_llm: int,
+        embeddings_dimensions: int,
+        llm_max_tokens: int,
+        llm_temperature: Decimal,
+        llm_top_p: Decimal,
+        rag_top_k_results: int,
+        rag_similarity_threshold: Decimal,
+        rag_alpha: Decimal,
+        role_behavior: str
+    ) -> Dict[str, Any]:
+        """
+        Update IA area configuration using stored procedure SP_UPDATE_IA_AREA_BASE
+
+        Args:
+            id_usuario: User ID performing the update
+            id_empresa: Company ID
+            id_area: Area ID
+            id_embeddings: Embeddings model ID
+            id_llm: LLM model ID
+            embeddings_dimensions: Embedding vector dimensions
+            llm_max_tokens: Maximum tokens for LLM
+            llm_temperature: Temperature parameter for LLM
+            llm_top_p: Top-P parameter for LLM
+            rag_top_k_results: Number of top-K results for RAG
+            rag_similarity_threshold: Similarity threshold for RAG
+            rag_alpha: Alpha parameter for RAG
+            role_behavior: Role behavior prompt/instructions
+
+        Returns:
+            Dictionary containing ID_TIPO_MENSAJE and message
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_IA_AREA_BASE @ID_USUARIO = ?, @ID_EMPRESA = ?, @ID_AREA = ?, "
+                    "@ID_EMBEDDINGS = ?, @ID_LLM = ?, @EMBEDDINGS_DIMENSIONS = ?, "
+                    "@LLM_MAX_TOKENS = ?, @LLM_TEMPERATURE = ?, @LLM_TOP_P = ?, "
+                    "@RAG_TOP_K_RESULTS = ?, @RAG_SIMILARITY_THRESHOLD = ?, @RAG_ALPHA = ?, "
+                    "@ROLE_BEHAVIOR = ?",
+                    id_usuario,
+                    id_empresa,
+                    id_area,
+                    id_embeddings,
+                    id_llm,
+                    embeddings_dimensions,
+                    llm_max_tokens,
+                    llm_temperature,
+                    llm_top_p,
+                    rag_top_k_results,
+                    rag_similarity_threshold,
+                    rag_alpha,
+                    role_behavior
+                )
+
+                result = {}
+
+                # SP returns 2 result sets
+                # First result set - skip it
+                if cursor.description:
+                    cursor.fetchall()
+
+                # Move to second result set - contains ID_TIPO_MENSAJE and MENSAJE
+                if cursor.nextset():
+                    if cursor.description:
+                        columns = [desc[0] for desc in cursor.description]
+                        row = cursor.fetchone()
+
+                        if row:
+                            full_result = dict(zip(columns, row))
+                            # Return only ID_TIPO_MENSAJE and message
+                            if 'ID_TIPO_MENSAJE' in full_result:
+                                result['ID_TIPO_MENSAJE'] = int(full_result['ID_TIPO_MENSAJE'])
+                            if 'MENSAJE' in full_result:
+                                result['MENSAJE'] = full_result['MENSAJE']
+
+                cursor.close()
+                self.db.commit()
+                return result
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_ia_area_config: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating IA area config with SP_UPDATE_IA_AREA_BASE: {e}")
             raise
