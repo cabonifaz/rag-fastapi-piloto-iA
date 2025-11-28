@@ -54,6 +54,41 @@ class IaConfigService:
             logger.error(f"Error in get_ia_area_config service for id_ia_area={id_ia_area}: {e}, using llm_role_behavior from env")
             return settings.llm_role_behavior
 
+    async def get_ia_area_config_full(self, db: Session, id_area: int) -> Optional[Dict[str, Any]]:
+        """
+        Load full IA area configuration from database using stored procedure.
+
+        Args:
+            db: Database session
+            id_area: ID of the area
+
+        Returns:
+            Dictionary with ID_IA_AREA, ID_AREA, ID_EMBEDDINGS, ID_LLM, EMBEDDINGS_DIMENSIONS,
+            LLM_MAX_TOKENS, LLM_TEMPERATURE, LLM_TOP_P, RAG_TOP_K_RESULTS, RAG_SIMILARITY_THRESHOLD,
+            RAG_ALPHA, ROLE_BEHAVIOR, or None if not found
+        """
+        try:
+            if not db:
+                logger.warning("Database session not available in IaConfigService")
+                return None
+
+            # Create repository for this request
+            repository = IaConfigRepository(db)
+
+            # Get full configuration from database
+            config = repository.get_ia_area_config_full(id_area)
+
+            if config:
+                logger.info(f"Retrieved full IA area config for id_area={id_area}")
+                return config
+
+            logger.info(f"No config found for id_area={id_area}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error in get_ia_area_config_full service for id_area={id_area}: {e}")
+            raise
+
     async def update_ia_area_config(
         self,
         db: Session,

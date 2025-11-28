@@ -3,14 +3,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import Dict, Any
-from decimal import Decimal
-from pydantic import BaseModel
 import logging
 
 from app.core.database import get_db
 from app.core.container import container
 from app.services.ia_config_service import IaConfigService
 from app.models.response_models import create_success_response, create_error_response
+from app.models.ia_config_models import GetIaAreaConfigRequest, UpdateIaAreaConfigRequest, GetIaAreaConfigResponse
 from app.utils.jwt_auth import get_current_user_with_company_validation
 
 logger = logging.getLogger(__name__)
@@ -23,20 +22,84 @@ def get_ia_config_service() -> IaConfigService:
     return container.get_ia_config_service()
 
 
-class UpdateIaAreaConfigRequest(BaseModel):
-    """Request model for updating IA area configuration."""
-    id_empresa: int
-    id_area: int
-    id_embeddings: int
-    id_llm: int
-    embeddings_dimensions: int
-    llm_max_tokens: int
-    llm_temperature: Decimal
-    llm_top_p: Decimal
-    rag_top_k_results: int
-    rag_similarity_threshold: Decimal
-    rag_alpha: Decimal
-    role_behavior: str
+@router.post("/get_ia_area_config")
+async def get_ia_area_config_endpoint(
+    request: GetIaAreaConfigRequest,
+    ia_config_service: IaConfigService = Depends(get_ia_config_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Get IA area configuration endpoint.
+
+    Retrieves full IA area configuration including models, parameters, and RAG settings
+    using SP_GET_IA_AREA_CONFIG.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: GetIaAreaConfigRequest with id_empresa and id_area
+
+    Returns:
+        Dict with:
+        - result: Configuration data with ID_IA_AREA, ID_AREA, ID_EMBEDDINGS, ID_LLM,
+                  EMBEDDINGS_DIMENSIONS, LLM_MAX_TOKENS, LLM_TEMPERATURE, LLM_TOP_P,
+                  RAG_TOP_K_RESULTS, RAG_SIMILARITY_THRESHOLD, RAG_ALPHA, ROLE_BEHAVIOR
+
+    Raises:
+        HTTPException: 404 if config not found, 403 for permission errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Get IA area config using service
+        config = await ia_config_service.get_ia_area_config_full(
+            db=db,
+            id_area=request.id_area
+        )
+
+        if not config:
+            error_response = create_error_response(f"No se encontró configuración para el área {request.id_area}")
+            raise HTTPException(
+                status_code=404,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Convert database column names to camelCase for API response
+        return {
+            "result": {
+                "id_ia_area": config.get('ID_IA_AREA'),
+                "id_area": config.get('ID_AREA'),
+                "id_embeddings": config.get('ID_EMBEDDINGS'),
+                "id_llm": config.get('ID_LLM'),
+                "embeddings_dimensions": config.get('EMBEDDINGS_DIMENSIONS'),
+                "llm_max_tokens": config.get('LLM_MAX_TOKENS'),
+                "llm_temperature": config.get('LLM_TEMPERATURE'),
+                "llm_top_p": config.get('LLM_TOP_P'),
+                "rag_top_k_results": config.get('RAG_TOP_K_RESULTS'),
+                "rag_similarity_threshold": config.get('RAG_SIMILARITY_THRESHOLD'),
+                "rag_alpha": config.get('RAG_ALPHA'),
+                "role_behavior": config.get('ROLE_BEHAVIOR')
+            }
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_ia_area_config endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
 
 
 @router.post("/update_ia_area_config")

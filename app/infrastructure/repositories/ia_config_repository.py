@@ -72,6 +72,53 @@ class IaConfigRepository:
             logger.error(f"Error loading IA area config for id_ia_area={id_ia_area}: {e}")
             raise
 
+    def get_ia_area_config_full(self, id_area: int) -> Optional[Dict[str, Any]]:
+        """
+        Load full IA area configuration from database using stored procedure.
+
+        Calls SP_GET_IA_AREA_CONFIG to retrieve all configuration parameters for the specified area.
+
+        Args:
+            id_area: ID of the area
+
+        Returns:
+            Dictionary containing ID_IA_AREA, ID_AREA, ID_EMBEDDINGS, ID_LLM, EMBEDDINGS_DIMENSIONS,
+            LLM_MAX_TOKENS, LLM_TEMPERATURE, LLM_TOP_P, RAG_TOP_K_RESULTS, RAG_SIMILARITY_THRESHOLD,
+            RAG_ALPHA, ROLE_BEHAVIOR, or None if not found
+
+        Raises:
+            Exception: If database operation fails
+        """
+        try:
+            query = text("""
+                EXEC SP_GET_IA_AREA_CONFIG
+                @ID_AREA = :id_area
+            """)
+
+            result = self.db.execute(query, {
+                'id_area': id_area
+            })
+
+            config_data = result.fetchone()
+            result.close()
+
+            if not config_data:
+                logger.info(f"No config found for id_area={id_area}")
+                return None
+
+            # Convert result to dictionary
+            config_dict = dict(config_data._mapping) if hasattr(config_data, '_mapping') else dict(zip(result.keys(), config_data))
+
+            if config_dict:
+                logger.info(f"Retrieved IA area config for id_area={id_area}")
+                return config_dict
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error loading full IA area config for id_area={id_area}: {e}")
+            raise
+
     async def update_ia_area_config(
         self,
         id_usuario: int,
