@@ -116,7 +116,49 @@ class JWTAuth:
             )
 
     @staticmethod
-    def validate_company_access(token: str, company_id: int, area_id: int = None) -> bool:
+    def validate_company_access(token: str, company_id: int) -> bool:
+        """
+        Validate user access to company based on role
+
+        Args:
+            token: JWT token
+            company_id: Requested company ID (matches ID_EMPRESA field in token)
+
+        Returns:
+            True if access is allowed, False otherwise
+        """
+        try:
+            # Validate input parameters
+            if not isinstance(company_id, int) or company_id <= 0:
+                return False
+
+            # Extract full payload
+            payload = JWTAuth._extract_payload(token)
+
+            role_id = payload.get('ID_TIPO_ROL')
+            company_areas = payload.get('company_areas', [])
+
+            # SuperAdmin (role_id = 1): Always allow access
+            if role_id == 1:
+                return True
+
+            # Admin (role_id = 2): Validate company_id exists in any company_areas row
+            if role_id == 2:
+                return any(ca.get('ID_EMPRESA') == company_id for ca in company_areas)
+
+            # User (role_id = 3): Validate company_id exists in any company_areas row
+            if role_id == 3:
+                return any(ca.get('ID_EMPRESA') == company_id for ca in company_areas)
+
+            # Unknown role: Deny access
+            return False
+
+        except Exception as e:
+            logger.error(f"Error validating company access: {e}")
+            return False
+
+    @staticmethod
+    def validate_company_area_access(token: str, company_id: int, area_id: int = None) -> bool:
         """
         Validate user access to company/area based on role
 
@@ -163,7 +205,7 @@ class JWTAuth:
             return False
 
         except Exception as e:
-            logger.error(f"Error validating company access: {e}")
+            logger.error(f"Error validating company/area access: {e}")
             return False
 
 # Dependency function
@@ -182,6 +224,51 @@ async def get_current_user(
     return JWTAuth.verify_jwt_token(credentials.credentials)
 
 async def get_current_user_with_company_validation(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Dict[str, Any]:
+    """Get current user and validate company access from request by ID_EMPRESA"""
+
+    if not credentials:
+        logger.warning("No JWT token found in Authorization header")
+        raise HTTPException(
+            status_code=401,
+            detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
+        )
+
+    token = credentials.credentials
+
+    # Verify JWT expiration and get user info
+    user_data = JWTAuth.verify_jwt_token(token)
+
+    # Extract company_id from request body
+    if request.method == "POST":
+        content_type = request.headers.get("content-type", "")
+
+        if "application/json" in content_type:
+            # For JSON requests
+            body = await request.json()
+            company_id = body.get("id_empresa")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported content type")
+
+        # Validate input parameters first
+        if company_id is None:
+            raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "id_empresa is required"}})
+
+        # Validate user has access to the requested company_id
+        has_access = JWTAuth.validate_company_access(token, company_id)
+
+        if not has_access:
+            logger.warning(f"Access denied for user {user_data.get('ID_USUARIO')} to company_id: {company_id}")
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Acceso denegado"}}
+            )
+
+    return user_data
+
+async def get_current_user_with_company_area_validation(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
@@ -219,7 +306,7 @@ async def get_current_user_with_company_validation(
             raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "area_id is required"}})
 
         # Validate user has access to the requested company_id and area_id
-        has_access = JWTAuth.validate_company_access(token, company_id, area_id)
+        has_access = JWTAuth.validate_company_area_access(token, company_id, area_id)
 
         if not has_access:
             logger.warning(f"Access denied for user {user_data.get('ID_USUARIO')} to company_id: {company_id}, area_id: {area_id}")

@@ -6,6 +6,10 @@ from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
 from app.services.message_service import MessageService
 from app.services.ia_config_service import IaConfigService
+from app.services.ia_models_service import IAModelsService
+from app.services.company_service import CompanyService
+from app.services.area_service import AreaService
+from app.services.users_service import UsersService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -41,6 +45,10 @@ class DIContainer:
         self._message_service = None
         self._recontextualizer = None
         self._ia_config_service = None
+        self._ia_models_service = None
+        self._company_service = None
+        self._area_service = None
+        self._users_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -185,6 +193,38 @@ class DIContainer:
             self._ia_config_service = IaConfigService()
 
         return self._ia_config_service
+
+    def get_ia_models_service(self) -> IAModelsService:
+        """Get IA models service as singleton (stateless, no db parameter)."""
+        if self._ia_models_service is None:
+            # Create ONCE - singleton
+            self._ia_models_service = IAModelsService()
+
+        return self._ia_models_service
+
+    def get_company_service(self) -> CompanyService:
+        """Get company service as singleton (stateless, no db parameter)."""
+        if self._company_service is None:
+            # Create ONCE - singleton
+            self._company_service = CompanyService()
+
+        return self._company_service
+
+    def get_area_service(self) -> AreaService:
+        """Get area service as singleton (stateless, no db parameter)."""
+        if self._area_service is None:
+            # Create ONCE - singleton
+            self._area_service = AreaService()
+
+        return self._area_service
+
+    def get_users_service(self) -> UsersService:
+        """Get users service as singleton (stateless, no db parameter)."""
+        if self._users_service is None:
+            # Create ONCE - singleton
+            self._users_service = UsersService()
+
+        return self._users_service
 
     def create_transcribe_session(self) -> TranscribePort:
         """

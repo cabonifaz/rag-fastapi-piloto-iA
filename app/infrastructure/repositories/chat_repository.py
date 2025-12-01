@@ -28,10 +28,6 @@ class ChatRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    # =============================================
-    # Chat Operations
-    # =============================================
-
     def create_chat(
         self,
         id_usuario: int,
