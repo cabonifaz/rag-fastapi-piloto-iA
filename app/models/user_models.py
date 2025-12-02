@@ -29,6 +29,7 @@ class LoginRequest(BaseModel):
     """Request model for login endpoint"""
     usuario: str
     clave_acceso: str
+    ref: str
 
 
 

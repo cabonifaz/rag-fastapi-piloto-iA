@@ -266,3 +266,19 @@ async def update_company_status_endpoint(
             status_code=500,
             detail={"result": error_response.model_dump()}
         )
+
+
+@router.get("/get_companies_login")
+async def get_companies_login_endpoint(
+    company_service: CompanyService = Depends(get_company_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Get companies with login credentials endpoint.
+
+    Fetches all companies with their secret keys using SP_EMPRESAS_LST_LOGIN.
+
+    Returns:
+        List of dictionaries with RAZON_SOCIAL and SECRET_KEY
+    """
+    return await company_service.get_companies_login(db=db)
