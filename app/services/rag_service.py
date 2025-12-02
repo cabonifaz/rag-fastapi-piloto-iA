@@ -340,6 +340,8 @@ class RagService:
                     user_query=cleaned_message,
                     conversation_history=conversation_for_recontextualization
                 )
+
+                print(recontextualized_result)
                 logger.info(f"Recontextualization result: {recontextualized_result}")
             except Exception as e:
                 logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
