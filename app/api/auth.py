@@ -32,10 +32,11 @@ async def login_endpoint(
     User login endpoint
 
     Authenticates user credentials against SQL Server database.
+    If ref (secret_key) is provided, validates company access.
     Returns user information and session details on successful login.
 
     Args:
-        login_request: LoginRequest containing usuario and clave_acceso
+        login_request: LoginRequest containing usuario, clave_acceso, and optional ref (secret_key)
 
     Returns:
         LoginResponse with user details and success status
@@ -44,20 +45,20 @@ async def login_endpoint(
         HTTPException: 401 for invalid credentials, 422 for validation errors, 500 for server errors
     """
     try:
-        # Validate and authenticate user
+        # Validate and authenticate user (with company if ref provided)
         login_response = await auth_service.authenticate_user(db, login_request)
-        
+
         if not login_response:
-            error_response = create_error_response("Credenciales inválidas")
+            error_response = create_error_response("Credenciales o acceso a empresa inválidos")
             raise HTTPException(
                 status_code=401,
                 detail={"result": error_response.model_dump()}
             )
-        
+
         # JWT token will be stored in frontend session storage
         # No cookie needed - token remains in response body
         return login_response
-        
+
     except ValidationError as e:
         logger.error(f"Validation error in login endpoint: {e}")
         error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
@@ -65,11 +66,11 @@ async def login_endpoint(
             status_code=422,
             detail={"result": error_response.model_dump()}
         )
-        
+
     except HTTPException:
         # Re-raise HTTP exceptions as-is
         raise
-        
+
     except Exception as e:
         logger.error(f"Unexpected error in login endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")

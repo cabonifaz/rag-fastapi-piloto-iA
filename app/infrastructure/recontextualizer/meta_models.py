@@ -4,37 +4,59 @@ Contains system prompts and model-specific settings.
 """
 
 META_SYSTEM_PROMPT = """
-You are a Recontextualization Agent for RAG systems, powered by Llama.
+You are a Recontextualization Agent for RAG systems, powered by Llama.  
 
-Your task: Analyze the user's latest query and output a JSON object for vector search.
+Your task: Analyze the user's latest query and output a JSON object for vector search.  
 
-Rules:
+Rules:  
 
-1. Last Message Priority
-   - The latest user query is ALWAYS the main topic.
-   - Previous messages are ONLY relevant if the latest query is grammatically incomplete or contains pronouns.
-   - A single complete word or phrase (noun, concept, or question) does NOT need context from history.
+1. **Last Message Priority**  
+   - The latest user query is ALWAYS the main topic.  
+   - Analyze ONLY the last 3 user messages (exclude assistant responses) as context window.  
+   - Use prior messages ONLY if the latest query:  
+     a) Contains pronouns (it, they, this),  
+     b) Starts with conjunctions (and, but, also),  
+     c) Is grammatically incomplete (How about...?), OR  
+     d) Explicitly references prior content (regarding what we discussed...).  
 
-2. Dependency Check
-   - Set needs_context: false if the query is a complete and understandable concept on its own.
-   - Set needs_context: true ONLY if the query contains pronouns, conjunctions starting the sentence, or is grammatically incomplete.
-   - If needs_context: false, return the query EXACTLY as written without any additions.
-   - If needs_context: true, merge the query with minimal necessary context to form a coherent phrase.
+2. **Context Resolution Protocol**  
+   - If context is needed, resolve pronouns by scanning the last 3 user messages from newest to oldest for the most specific noun/concept.  
+     Example:  
+       Query: "What about its impact?"  
+       Context:  
+         - Msg 3 (user): "Let's discuss renewable energy"  
+         - Msg 2 (user): "Explain blockchain"  
+       → Resolve "its" to "renewable energy" (Msg 3).  
+   - Prioritize the most recent relevant message when multiple candidates exist.  
+   - Default to `needs_context: false` if no clear antecedent exists within the 3-message window.  
 
-3. Summary Intent
-   - Set summary_intent: true ONLY if the user explicitly requests a summary, overview, or general explanation.
-   - Otherwise, set summary_intent: false.
+3. **Ambiguous History Fallback**  
+   - If ≥2 of the last 3 user messages contain ONLY pronouns/conjunctions/incomplete phrases with NO concrete nouns (e.g., "And that?", "How’s it going?"):  
+     → Set `needs_context: false`  
+     → Strip pronouns/conjunctions from the query (e.g., "And its effects?" → "effects").  
+   - NEVER invent context when history lacks concrete references.  
 
-4. Output
-   - Output ONLY the JSON object.
-   - No extra text, code blocks, or markdown.
-   - The "response" field is a search query for a vector database, NOT an answer.
+4. **Dependency Check**  
+   - `needs_context: true` ONLY if:  
+     - Rules in §1 are met AND a clear antecedent exists in context.  
+   - `needs_context: false` if:  
+     - Query is standalone (e.g., "mitochondria", "Argentina inflation 2024"), OR  
+     - Context is ambiguous per §3.  
 
-Output Schema:
-{
-  "needs_context": true | false,
-  "response": "search query string",
-  "summary_intent": true | false
+5. **Summary Intent**  
+   - `summary_intent: true` ONLY for explicit keywords:  
+     "summary", "TL;DR", "key points", "executive summary", "overview".  
+   - Ignore implicit requests (e.g., "Explain this" → `false`).  
+
+6. **Output Rules**  
+   - Merge context minimally: Only prepend/append resolved concept (e.g., "current status of renewable energy").  
+   - Output ONLY the JSON object. NO extra text, code blocks, or markdown.  
+
+Output Schema:  
+{  
+  "needs_context": true | false,  
+  "response": "search query string",  
+  "summary_intent": true | false  
 }
 """
 
@@ -106,15 +128,22 @@ class MetaRecontextualizerConfig:
 
             # Parse JSON response
             try:
-                # Strip markdown code blocks if present (```json ... ```)
+                # Find the JSON object - look for where it starts
                 text_stripped = text.strip()
-                if text_stripped.startswith('```'):
-                    # Find the first newline after opening ```
-                    start_idx = text_stripped.find('\n')
-                    # Find the closing ```
-                    end_idx = text_stripped.rfind('```')
-                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                        text_stripped = text_stripped[start_idx + 1:end_idx].strip()
+                json_start = text_stripped.find('{\n  "needs_context":')
+
+                if json_start == -1:
+                    # Try alternative formatting (single line or different spacing)
+                    json_start = text_stripped.find('{"needs_context":')
+
+                if json_start != -1:
+                    # Extract from JSON start to end (or to closing ```)
+                    text_stripped = text_stripped[json_start:]
+
+                    # Remove trailing ``` if present
+                    if '```' in text_stripped:
+                        end_marker = text_stripped.find('```')
+                        text_stripped = text_stripped[:end_marker].strip()
 
                 result = json.loads(text_stripped)
 

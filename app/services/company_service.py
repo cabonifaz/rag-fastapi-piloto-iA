@@ -156,3 +156,32 @@ class CompanyService:
         except Exception as e:
             logger.error(f"Error in update_company_status service: {e}")
             raise
+
+    async def get_companies_login(self, db: Session) -> List[Dict[str, Any]]:
+        """
+        Get companies with their secret keys using stored procedure SP_EMPRESAS_LST_LOGIN.
+
+        Args:
+            db: Database session
+
+        Returns:
+            List of dictionaries containing RAZON_SOCIAL and SECRET_KEY
+            Empty list if fetch failed
+        """
+        try:
+            # Create repository for this request
+            repository = CompanyRepository(db)
+
+            # Get companies login data from repository
+            companies = repository.get_companies_login()
+
+            if companies:
+                logger.info(f"Retrieved {len(companies)} companies with login credentials")
+            else:
+                logger.warning("No companies found with login credentials")
+
+            return companies
+
+        except Exception as e:
+            logger.error(f"Error in get_companies_login service: {e}")
+            return []
