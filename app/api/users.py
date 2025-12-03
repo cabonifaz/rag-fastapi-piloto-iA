@@ -155,12 +155,11 @@ async def create_usuario_endpoint(
             password=request.password,
             nombres=request.nombres,
             apellidos=request.apellidos,
+            telefono=request.telefono or "",
             nuevo_rol=request.nuevo_rol,
             id_empresa=request.id_empresa,
             areas_string=request.areas_string
         )
-
-        print(f"[CREATE_USUARIO] SP Response: {results}")
 
         # SP may not return results for now, so we just treat empty results as success
         # Check if the stored procedure returned an error message
@@ -252,7 +251,8 @@ async def update_usuario_endpoint(
             id_usuario=request.id_usuario,
             usuario=request.usuario,
             nombres=request.nombres,
-            apellidos=request.apellidos
+            apellidos=request.apellidos,
+            telefono=request.telefono
         )
 
         # Check if the stored procedure returned an error message

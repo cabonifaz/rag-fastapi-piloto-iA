@@ -76,6 +76,7 @@ class UsersService:
         password: str,
         nombres: str,
         apellidos: str,
+        telefono: str,
         nuevo_rol: int,
         id_empresa: int,
         areas_string: str
@@ -90,6 +91,7 @@ class UsersService:
             password: Password (max 100 chars)
             nombres: First names (max 100 chars)
             apellidos: Last names (max 100 chars)
+            telefono: Phone number (max 15 chars)
             nuevo_rol: Role type ID (1=Super Admin, 2=Admin, 3=User)
             id_empresa: Company ID
             areas_string: Comma-separated area IDs (max 100 chars)
@@ -142,6 +144,7 @@ class UsersService:
             password = password.strip()[:100]
             nombres = nombres.strip()[:100]
             apellidos = apellidos.strip()[:100]
+            telefono = telefono.strip()[:15] if telefono else ""
             areas_string = areas_string.strip()[:100]
 
             # Use repository to create user with SP_CREATE_USUARIO
@@ -151,6 +154,7 @@ class UsersService:
                 password=password,
                 nombres=nombres,
                 apellidos=apellidos,
+                telefono=telefono,
                 nuevo_rol=nuevo_rol,
                 id_empresa=id_empresa,
                 areas_string=areas_string
@@ -174,7 +178,8 @@ class UsersService:
         id_usuario: int,
         usuario: str,
         nombres: str,
-        apellidos: str
+        apellidos: str,
+        telefono: str = None
     ) -> List[Dict[str, Any]]:
         """
         Update user data using stored procedure.
@@ -186,6 +191,7 @@ class UsersService:
             usuario: New username (max 200 chars)
             nombres: New first names (max 200 chars)
             apellidos: New last names (max 200 chars)
+            telefono: Phone number (max 15 chars), optional (default None)
 
         Returns:
             List of dictionaries containing:
@@ -222,6 +228,7 @@ class UsersService:
             usuario = usuario.strip()[:200]
             nombres = nombres.strip()[:200]
             apellidos = apellidos.strip()[:200]
+            telefono = telefono.strip()[:15] if telefono else None
 
             # Use repository to update user with SP_UPDATE_DATOS_USUARIO
             results = repository.update_usuario(
@@ -229,7 +236,8 @@ class UsersService:
                 id_usuario=id_usuario,
                 usuario=usuario,
                 nombres=nombres,
-                apellidos=apellidos
+                apellidos=apellidos,
+                telefono=telefono
             )
 
             if results:
