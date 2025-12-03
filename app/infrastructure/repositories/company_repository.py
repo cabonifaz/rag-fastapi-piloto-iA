@@ -228,3 +228,43 @@ class CompanyRepository:
             logger.error(f"Error updating company status with SP: {e}")
             self.db.rollback()
             return []
+
+    def get_companies_login(self) -> List[Dict[str, Any]]:
+        """
+        Get companies with their secret keys using stored procedure SP_EMPRESAS_LST_LOGIN
+
+        Returns:
+            List of dictionaries with RAZON_SOCIAL and SECRET_KEY
+            Empty list if fetch failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute("EXEC SP_EMPRESAS_LST_LOGIN")
+
+                companies = []
+
+                # Get the company data
+                if cursor.description:
+                    columns = [desc[0] for desc in cursor.description]
+                    rows = cursor.fetchall()
+
+                    # Convert rows to list of dictionaries
+                    for row in rows:
+                        company_dict = dict(zip(columns, row))
+                        companies.append(company_dict)
+
+                cursor.close()
+                return companies
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_companies_login: {cursor_error}")
+                cursor.close()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error fetching companies login with SP: {e}")
+            return []

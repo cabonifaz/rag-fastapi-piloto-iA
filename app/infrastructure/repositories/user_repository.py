@@ -24,53 +24,60 @@ class UserRepository:
     # Stored Procedure Calls - Raw DB Operations
     # =============================================
 
-    def verify_user_password_sp(self, usuario: str, password: str) -> int:
+    def verify_user_acceso_sp(self, usuario: str, password: str, secret_key: str) -> Tuple[int, Optional[int]]:
         """
-        Execute SP_VERIFY_USER_PASS and return status
+        Execute SP_VERIFY_USUARIO_ACCESO and return status with company ID
 
         Args:
             usuario: Username
             password: Plain text password
+            secret_key: Company secret key
 
         Returns:
-            Status code from SP (1 = valid, 0 = invalid)
+            Tuple of (status, id_empresa) where status is 1 on success or 0 on failure
         """
         try:
             query = text("""
-                EXEC SP_VERIFY_USER_PASS
-                @Username = :username,
-                @Password = :password
+                EXEC SP_VERIFY_USUARIO_ACCESO
+                @USERNAME = :username,
+                @PASSWORD = :password,
+                @SECRET_KEY = :secret_key
             """)
 
             result = self.db.execute(query, {
                 'username': usuario,
-                'password': password
+                'password': password,
+                'secret_key': secret_key
             })
 
             status_data = result.fetchone()
             result.close()
 
             if not status_data:
-                return 0
+                return 0, None
 
             status_dict = dict(status_data._mapping) if hasattr(status_data, '_mapping') else dict(zip(result.keys(), status_data))
-            return status_dict.get('Status', 0)
+            status = status_dict.get('STATUS', 0)
+            id_empresa = status_dict.get('ID_EMPRESA')
+
+            return status, id_empresa
 
         except Exception as e:
-            logger.error(f"Error executing SP_VERIFY_USER_PASS: {e}")
+            logger.error(f"Error executing SP_VERIFY_USUARIO_ACCESO: {e}")
             raise
 
-    def get_user_data_sp(self, usuario: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def get_user_login_data_sp(self, usuario: str, id_empresa: int) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Execute SP_USUARIO_LOGIN and return all result sets
+        Execute SP_USUARIO_LOGIN_DATA and return all result sets
 
         The SP returns multiple result sets:
-        - Result set 3: User data
-        - Result set 4: Roles data
-        - Result set 5: Company areas data
+        - Result set 2: User data
+        - Result set 3: Roles data
+        - Result set 4: Company areas data
 
         Args:
-            usuario: Username to retrieve data for
+            usuario: Username
+            id_empresa: Company ID
 
         Returns:
             Tuple of (user_data dict, roles_list, company_areas_list)
@@ -81,7 +88,7 @@ class UserRepository:
             cursor = raw_conn.cursor()
 
             try:
-                cursor.execute("EXEC SP_USUARIO_LOGIN @USUARIO = ?", usuario)
+                cursor.execute("EXEC SP_USUARIO_LOGIN_DATA @USUARIO = ?, @ID_EMPRESA = ?", (usuario, id_empresa))
 
                 user_data = {}
                 roles_data = []
@@ -129,7 +136,7 @@ class UserRepository:
                 raise
 
         except Exception as e:
-            logger.error(f"Error executing SP_USUARIO_LOGIN: {e}")
+            logger.error(f"Error executing SP_USUARIO_LOGIN_DATA: {e}")
             raise
 
     def get_user_company_areas_sp(self, user_id: int, role_id: int) -> List[Dict[str, Any]]:

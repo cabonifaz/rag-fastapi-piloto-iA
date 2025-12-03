@@ -3,7 +3,7 @@ from app.models.user_models import LoginRequest, LoginResponse, UserInfo
 from app.infrastructure.repositories.user_repository import UserRepository
 from app.utils.jwt_auth import JWTAuth
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -15,23 +15,23 @@ class AuthService:
         """Initialize stateless AuthService - no db parameter."""
         pass
 
-    async def verify_user_password(self, db: Session, usuario: str, password: str) -> bool:
-        """Verify user password using SP_VERIFY_USER_PASS"""
+    async def verify_user_acceso(self, db: Session, usuario: str, password: str, secret_key: str) -> Tuple[bool, Optional[int]]:
+        """Verify user access with company secret key using SP_VERIFY_USUARIO_ACCESO"""
         try:
             user_repo = UserRepository(db)
-            auth_status = user_repo.verify_user_password_sp(usuario, password)
-            return auth_status == 1
+            status, id_empresa = user_repo.verify_user_acceso_sp(usuario, password, secret_key)
+            return status == 1, id_empresa
 
         except Exception as e:
-            logger.error(f"Error in verify_user_password: {e}")
-            return False
-    
-    async def get_user_data(self, db: Session, usuario: str) -> Optional[dict]:
-        """Get user data using SP_USUARIO_LOGIN"""
+            logger.error(f"Error in verify_user_acceso: {e}")
+            return False, None
+
+    async def get_user_login_data(self, db: Session, usuario: str, id_empresa: int) -> Optional[dict]:
+        """Get user login data for specific company using SP_USUARIO_LOGIN_DATA"""
         try:
             user_repo = UserRepository(db)
             # Get data from repository (only raw SP call)
-            user_data, roles_data, company_areas_data = user_repo.get_user_data_sp(usuario)
+            user_data, roles_data, company_areas_data = user_repo.get_user_login_data_sp(usuario, id_empresa)
 
             # Combine user data with roles and company areas (business logic in service)
             complete_user_data = {
@@ -43,7 +43,7 @@ class AuthService:
             return complete_user_data
 
         except Exception as e:
-            logger.error(f"Error in get_user_data: {e}")
+            logger.error(f"Error in get_user_login_data: {e}")
             return None
     
     async def authenticate_user(self, db: Session, login_request: LoginRequest) -> Optional[LoginResponse]:
@@ -52,21 +52,21 @@ class AuthService:
 
         Args:
             db: Database session
-            login_request: LoginRequest containing usuario and clave_acceso (plain text)
+            login_request: LoginRequest containing usuario, clave_acceso, and ref (secret_key)
 
         Returns:
             LoginResponse with user details if successful, None if failed
         """
         try:
-            # Step 1: Verify password
-            is_valid = await self.verify_user_password(db, login_request.usuario, login_request.clave_acceso)
+            # Step 1: Verify user access with company secret key
+            is_valid, id_empresa = await self.verify_user_acceso(db, login_request.usuario, login_request.clave_acceso, login_request.ref)
 
             if not is_valid:
-                logger.warning(f"Password verification FAILED for user: {login_request.usuario}")
+                logger.warning(f"Access verification FAILED for user: {login_request.usuario}")
                 return None
 
-            # Step 2: Get user data
-            user_data = await self.get_user_data(db, login_request.usuario)
+            # Step 2: Get user data for specific company
+            user_data = await self.get_user_login_data(db, login_request.usuario, id_empresa)
 
             if not user_data:
                 logger.error(f"Failed to get user data for: {login_request.usuario}")
