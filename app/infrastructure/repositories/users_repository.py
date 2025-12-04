@@ -64,6 +64,9 @@ class UsersRepository:
                                     for field in numeric_fields:
                                         if field in result_dict and result_dict[field] is not None:
                                             result_dict[field] = int(result_dict[field])
+                                    # Ensure TELEFONO field is always present (even if NULL)
+                                    if 'TELEFONO' not in result_dict:
+                                        result_dict['TELEFONO'] = None
                                     results.append(result_dict)
 
                     except Exception as fetch_error:
@@ -103,6 +106,7 @@ class UsersRepository:
         password: str,
         nombres: str,
         apellidos: str,
+        telefono: str,
         nuevo_rol: int,
         id_empresa: int,
         areas_string: str
@@ -116,6 +120,7 @@ class UsersRepository:
             password: Password (max 100 chars)
             nombres: First names (max 100 chars)
             apellidos: Last names (max 100 chars)
+            telefono: Phone number (max 15 chars)
             nuevo_rol: Role type ID
             id_empresa: Company ID
             areas_string: Comma-separated area IDs (max 100 chars)
@@ -131,12 +136,13 @@ class UsersRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_CREATE_USUARIO @ID_USUARIO = ?, @NUEVO_USUARIO = ?, @PASSWORD = ?, @NOMBRES = ?, @APELLIDOS = ?, @NUEVO_ROL = ?, @ID_EMPRESA = ?, @AREAS_STRING = ?",
+                    "EXEC SP_CREATE_USUARIO @ID_USUARIO = ?, @NUEVO_USUARIO = ?, @PASSWORD = ?, @NOMBRES = ?, @APELLIDOS = ?, @TELEFONO = ?, @NUEVO_ROL = ?, @ID_EMPRESA = ?, @AREAS_STRING = ?",
                     id_usuario,
                     nuevo_usuario,
                     password,
                     nombres,
                     apellidos,
+                    telefono,
                     nuevo_rol,
                     id_empresa,
                     areas_string
@@ -200,7 +206,8 @@ class UsersRepository:
         id_usuario: int,
         usuario: str,
         nombres: str,
-        apellidos: str
+        apellidos: str,
+        telefono: str = None
     ) -> List[Dict[str, Any]]:
         """
         Update user data using stored procedure SP_UPDATE_DATOS_USUARIO
@@ -211,6 +218,7 @@ class UsersRepository:
             usuario: New username (max 200 chars)
             nombres: New first names (max 200 chars)
             apellidos: New last names (max 200 chars)
+            telefono: Phone number (max 15 chars), optional (default None)
 
         Returns:
             List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
@@ -223,12 +231,13 @@ class UsersRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_UPDATE_DATOS_USUARIO @ID_ADMIN = ?, @ID_USUARIO = ?, @USUARIO = ?, @NOMBRES = ?, @APELLIDOS = ?",
+                    "EXEC SP_UPDATE_DATOS_USUARIO @ID_ADMIN = ?, @ID_USUARIO = ?, @USUARIO = ?, @NOMBRES = ?, @APELLIDOS = ?, @TELEFONO = ?",
                     id_admin,
                     id_usuario,
                     usuario,
                     nombres,
-                    apellidos
+                    apellidos,
+                    telefono
                 )
 
                 results = []
@@ -535,5 +544,81 @@ class UsersRepository:
 
         except Exception as e:
             logger.error(f"Error updating usuario access with SP_UPDATE_USUARIO_ACCESS: {e}")
+            self.db.rollback()
+            return []
+
+#FUNCIONES DE N8N
+    def get_usuario_by_telefono(self, id_agente: int, telefono: str) -> List[Dict[str, Any]]:
+        """
+        Get an user by telefono using stored procedure SP_GET_USUARIO_BY_TELEFONO
+
+        Args:
+            id_agente: ID agent
+            telefono: Cell Phone number
+
+        Returns:
+            List of dictionaries containing user information
+            Empty list if query failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_GET_USUARIO_BY_TELEFONO @ID_AGENTE = ?, @TELEFONO = ?",
+                    id_agente,
+                    telefono
+                )
+
+                results = []
+
+                # Iterate through all result sets (messages + user data on success)
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            if rows:
+                                # Capture all result sets (messages and user data)
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for numeric fields
+                                    numeric_fields = ['ID_TIPO_MENSAJE', 'ID_USUARIO']
+                                    for field in numeric_fields:
+                                        if field in result_dict and result_dict[field] is not None:
+                                            result_dict[field] = int(result_dict[field])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_usuario_by_telefono: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error getting usuario by telefono with SP_GET_USUARIO_BY_TELEFONO: {e}")
             self.db.rollback()
             return []
