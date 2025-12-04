@@ -583,7 +583,7 @@ class UsersRepository:
                             rows = cursor.fetchall()
 
                             if rows:
-                                # Filter result sets: exclude agent info, keep only message and ID_USUARIO
+                                # Filter result sets: exclude agent info, keep only message and user data
                                 for row in rows:
                                     result_dict = dict(zip(columns, row))
                                     # Convert Decimal to int for numeric fields
@@ -592,11 +592,11 @@ class UsersRepository:
                                         if field in result_dict and result_dict[field] is not None:
                                             result_dict[field] = int(result_dict[field])
 
-                                    # Only include message results and user ID result (exclude agent info)
+                                    # Only include message results and user data result (exclude agent info)
                                     is_message_result = 'ID_TIPO_MENSAJE' in result_dict and 'MENSAJE' in result_dict
-                                    is_user_id_result = list(result_dict.keys()) == ['ID_USUARIO']
+                                    is_user_data_result = 'ID_USUARIO' in result_dict and 'USUARIO' in result_dict
 
-                                    if is_message_result or is_user_id_result:
+                                    if is_message_result or is_user_data_result:
                                         results.append(result_dict)
 
                     except Exception as fetch_error:

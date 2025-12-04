@@ -598,7 +598,7 @@ async def get_usuario_by_telefono_endpoint(
     Returns:
         List with:
         - On failure (1 result set): ID_TIPO_MENSAJE, MENSAJE
-        - On success (2 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO
+        - On success (2 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO, USUARIO
 
     Raises:
         HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors

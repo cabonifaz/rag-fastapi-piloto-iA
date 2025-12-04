@@ -61,6 +61,7 @@ async def chat_streaming_endpoint(
         async def generate_stream():
             try:
                 answer = ""
+                print(request)
                 async for chunk_data in rag_service.process_rag_query_stream(
                     user_id=request.user_id,
                     user=request.user,
