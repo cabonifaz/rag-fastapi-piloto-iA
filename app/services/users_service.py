@@ -460,7 +460,7 @@ class UsersService:
         Returns:
             List of dictionaries containing:
             - On failure (1 result set): ID_TIPO_MENSAJE, MENSAJE
-            - On success (2 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO
+            - On success (2 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO, USUARIO
             Empty list if query failed
         """
         try:
