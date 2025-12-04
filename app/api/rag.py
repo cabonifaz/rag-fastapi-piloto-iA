@@ -60,6 +60,7 @@ async def chat_streaming_endpoint(
 
         async def generate_stream():
             try:
+                print(f"[STREAMING START] User: {request.user}, Message: {request.message}")
                 answer = ""
                 async for chunk_data in rag_service.process_rag_query_stream(
                     user_id=request.user_id,
@@ -82,10 +83,14 @@ async def chat_streaming_endpoint(
                     if chunk_data["type"] == "chunk":
                         # Concatenate content
                         answer += chunk_data["content"]
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
+                        output = f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
+                        print(f"[STREAMING CHUNK] {output}")
+                        yield output
                     else:
                         # Send metadata and complete as-is
-                        yield f"data: {json.dumps(chunk_data)}\n\n"
+                        output = f"data: {json.dumps(chunk_data)}\n\n"
+                        print(f"[STREAMING {chunk_data['type'].upper()}] {output}")
+                        yield output
 
                     # Force flush by yielding control back to event loop
                     await asyncio.sleep(0)
