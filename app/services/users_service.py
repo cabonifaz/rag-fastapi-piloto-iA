@@ -228,7 +228,7 @@ class UsersService:
             usuario = usuario.strip()[:200]
             nombres = nombres.strip()[:200]
             apellidos = apellidos.strip()[:200]
-            telefono = telefono.strip()[:15] if telefono else None
+            telefono = telefono.strip()[:15]
 
             # Use repository to update user with SP_UPDATE_DATOS_USUARIO
             results = repository.update_usuario(
@@ -441,4 +441,62 @@ class UsersService:
 
         except Exception as e:
             logger.error(f"Error in update_usuario_access service: {e}")
+            raise
+
+    async def get_usuario_by_telefono(
+        self,
+        db: Session,
+        id_agente: int,
+        telefono: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get user by phone number using stored procedure (N8N integration).
+
+        Args:
+            db: Database session
+            id_agente: Agent ID
+            telefono: Phone number (max 15 chars)
+
+        Returns:
+            List of dictionaries containing:
+            - On failure (2 result sets): ID_TIPO_MENSAJE, MENSAJE
+            - On success (3 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO and user data
+            Empty list if query failed
+        """
+        try:
+            # Create repository for this request
+            repository = UsersRepository(db)
+
+            # Validate input
+            if not isinstance(id_agente, int) or id_agente <= 0:
+                logger.error(f"Invalid id_agente: {id_agente}")
+                return []
+
+            if not telefono or len(telefono.strip()) == 0:
+                logger.error("Phone number cannot be empty")
+                return []
+
+            # Trim input to match database constraints
+            telefono = telefono.strip()[:15]
+
+            # Use repository to get user by phone with SP_GET_USUARIO_BY_TELEFONO
+            results = repository.get_usuario_by_telefono(
+                id_agente=id_agente,
+                telefono=telefono
+            )
+
+            if results:
+                # Check if user was found (3 result sets means success)
+                has_user_data = any('ID_USUARIO' in result for result in results)
+                if has_user_data:
+                    logger.info(f"User found by phone: Telefono={telefono}, Results count={len(results)}")
+                else:
+                    logger.info(f"User not found by phone: Telefono={telefono}, Results count={len(results)}")
+            else:
+                logger.warning(f"Get user by phone returned no results: Telefono={telefono}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in get_usuario_by_telefono service: {e}")
             raise
