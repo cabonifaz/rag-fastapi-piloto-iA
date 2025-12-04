@@ -459,8 +459,8 @@ class UsersService:
 
         Returns:
             List of dictionaries containing:
-            - On failure (2 result sets): ID_TIPO_MENSAJE, MENSAJE
-            - On success (3 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO and user data
+            - On failure (1 result set): ID_TIPO_MENSAJE, MENSAJE
+            - On success (2 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO
             Empty list if query failed
         """
         try:
@@ -486,7 +486,7 @@ class UsersService:
             )
 
             if results:
-                # Check if user was found (3 result sets means success)
+                # Check if user was found (2 result sets means success)
                 has_user_data = any('ID_USUARIO' in result for result in results)
                 if has_user_data:
                     logger.info(f"User found by phone: Telefono={telefono}, Results count={len(results)}")

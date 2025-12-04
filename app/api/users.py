@@ -596,10 +596,9 @@ async def get_usuario_by_telefono_endpoint(
         }
 
     Returns:
-        Dict with:
-        - On failure (2 result sets): results with ID_TIPO_MENSAJE, MENSAJE
-        - On success (3 result sets): results with ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO and user data
-        - result: Success/error response
+        List with:
+        - On failure (1 result set): ID_TIPO_MENSAJE, MENSAJE
+        - On success (2 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO
 
     Raises:
         HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
@@ -648,19 +647,8 @@ async def get_usuario_by_telefono_endpoint(
                 detail={"result": error_response.model_dump()}
             )
 
-        # Check if user was found (3 result sets with ID_USUARIO means success)
-        has_user_data = any('ID_USUARIO' in result for result in results)
-
-        if has_user_data:
-            success_response = create_success_response("Usuario encontrado exitosamente")
-        else:
-            # User not found, but stored procedure executed successfully
-            success_response = create_success_response("Usuario no encontrado")
-
-        return {
-            "results": results,
-            "result": success_response.model_dump()
-        }
+        # Return only the results from the stored procedure (no extra fields)
+        return results
 
     except HTTPException:
         # Re-raise HTTP exceptions as-is
