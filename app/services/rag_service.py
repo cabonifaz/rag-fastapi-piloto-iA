@@ -46,7 +46,8 @@ class RagService:
         message_service: MessageService,
         ia_config_service: IaConfigService,
         recontextualizer: RecontextualizerPort,
-        orchestrator: QueryAnalysisPort = None
+        orchestrator: QueryAnalysisPort = None,
+        llm_nonstreaming_provider = None
     ):
         """
         Initialize RagService with all dependencies injected.
@@ -54,11 +55,12 @@ class RagService:
         Args:
             embeddings_provider: Port for generating embeddings
             vectorstore: Port for vector database operations
-            llm_provider: Port for LLM operations
+            llm_provider: Port for LLM operations (streaming)
             message_service: Service for managing chat messages in DynamoDB
             ia_config_service: Service for loading IA area configuration
             recontextualizer: Service for query recontextualization
             orchestrator: Optional port for query analysis and task decomposition
+            llm_nonstreaming_provider: Optional port for non-streaming LLM operations (for n8n)
         """
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
@@ -67,204 +69,205 @@ class RagService:
         self.ia_config_service = ia_config_service
         self.recontextualizer = recontextualizer
         self.orchestrator = orchestrator
+        self.llm_nonstreaming_provider = llm_nonstreaming_provider
 
-    async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
-        """
-        Analyze user query using the agent orchestrator model to determine workflow requirements.
-        Enhanced version that accepts all process_rag_query_stream parameters for complete context.
-        """
-        try:
-            # Validate inputs
-            if not message or not message.strip():
-                raise ValueError("Message cannot be empty")
-            if not user_id:
-                raise ValueError("User ID is required")
-            if not company or not company.strip():
-                raise ValueError("Company ID is required and cannot be empty")
-            if not area or not area.strip():
-                raise ValueError("Area is required and cannot be empty")
-            if id_ia_area is None:
-                raise ValueError("ID IA Area is required and cannot be empty")
-            if not external_token or not external_token.strip():
-                raise ValueError("External token is required and cannot be empty")
-
-            # Use injected orchestrator
-            if not self.orchestrator:
-                raise ValueError("Orchestrator not configured for this service instance")
-
-            orchestrator = self.orchestrator
-
-            # Load IA area role behavior configuration
-            role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
-
-            # Clean user query
-            user_query = clean_user_query(message)
-
-            # Define available APIs (this could be loaded from config)
-            available_apis = [
-                {
-                    "method": "GET",
-                    "endpoint": "/bdt/talent/list",
-                    "description": "Table: talents, Columns: idTalento, nombres, apellidoPaterno, apellidoMaterno, imagen, puesto, pais, ciudad, idModalidadFacturacion, montoInicialPlanilla, montoFinalPlanilla, montoInicialRxH, montoFinalRxH, moneda, estrellas, esFavorito, idMonedaPlan, idMonedaRxh",
-                    "params": {
-                        "nPag": { "type": "integer", "required": False },
-                        "search": { "type": "string", "required": False },
-                        "techAbilities": { "type": "string", "required": False },
-                        "idEnglishLevel": { "type": "integer", "required": False },
-                        "idTalentCollection": { "type": "integer", "required": False }
-                    }
-                }
-            ]
-
-            # Call orchestrator to analyze the query
-            analysis = await orchestrator.analyze_query(user_query, available_apis)
-
-            # Generate tasks from analysis
-            tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
-
-            # Execute tasks sequentially
-            query_embedding = None
-            context_text = ""
-            execution_failed = False
-
-            for task in tasks:
-                if execution_failed:
-                    break
-                if task.get("action") == "embedding":
-                    try:
-                        query_text = task.get("input", user_query)
-                        query_embedding = await self.embeddings_provider.embed(query_text)
-                    except Exception as e:
-                        execution_failed = True
-                        break  # Stop execution if embedding fails
-
-                elif task.get("action") == "retrieval":
-                    try:
-                        if query_embedding is None:
-                            # Generate embedding if not already done
-                            query_embedding = await self.embeddings_provider.embed(user_query)
-
-                        # Use semantic_query from analysis if available, otherwise use user_query
-                        semantic_query = analysis.get("semantic_query", "").strip() if analysis.get("semantic_query") else user_query
-
-                        # Perform hybrid search using vectorstore directly
-                        search_results = await self.vectorstore.search_in_collection_hybrid(
-                            company_id=company_id,
-                            area_id=area_id,
-                            query_text=semantic_query,
-                            query_vector=query_embedding,
-                            top_k=top_k,
-                            similarity_threshold=similarity_threshold,
-                            alpha=alpha
-                        )
-
-                        # Build context from retrieved documents using utility function
-                        context_text = build_context_from_search_results(search_results)
-                    except Exception as e:
-                        execution_failed = True
-                        break  # Stop execution if retrieval fails
-
-                elif task.get("action") == "api_call":
-                    try:
-                        method = task.get("method", "GET").upper()
-                        if method == "GET":
-                            api_result = await httpx_get(task.get("endpoint", ""), external_token, task.get("params", {}))
-                        else:
-                            api_result = await httpx_post(task.get("endpoint", ""), external_token, task.get("params", {}))
-
-                        # Add API result to context only if there's actual data
-                        if api_result.get("success") and api_result.get("data"):
-                            api_data = json.dumps(api_result['data'])
-                            if api_data and api_data.strip() not in ["{}", "[]", "null"]:
-                                # Format API call result with metadata
-                                api_context_parts = []
-                                api_context_parts.append(f"API Call:")
-                                api_context_parts.append(f"Endpoint: {task.get('endpoint', 'N/A')}")
-                                api_context_parts.append(f"Params: {json.dumps(task.get('params', {}))}")
-                                api_context_parts.append(f"Response:\n{api_data}")
-
-                                formatted_api_context = "\n".join(api_context_parts)
-
-                                # Add separator if context already has content
-                                if context_text:
-                                    context_text += "\n\n"
-                                context_text += formatted_api_context
-
-                    except Exception as e:
-                        execution_failed = True
-                        break  # Stop execution if API call fails
-
-                elif task.get("action") == "llm_response":
-                    try:
-                        # Check if we have any context at all
-                        if not context_text or context_text.strip() == "":
-                            # No context available - return predefined message
-                            yield {
-                                "type": "chunk",
-                                "content": NO_CONTEXT_MESSAGE
-                            }
-                            break
-
-                        # Prepare the query, checking for format requirements
-                        query_to_use = user_query
-                        task_format = task.get("format")
-                        if task_format:
-                            if task_format.lower() == "list":
-                                query_to_use = f"{user_query}. IMPORTANT: Format the list items as a compact markdown list in a single line per item, including only the key and necessary information for clear understanding. If there is additional text content after the list, continue with it as plain text below the list."
-                            elif task_format.lower() == "table":
-                                query_to_use = f"{user_query}. IMPORTANT: Provide your response in the same language as the question. If explanation or summary is needed, include it briefly before the table. Then present the tabular data as a well-structured markdown table, showing ALL rows and ALL columns without adding empty or duplicate rows. Convert headers to natural language in the same language as the question, and ensure the table is properly aligned and easy to read. If there is additional text content after the table, continue with it as plain text below the table."
-
-                        # Build prompt with context (we know context_text exists here)
-                        model_config = self.llm_provider.get_model_config()
-                        prompt = model_config.build_rag_prompt(query_to_use, context_text)
-
-                        # Use provided parameters or fall back to environment defaults
-                        llm_temperature = temperature if temperature is not None else settings.llm_temperature
-                        llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
-
-                        # Track if assistant metadata has been sent
-                        agent_timestamp_sent = False
-
-                        # Stream response using utility function for consistent stop reason handling
-                        async for chunk in generate_text_stream_with_validation(
-                            llm_provider=self.llm_provider,
-                            prompt=prompt,
-                            max_tokens=llm_max_tokens,
-                            temperature=llm_temperature,
-                            role_behavior=role_behavior
-                        ):
-                            # Send agent metadata on first chunk
-                            if not agent_timestamp_sent:
-                                agent_timestamp = str(int(time.time() * 1000))
-                                yield {
-                                    "type": "assistant_metadata",
-                                    "sender": 2,  # 2 = agent
-                                    "created_at": agent_timestamp
-                                }
-                                agent_timestamp_sent = True
-
-                            # Yield each chunk for streaming (same format as process_rag_query_stream)
-                            yield {
-                                "type": "chunk",
-                                "content": chunk
-                            }
-
-                    except Exception as e:
-                        execution_failed = True
-                        break  # Stop execution if LLM response fails
-
-            # Send completion signal
-            yield {
-                "type": "complete",
-                "status": "success"
-            }
-
-        except Exception as e:
-            logger.error(f"Error in agent_orchestrator_stream: {e}")
-            yield {
-                "type": "error",
-                "content": f"An error occurred: {str(e)}"
-            }
+    # async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
+    #     """
+    #     Analyze user query using the agent orchestrator model to determine workflow requirements.
+    #     Enhanced version that accepts all process_rag_query_stream parameters for complete context.
+    #     """
+    #     try:
+    #         # Validate inputs
+    #         if not message or not message.strip():
+    #             raise ValueError("Message cannot be empty")
+    #         if not user_id:
+    #             raise ValueError("User ID is required")
+    #         if not company or not company.strip():
+    #             raise ValueError("Company ID is required and cannot be empty")
+    #         if not area or not area.strip():
+    #             raise ValueError("Area is required and cannot be empty")
+    #         if id_ia_area is None:
+    #             raise ValueError("ID IA Area is required and cannot be empty")
+    #         if not external_token or not external_token.strip():
+    #             raise ValueError("External token is required and cannot be empty")
+    #
+    #         # Use injected orchestrator
+    #         if not self.orchestrator:
+    #             raise ValueError("Orchestrator not configured for this service instance")
+    #
+    #         orchestrator = self.orchestrator
+    #
+    #         # Load IA area role behavior configuration
+    #         role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
+    #
+    #         # Clean user query
+    #         user_query = clean_user_query(message)
+    #
+    #         # Define available APIs (this could be loaded from config)
+    #         available_apis = [
+    #             {
+    #                 "method": "GET",
+    #                 "endpoint": "/bdt/talent/list",
+    #                 "description": "Table: talents, Columns: idTalento, nombres, apellidoPaterno, apellidoMaterno, imagen, puesto, pais, ciudad, idModalidadFacturacion, montoInicialPlanilla, montoFinalPlanilla, montoInicialRxH, montoFinalRxH, moneda, estrellas, esFavorito, idMonedaPlan, idMonedaRxh",
+    #                 "params": {
+    #                     "nPag": { "type": "integer", "required": False },
+    #                     "search": { "type": "string", "required": False },
+    #                     "techAbilities": { "type": "string", "required": False },
+    #                     "idEnglishLevel": { "type": "integer", "required": False },
+    #                     "idTalentCollection": { "type": "integer", "required": False }
+    #                 }
+    #             }
+    #         ]
+    #
+    #         # Call orchestrator to analyze the query
+    #         analysis = await orchestrator.analyze_query(user_query, available_apis)
+    #
+    #         # Generate tasks from analysis
+    #         tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
+    #
+    #         # Execute tasks sequentially
+    #         query_embedding = None
+    #         context_text = ""
+    #         execution_failed = False
+    #
+    #         for task in tasks:
+    #             if execution_failed:
+    #                 break
+    #             if task.get("action") == "embedding":
+    #                 try:
+    #                     query_text = task.get("input", user_query)
+    #                     query_embedding = await self.embeddings_provider.embed(query_text)
+    #                 except Exception as e:
+    #                     execution_failed = True
+    #                     break  # Stop execution if embedding fails
+    #
+    #             elif task.get("action") == "retrieval":
+    #                 try:
+    #                     if query_embedding is None:
+    #                         # Generate embedding if not already done
+    #                         query_embedding = await self.embeddings_provider.embed(user_query)
+    #
+    #                     # Use semantic_query from analysis if available, otherwise use user_query
+    #                     semantic_query = analysis.get("semantic_query", "").strip() if analysis.get("semantic_query") else user_query
+    #
+    #                     # Perform hybrid search using vectorstore directly
+    #                     search_results = await self.vectorstore.search_in_collection_hybrid(
+    #                         company_id=company_id,
+    #                         area_id=area_id,
+    #                         query_text=semantic_query,
+    #                         query_vector=query_embedding,
+    #                         top_k=top_k,
+    #                         similarity_threshold=similarity_threshold,
+    #                         alpha=alpha
+    #                     )
+    #
+    #                     # Build context from retrieved documents using utility function
+    #                     context_text = build_context_from_search_results(search_results)
+    #                 except Exception as e:
+    #                     execution_failed = True
+    #                     break  # Stop execution if retrieval fails
+    #
+    #             elif task.get("action") == "api_call":
+    #                 try:
+    #                     method = task.get("method", "GET").upper()
+    #                     if method == "GET":
+    #                         api_result = await httpx_get(task.get("endpoint", ""), external_token, task.get("params", {}))
+    #                     else:
+    #                         api_result = await httpx_post(task.get("endpoint", ""), external_token, task.get("params", {}))
+    #
+    #                     # Add API result to context only if there's actual data
+    #                     if api_result.get("success") and api_result.get("data"):
+    #                         api_data = json.dumps(api_result['data'])
+    #                         if api_data and api_data.strip() not in ["{}", "[]", "null"]:
+    #                             # Format API call result with metadata
+    #                             api_context_parts = []
+    #                             api_context_parts.append(f"API Call:")
+    #                             api_context_parts.append(f"Endpoint: {task.get('endpoint', 'N/A')}")
+    #                             api_context_parts.append(f"Params: {json.dumps(task.get('params', {}))}")
+    #                             api_context_parts.append(f"Response:\n{api_data}")
+    #
+    #                             formatted_api_context = "\n".join(api_context_parts)
+    #
+    #                             # Add separator if context already has content
+    #                             if context_text:
+    #                                 context_text += "\n\n"
+    #                             context_text += formatted_api_context
+    #
+    #                 except Exception as e:
+    #                     execution_failed = True
+    #                     break  # Stop execution if API call fails
+    #
+    #             elif task.get("action") == "llm_response":
+    #                 try:
+    #                     # Check if we have any context at all
+    #                     if not context_text or context_text.strip() == "":
+    #                         # No context available - return predefined message
+    #                         yield {
+    #                             "type": "chunk",
+    #                             "content": NO_CONTEXT_MESSAGE
+    #                         }
+    #                         break
+    #
+    #                     # Prepare the query, checking for format requirements
+    #                     query_to_use = user_query
+    #                     task_format = task.get("format")
+    #                     if task_format:
+    #                         if task_format.lower() == "list":
+    #                             query_to_use = f"{user_query}. IMPORTANT: Format the list items as a compact markdown list in a single line per item, including only the key and necessary information for clear understanding. If there is additional text content after the list, continue with it as plain text below the list."
+    #                         elif task_format.lower() == "table":
+    #                             query_to_use = f"{user_query}. IMPORTANT: Provide your response in the same language as the question. If explanation or summary is needed, include it briefly before the table. Then present the tabular data as a well-structured markdown table, showing ALL rows and ALL columns without adding empty or duplicate rows. Convert headers to natural language in the same language as the question, and ensure the table is properly aligned and easy to read. If there is additional text content after the table, continue with it as plain text below the table."
+    #
+    #                     # Build prompt with context (we know context_text exists here)
+    #                     model_config = self.llm_provider.get_model_config()
+    #                     prompt = model_config.build_rag_prompt(query_to_use, context_text)
+    #
+    #                     # Use provided parameters or fall back to environment defaults
+    #                     llm_temperature = temperature if temperature is not None else settings.llm_temperature
+    #                     llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+    #
+    #                     # Track if assistant metadata has been sent
+    #                     agent_timestamp_sent = False
+    #
+    #                     # Stream response using utility function for consistent stop reason handling
+    #                     async for chunk in generate_text_stream_with_validation(
+    #                         llm_provider=self.llm_provider,
+    #                         prompt=prompt,
+    #                         max_tokens=llm_max_tokens,
+    #                         temperature=llm_temperature,
+    #                         role_behavior=role_behavior
+    #                     ):
+    #                         # Send agent metadata on first chunk
+    #                         if not agent_timestamp_sent:
+    #                             agent_timestamp = str(int(time.time() * 1000))
+    #                             yield {
+    #                                 "type": "assistant_metadata",
+    #                                 "sender": 2,  # 2 = agent
+    #                                 "created_at": agent_timestamp
+    #                             }
+    #                             agent_timestamp_sent = True
+    #
+    #                         # Yield each chunk for streaming (same format as process_rag_query_stream)
+    #                         yield {
+    #                             "type": "chunk",
+    #                             "content": chunk
+    #                         }
+    #
+    #                 except Exception as e:
+    #                     execution_failed = True
+    #                     break  # Stop execution if LLM response fails
+    #
+    #         # Send completion signal
+    #         yield {
+    #             "type": "complete",
+    #             "status": "success"
+    #         }
+    #
+    #     except Exception as e:
+    #         logger.error(f"Error in agent_orchestrator_stream: {e}")
+    #         yield {
+    #             "type": "error",
+    #             "content": f"An error occurred: {str(e)}"
+    #         }
 
 
     async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, created_at: str, chat_id: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
@@ -568,3 +571,268 @@ class RagService:
             "type": "complete",
             "status": "success"
         }
+
+    async def process_rag_query_n8n(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, created_at: str, chat_id: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> Dict[str, Any]:
+        """
+        Proceso RAG completo sin streaming (para n8n): embeddings → search → LLM → response completa
+        Retorna directamente la respuesta completa del LLM con resultado estructurado.
+        """
+        try:
+            # Validate non-streaming provider is available
+            if not self.llm_nonstreaming_provider:
+                logger.error("Non-streaming LLM provider not configured")
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "Servicio de generación no configurado correctamente"
+                    }
+                }
+
+            # Validate inputs
+            if not message or not message.strip():
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "El mensaje no puede estar vacío"
+                    }
+                }
+            if not user_id:
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "ID de usuario requerido"
+                    }
+                }
+            if not company_id:
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "ID de empresa requerido"
+                    }
+                }
+            if not area_id:
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "ID de área requerido"
+                    }
+                }
+            if id_ia_area is None:
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "ID de área IA requerido"
+                    }
+                }
+
+            # Get last 16 messages from chat history if chat_id exists
+            conversation_history = []
+            if chat_id is not None:
+                try:
+                    messages_response = await self.message_service.get_last_n_messages(
+                        chat_id=f"chat-{chat_id}",
+                        n=20
+                    )
+                    conversation_history = [
+                        {
+                            "role": "user" if msg.sender == 0 else "assistant",
+                            "content": msg.message
+                        }
+                        for msg in messages_response
+                    ]
+                    conversation_history.reverse()
+                    filtered_history = []
+                    for i, msg in enumerate(conversation_history):
+                        if i > 0 and msg["role"] == "user" and conversation_history[i-1]["role"] == "user":
+                            continue
+                        else:
+                            filtered_history.append(msg)
+                    if filtered_history:
+                        if filtered_history[0]["role"] != "user":
+                            removed_msg = filtered_history.pop(0)
+                        if filtered_history and filtered_history[-1]["role"] == "user":
+                            removed_msg = filtered_history.pop()
+                    conversation_history = filtered_history[-16:]
+                except Exception as e:
+                    logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
+                    conversation_history = []
+
+            cleaned_message = clean_user_query(message)
+
+            # Recontextualize query if chat_id exists
+            recontextualized_result = None
+            if chat_id is not None and conversation_history:
+                try:
+                    conversation_for_recontextualization = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
+                    recontextualized_result = await self.recontextualizer.recontextualize_query(
+                        user_query=cleaned_message,
+                        conversation_history=conversation_for_recontextualization
+                    )
+                    logger.info(f"Recontextualization result: {recontextualized_result}")
+                except Exception as e:
+                    logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
+                    recontextualized_result = None
+
+            # Load IA area role behavior configuration
+            role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
+
+            # Create chat if chat_id is not provided
+            if chat_id is None:
+                now = datetime.now()
+                formatted_date = now.strftime("%d/%m/%Y %H:%M")
+                titulo = f"Nueva conversación {formatted_date}"
+                chat_repository = ChatRepository(db)
+                new_chat_id = await asyncio.to_thread(
+                    chat_repository.create_chat,
+                    id_usuario=user_id,
+                    id_area=area_id,
+                    id_empresa=company_id,
+                    titulo=titulo
+                )
+                if new_chat_id:
+                    chat_id = new_chat_id
+                else:
+                    logger.error("Chat creation failed - no ID returned")
+                    return {
+                        "result": {
+                            "idTipoMensaje": 1,
+                            "mensaje": "El chat no pudo crearse correctamente"
+                        }
+                    }
+
+            # Save user message to DynamoDB
+            if chat_id:
+                try:
+                    await self.message_service.create_message(
+                        chat_id=chat_id,
+                        created_at=created_at,
+                        sender=0,
+                        message=cleaned_message
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to save user message: {e}")
+                    return {
+                        "result": {
+                            "idTipoMensaje": 1,
+                            "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
+                        }
+                    }
+
+            # Determine query to use for embedding and search
+            query_for_search = cleaned_message
+            if recontextualized_result and recontextualized_result.get("needs_context", False):
+                recontextualized_query = recontextualized_result.get("response", "").strip()
+                if recontextualized_query:
+                    query_for_search = recontextualized_query
+                    logger.info(f"Using recontextualized query for search: {query_for_search}")
+
+            # Generate embedding for the query
+            query_embedding = await self.embeddings_provider.embed(query_for_search)
+
+            # Search vector database
+            search_results = await self.vectorstore.search_in_collection_hybrid(
+                company_id=company_id,
+                area_id=area_id,
+                query_text=query_for_search,
+                query_vector=query_embedding,
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+                alpha=alpha
+            )
+
+            # Prepare context text for LLM
+            context_text = build_context_from_search_results(search_results)
+
+            # Select conversation history for LLM prompt
+            conversation_history_for_prompt = []
+            if chat_id and conversation_history and recontextualized_result:
+                needs_context = recontextualized_result.get("needs_context", False)
+                summary_intent = recontextualized_result.get("summary_intent", False)
+                messages_to_use = 0
+                if needs_context and summary_intent:
+                    messages_to_use = 16
+                elif needs_context:
+                    messages_to_use = 8
+                elif summary_intent:
+                    messages_to_use = 16
+                if messages_to_use > 0:
+                    conversation_history_for_prompt = conversation_history[-messages_to_use:] if len(conversation_history) >= messages_to_use else conversation_history
+
+            # Build RAG prompt
+            model_config = self.llm_nonstreaming_provider.get_model_config()
+            rag_prompt = model_config.build_rag_prompt(cleaned_message, context_text)
+
+            # Use provided parameters or fall back to environment defaults
+            llm_temperature = temperature if temperature is not None else settings.llm_temperature
+            llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+
+            # Generate complete response using non-streaming provider
+            assistant_response = await self.llm_nonstreaming_provider.generate(
+                prompt=rag_prompt,
+                max_tokens=llm_max_tokens,
+                temperature=llm_temperature,
+                role_behavior=role_behavior,
+                messages=conversation_history_for_prompt if conversation_history_for_prompt else None
+            )
+
+            # Validate response
+            if not assistant_response or not assistant_response.strip():
+                logger.error("Empty response from LLM")
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "No se pudo generar una respuesta"
+                    }
+                }
+
+            # Update chat last message date
+            if chat_id:
+                chat_repo = ChatRepository(db)
+                await asyncio.to_thread(
+                    chat_repo.update_ultimo_mensaje_fecha,
+                    chat_id
+                )
+
+            # Generate timestamp for assistant message
+            assistant_timestamp_ms = int(time.time() * 1000)
+            user_timestamp_ms = int(created_at)
+            if assistant_timestamp_ms < user_timestamp_ms:
+                assistant_timestamp = str(user_timestamp_ms + 1000)
+            else:
+                assistant_timestamp = str(assistant_timestamp_ms)
+
+            # Save assistant message to DynamoDB
+            if chat_id and assistant_response and assistant_timestamp:
+                try:
+                    await self.message_service.create_message(
+                        chat_id=chat_id,
+                        created_at=assistant_timestamp,
+                        sender=1,  # 1 = assistant
+                        message=assistant_response
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to save assistant message: {e}")
+                    return {
+                        "result": {
+                            "idTipoMensaje": 1,
+                            "mensaje": "El mensaje de la IA no pudo guardarse correctamente"
+                        }
+                    }
+
+            # Return successful response
+            return {
+                "response": assistant_response,
+                "result": {
+                    "idTipoMensaje": 2,
+                    "mensaje": "Respuesta generada correctamente"
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error in process_rag_query_n8n: {e}")
+            return {
+                "result": {
+                    "idTipoMensaje": 1,
+                    "mensaje": f"Error al procesar la consulta: {str(e)}"
+                }
+            }
