@@ -450,7 +450,7 @@ class UsersService:
         telefono: str
     ) -> List[Dict[str, Any]]:
         """
-        Get user by phone number using stored procedure (N8N integration).
+        Get complete user data for n8n integration using stored procedure.
 
         Args:
             db: Database session
@@ -459,8 +459,14 @@ class UsersService:
 
         Returns:
             List of dictionaries containing:
-            - On failure (1 result set): ID_TIPO_MENSAJE, MENSAJE
-            - On success (2 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO, USUARIO
+            - On failure (1 result set):
+                * ID_TIPO_MENSAJE, MENSAJE
+            - On success (5 result sets):
+                * ID_TIPO_MENSAJE, MENSAJE (status message)
+                * ID_USUARIO, USUARIO, ... (user data)
+                * ID_EMPRESA, ID_AREA (company and area IDs)
+                * ID_IA_AREA (IA area configuration ID)
+                * ID_CHAT (existing chat ID)
             Empty list if query failed
         """
         try:
@@ -479,21 +485,31 @@ class UsersService:
             # Trim input to match database constraints
             telefono = telefono.strip()[:15]
 
-            # Use repository to get user by phone with SP_GET_USUARIO_BY_TELEFONO
-            results = repository.get_usuario_by_telefono(
+            # Use repository to get complete user data with SP_GET_USER_DATA_FOR_N8N
+            results = repository.get_user_data_for_n8n(
                 id_agente=id_agente,
                 telefono=telefono
             )
 
             if results:
-                # Check if user was found (2 result sets means success)
+                # Check if user was found (user data result set present)
                 has_user_data = any('ID_USUARIO' in result for result in results)
+                has_company_area = any('ID_EMPRESA' in result and 'ID_AREA' in result for result in results)
+                has_ia_area = any('ID_IA_AREA' in result for result in results)
+                has_chat = any('ID_CHAT' in result for result in results)
+
                 if has_user_data:
-                    logger.info(f"User found by phone: Telefono={telefono}, Results count={len(results)}")
+                    logger.info(
+                        f"User data found by phone: Telefono={telefono}, "
+                        f"Results count={len(results)}, "
+                        f"Has company/area={has_company_area}, "
+                        f"Has IA area={has_ia_area}, "
+                        f"Has chat={has_chat}"
+                    )
                 else:
                     logger.info(f"User not found by phone: Telefono={telefono}, Results count={len(results)}")
             else:
-                logger.warning(f"Get user by phone returned no results: Telefono={telefono}")
+                logger.warning(f"Get user data by phone returned no results: Telefono={telefono}")
 
             return results
 

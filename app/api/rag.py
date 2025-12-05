@@ -179,6 +179,14 @@ async def chat_n8n_endpoint(
     }
     """
     try:
+        # Validate role - only role 4 (n8n/external) is allowed
+        role_id = current_user.get('ID_TIPO_ROL')
+        if role_id not in [4]:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
         logger.info(f"[N8N REQUEST] User: {request.user}, Message: {request.message}")
 
         # Call non-streaming RAG service
