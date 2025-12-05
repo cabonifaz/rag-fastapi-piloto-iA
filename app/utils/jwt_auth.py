@@ -191,8 +191,8 @@ class JWTAuth:
             if role_id == 2:
                 return any(ca.get('ID_EMPRESA') == company_id for ca in company_areas)
 
-            # User (role_id = 3): Validate both company_id and area_id exist in the same row
-            if role_id == 3 or 4:
+            # User (role_id = 3 or 4): Validate both company_id and area_id exist in the same row
+            if role_id in [3, 4]:
                 if area_id is None:
                     return False
                 return any(

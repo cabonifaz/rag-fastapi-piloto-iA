@@ -60,7 +60,6 @@ async def chat_streaming_endpoint(
 
         async def generate_stream():
             try:
-                print(f"[STREAMING START] User: {request.user}, Message: {request.message}")
                 answer = ""
                 async for chunk_data in rag_service.process_rag_query_stream(
                     user_id=request.user_id,
@@ -84,12 +83,10 @@ async def chat_streaming_endpoint(
                         # Concatenate content
                         answer += chunk_data["content"]
                         output = f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
-                        print(f"[STREAMING CHUNK] {output}")
                         yield output
                     else:
                         # Send metadata and complete as-is
                         output = f"data: {json.dumps(chunk_data)}\n\n"
-                        print(f"[STREAMING {chunk_data['type'].upper()}] {output}")
                         yield output
 
                     # Force flush by yielding control back to event loop
@@ -150,6 +147,111 @@ async def chat_streaming_endpoint(
         
     except Exception as e:
         logger.error(f"Unexpected error in streaming endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
+
+
+@router.post("/chat-n8n")
+async def chat_n8n_endpoint(
+    request: UnifiedRequest,
+    rag_service: RagService = Depends(get_rag_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation)
+):
+    """
+    Non-streaming chat endpoint for n8n integration with RAG-powered answer generation.
+
+    Returns complete response in a single JSON object (no streaming).
+
+    Response format:
+    {
+        "response": "Complete LLM response text",
+        "result": {
+            "idTipoMensaje": 2,  // 2 = success, 1 = error
+            "mensaje": "Respuesta generada correctamente"
+        }
+    }
+
+    Error format:
+    {
+        "result": {
+            "idTipoMensaje": 1,
+            "mensaje": "Error message"
+        }
+    }
+    """
+    try:
+        logger.info(f"[N8N REQUEST] User: {request.user}, Message: {request.message}")
+
+        # Call non-streaming RAG service
+        result = await rag_service.process_rag_query_n8n(
+            user_id=request.user_id,
+            user=request.user,
+            message=request.message,
+            company_id=request.company_id,
+            company=request.company,
+            area_id=request.area_id,
+            area=request.area,
+            id_ia_area=request.id_ia_area,
+            db=db,
+            created_at=request.created_at,
+            chat_id=request.chat_id,
+            top_k=request.top_k,
+            similarity_threshold=request.similarity_threshold,
+            alpha=request.alpha,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens
+        )
+
+        logger.info(f"[N8N RESPONSE] Result type: {result.get('result', {}).get('idTipoMensaje')}")
+
+        # Check if the result indicates an error (idTipoMensaje = 1)
+        if result.get("result", {}).get("idTipoMensaje") == 1:
+            # Return error response with 400 status
+            logger.error(f"[N8N ERROR] {result.get('result', {}).get('mensaje')}")
+            raise HTTPException(status_code=400, detail=result)
+
+        # Return successful response
+        return result
+
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
+
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        logger.error(f"AWS Client error in n8n endpoint: {error_code} - {e}")
+        error_msg = "Error del servicio de modelo de lenguaje"
+        if error_code == 'ValidationException':
+            error_msg = "Parámetros inválidos para el modelo de lenguaje"
+        elif error_code == 'ThrottlingException':
+            error_msg = "Límite de tasa excedido. Por favor, inténtelo de nuevo más tarde"
+        error_response = create_error_response(error_msg)
+        raise HTTPException(status_code=503, detail={"result": error_response.model_dump()})
+
+    except (NoCredentialsError, EndpointConnectionError, ConnectionError) as e:
+        logger.error(f"Connection error in n8n endpoint: {e}")
+        error_response = create_error_response("Error de conexión del servicio")
+        raise HTTPException(status_code=503, detail={"result": error_response.model_dump()})
+
+    except TimeoutError as e:
+        logger.error(f"Timeout error in n8n endpoint: {e}")
+        error_response = create_error_response("Tiempo de espera de la solicitud agotado")
+        raise HTTPException(status_code=504, detail={"result": error_response.model_dump()})
+
+    except ValueError as e:
+        logger.error(f"Invalid input for n8n endpoint: {e}")
+        error_msg = str(e)
+        error_response = create_error_response(error_msg)
+        raise HTTPException(status_code=400, detail={"result": error_response.model_dump()})
+
+    except ValidationError as e:
+        logger.error(f"Validation error in n8n endpoint: {e}")
+        error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
+        raise HTTPException(status_code=422, detail={"result": error_response.model_dump()})
+
+    except Exception as e:
+        logger.error(f"Unexpected error in n8n endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
 
