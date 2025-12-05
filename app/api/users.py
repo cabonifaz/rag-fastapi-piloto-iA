@@ -577,28 +577,44 @@ async def update_usuario_access_endpoint(
 
 
 # N8N Integration Endpoints
-@router.post("/get_usuario_by_telefono")
-async def get_usuario_by_telefono_endpoint(
+@router.post("/get_user_data_for_n8n")
+async def get_user_data_for_n8n_endpoint(
     http_request: Request,
     users_service: UsersService = Depends(get_users_service),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get user by phone number endpoint (N8N integration).
+    Get complete user data for n8n integration endpoint.
 
-    Retrieves user information by phone number using SP_GET_USUARIO_BY_TELEFONO.
-    Requires JWT authentication. Only accessible by users with role ID 4.
+    Retrieves user information and all context needed for RAG queries using SP_GET_USER_DATA_FOR_N8N.
+    Requires JWT authentication. Only accessible by users with role ID 4 (n8n/agent).
 
     Request body:
         {
-            "telefono": str
+            "telefono": str  // Phone number (max 15 chars)
         }
 
     Returns:
         List with:
-        - On failure (1 result set): ID_TIPO_MENSAJE, MENSAJE
-        - On success (2 result sets): ID_TIPO_MENSAJE, MENSAJE + ID_USUARIO, USUARIO
+        - On failure (1 result set):
+            * {"ID_TIPO_MENSAJE": 1, "MENSAJE": "error message"}
+
+        - On success (5 result sets):
+            * {"ID_TIPO_MENSAJE": 2, "MENSAJE": "success message"}
+            * {"ID_USUARIO": int, "USUARIO": str, ...}  // User data
+            * {"ID_EMPRESA": int, "ID_AREA": int}       // Company and Area IDs
+            * {"ID_IA_AREA": int}                        // IA Area config ID
+            * {"ID_CHAT": int}                           // Existing chat ID (if any)
+
+    Example success response:
+        [
+            {"ID_TIPO_MENSAJE": 2, "MENSAJE": "Usuario encontrado"},
+            {"ID_USUARIO": 123, "USUARIO": "john_doe", "TELEFONO": "+51999888777"},
+            {"ID_EMPRESA": 1, "ID_AREA": 2},
+            {"ID_IA_AREA": 2},
+            {"ID_CHAT": 4045}
+        ]
 
     Raises:
         HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors

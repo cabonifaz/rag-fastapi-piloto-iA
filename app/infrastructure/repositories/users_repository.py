@@ -548,16 +548,24 @@ class UsersRepository:
             return []
 
 #FUNCIONES DE N8N
-    def get_usuario_by_telefono(self, id_agente: int, telefono: str) -> List[Dict[str, Any]]:
+
+    def get_user_data_for_n8n(self, id_agente: int, telefono: str) -> List[Dict[str, Any]]:
         """
-        Get an user by telefono using stored procedure SP_GET_USUARIO_BY_TELEFONO
+        Get complete user data for n8n integration using stored procedure SP_GET_USER_DATA_FOR_N8N
+
+        Returns user data along with company, area, IA area, and chat information.
 
         Args:
             id_agente: ID agent
             telefono: Cell Phone number
 
         Returns:
-            List of dictionaries containing user information
+            List of dictionaries containing:
+            - Message result (status)
+            - User data (if found)
+            - Company and Area IDs (ID_EMPRESA, ID_AREA)
+            - IA Area ID (ID_IA_AREA)
+            - Chat ID (ID_CHAT)
             Empty list if query failed
         """
         try:
@@ -567,14 +575,14 @@ class UsersRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_GET_USUARIO_BY_TELEFONO @ID_AGENTE = ?, @TELEFONO = ?",
+                    "EXEC SP_GET_USER_DATA_FOR_N8N @ID_AGENTE = ?, @TELEFONO = ?",
                     id_agente,
                     telefono
                 )
 
                 results = []
 
-                # Iterate through all result sets (messages + user data on success)
+                # Iterate through all result sets
                 while True:
                     try:
                         # Check if we have columns (indicating data)
@@ -583,24 +591,37 @@ class UsersRepository:
                             rows = cursor.fetchall()
 
                             if rows:
-                                # Filter result sets: exclude agent info, keep only message and user data
                                 for row in rows:
                                     result_dict = dict(zip(columns, row))
+
                                     # Convert Decimal to int for numeric fields
-                                    numeric_fields = ['ID_TIPO_MENSAJE', 'ID_USUARIO']
+                                    numeric_fields = [
+                                        'ID_TIPO_MENSAJE', 'ID_USUARIO', 'ID_EMPRESA',
+                                        'ID_AREA', 'ID_IA_AREA', 'ID_CHAT'
+                                    ]
                                     for field in numeric_fields:
                                         if field in result_dict and result_dict[field] is not None:
                                             result_dict[field] = int(result_dict[field])
 
-                                    # Only include message results and user data result (exclude agent info)
+                                    # Include all relevant result sets:
+                                    # 1. Message result (ID_TIPO_MENSAJE, MENSAJE)
+                                    # 2. User data (ID_USUARIO, USUARIO, etc.)
+                                    # 3. Company/Area data (ID_EMPRESA, ID_AREA)
+                                    # 4. IA Area data (ID_IA_AREA)
+                                    # 5. Chat data (ID_CHAT)
                                     is_message_result = 'ID_TIPO_MENSAJE' in result_dict and 'MENSAJE' in result_dict
                                     is_user_data_result = 'ID_USUARIO' in result_dict and 'USUARIO' in result_dict
+                                    is_company_area_result = 'ID_EMPRESA' in result_dict and 'ID_AREA' in result_dict
+                                    is_ia_area_result = 'ID_IA_AREA' in result_dict
+                                    is_chat_result = 'ID_CHAT' in result_dict
 
-                                    if is_message_result or is_user_data_result:
+                                    # Include all relevant result types (exclude only agent info)
+                                    if (is_message_result or is_user_data_result or
+                                        is_company_area_result or is_ia_area_result or is_chat_result):
                                         results.append(result_dict)
 
                     except Exception as fetch_error:
-                        logger.error(f"Fetch error: {fetch_error}")
+                        logger.error(f"Fetch error in get_user_data_for_n8n: {fetch_error}")
 
                     # Move to next result set
                     try:
@@ -611,7 +632,7 @@ class UsersRepository:
                         if "Transaction count after EXECUTE" in str(nextset_error):
                             logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
                         else:
-                            logger.error(f"Nextset error: {nextset_error}")
+                            logger.error(f"Nextset error in get_user_data_for_n8n: {nextset_error}")
                         break
 
                 cursor.close()
@@ -619,12 +640,12 @@ class UsersRepository:
                 return results
 
             except Exception as cursor_error:
-                logger.error(f"Cursor error in get_usuario_by_telefono: {cursor_error}")
+                logger.error(f"Cursor error in get_user_data_for_n8n: {cursor_error}")
                 cursor.close()
                 self.db.rollback()
                 raise
 
         except Exception as e:
-            logger.error(f"Error getting usuario by telefono with SP_GET_USUARIO_BY_TELEFONO: {e}")
+            logger.error(f"Error getting user data for n8n with SP_GET_USER_DATA_FOR_N8N: {e}")
             self.db.rollback()
             return []
