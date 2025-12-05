@@ -572,7 +572,7 @@ class RagService:
             "status": "success"
         }
 
-    async def process_rag_query_n8n(self, user_id: int, user: str, message: str, company_id: int, area_id: int, id_ia_area: int, db: Session, created_at: str, chat_id: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> Dict[str, Any]:
+    async def process_rag_query_n8n(self, user_id: int, user: str, message: str, company_id: int, area_id: int, id_ia_area: int, db: Session, created_at: str, chat_id: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> Dict[str, Any]:
         """
         Proceso RAG completo sin streaming (para n8n): embeddings → search → LLM → response completa
         Retorna directamente la respuesta completa del LLM con resultado estructurado.
@@ -625,43 +625,42 @@ class RagService:
                     }
                 }
 
-            # Get last 16 messages from chat history if chat_id exists
+            # Get last 16 messages from chat history
             conversation_history = []
-            if chat_id is not None:
-                try:
-                    messages_response = await self.message_service.get_last_n_messages(
-                        chat_id=f"chat-{chat_id}",
-                        n=20
-                    )
-                    conversation_history = [
-                        {
-                            "role": "user" if msg.sender == 0 else "assistant",
-                            "content": msg.message
-                        }
-                        for msg in messages_response
-                    ]
-                    conversation_history.reverse()
-                    filtered_history = []
-                    for i, msg in enumerate(conversation_history):
-                        if i > 0 and msg["role"] == "user" and conversation_history[i-1]["role"] == "user":
-                            continue
-                        else:
-                            filtered_history.append(msg)
-                    if filtered_history:
-                        if filtered_history[0]["role"] != "user":
-                            removed_msg = filtered_history.pop(0)
-                        if filtered_history and filtered_history[-1]["role"] == "user":
-                            removed_msg = filtered_history.pop()
-                    conversation_history = filtered_history[-16:]
-                except Exception as e:
-                    logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
-                    conversation_history = []
+            try:
+                messages_response = await self.message_service.get_last_n_messages(
+                    chat_id=f"chat-{chat_id}",
+                    n=20
+                )
+                conversation_history = [
+                    {
+                        "role": "user" if msg.sender == 0 else "assistant",
+                        "content": msg.message
+                    }
+                    for msg in messages_response
+                ]
+                conversation_history.reverse()
+                filtered_history = []
+                for i, msg in enumerate(conversation_history):
+                    if i > 0 and msg["role"] == "user" and conversation_history[i-1]["role"] == "user":
+                        continue
+                    else:
+                        filtered_history.append(msg)
+                if filtered_history:
+                    if filtered_history[0]["role"] != "user":
+                        removed_msg = filtered_history.pop(0)
+                    if filtered_history and filtered_history[-1]["role"] == "user":
+                        removed_msg = filtered_history.pop()
+                conversation_history = filtered_history[-16:]
+            except Exception as e:
+                logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
+                conversation_history = []
 
             cleaned_message = clean_user_query(message)
 
-            # Recontextualize query if chat_id exists
+            # Recontextualize query if conversation history exists
             recontextualized_result = None
-            if chat_id is not None and conversation_history:
+            if conversation_history:
                 try:
                     conversation_for_recontextualization = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
                     recontextualized_result = await self.recontextualizer.recontextualize_query(
@@ -676,47 +675,22 @@ class RagService:
             # Load IA area role behavior configuration
             role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
 
-            # Create chat if chat_id is not provided
-            if chat_id is None:
-                now = datetime.now()
-                formatted_date = now.strftime("%d/%m/%Y %H:%M")
-                titulo = f"Nueva conversación {formatted_date}"
-                chat_repository = ChatRepository(db)
-                new_chat_id = await asyncio.to_thread(
-                    chat_repository.create_chat,
-                    id_usuario=user_id,
-                    id_area=area_id,
-                    id_empresa=company_id,
-                    titulo=titulo
-                )
-                if new_chat_id:
-                    chat_id = new_chat_id
-                else:
-                    logger.error("Chat creation failed - no ID returned")
-                    return {
-                        "result": {
-                            "idTipoMensaje": 1,
-                            "mensaje": "El chat no pudo crearse correctamente"
-                        }
-                    }
-
             # Save user message to DynamoDB
-            if chat_id:
-                try:
-                    await self.message_service.create_message(
-                        chat_id=chat_id,
-                        created_at=created_at,
-                        sender=0,
-                        message=cleaned_message
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to save user message: {e}")
-                    return {
-                        "result": {
-                            "idTipoMensaje": 1,
-                            "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
-                        }
+            try:
+                await self.message_service.create_message(
+                    chat_id=chat_id,
+                    created_at=created_at,
+                    sender=0,
+                    message=cleaned_message
+                )
+            except Exception as e:
+                logger.error(f"Failed to save user message: {e}")
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
                     }
+                }
 
             # Determine query to use for embedding and search
             query_for_search = cleaned_message
@@ -745,7 +719,7 @@ class RagService:
 
             # Select conversation history for LLM prompt
             conversation_history_for_prompt = []
-            if chat_id and conversation_history and recontextualized_result:
+            if conversation_history and recontextualized_result:
                 needs_context = recontextualized_result.get("needs_context", False)
                 summary_intent = recontextualized_result.get("summary_intent", False)
                 messages_to_use = 0
@@ -786,12 +760,11 @@ class RagService:
                 }
 
             # Update chat last message date
-            if chat_id:
-                chat_repo = ChatRepository(db)
-                await asyncio.to_thread(
-                    chat_repo.update_ultimo_mensaje_fecha,
-                    chat_id
-                )
+            chat_repo = ChatRepository(db)
+            await asyncio.to_thread(
+                chat_repo.update_ultimo_mensaje_fecha,
+                chat_id
+            )
 
             # Generate timestamp for assistant message
             assistant_timestamp_ms = int(time.time() * 1000)
@@ -802,7 +775,7 @@ class RagService:
                 assistant_timestamp = str(assistant_timestamp_ms)
 
             # Save assistant message to DynamoDB
-            if chat_id and assistant_response and assistant_timestamp:
+            if assistant_response and assistant_timestamp:
                 try:
                     await self.message_service.create_message(
                         chat_id=chat_id,

@@ -19,7 +19,7 @@ from app.models.response_models import (
     create_error_response,
     create_warning_response
 )
-from app.models.rag_models import UnifiedRequest, AgentStreamingRequest
+from app.models.rag_models import UnifiedRequest, N8NRequest, AgentStreamingRequest
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -151,7 +151,7 @@ async def chat_streaming_endpoint(
 
 @router.post("/chat-n8n")
 async def chat_n8n_endpoint(
-    request: UnifiedRequest,
+    request: N8NRequest,
     rag_service: RagService = Depends(get_rag_service),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation)
