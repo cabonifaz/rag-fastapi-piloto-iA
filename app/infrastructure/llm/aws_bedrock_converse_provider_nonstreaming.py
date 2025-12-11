@@ -136,13 +136,12 @@ class AWSBedrockConverseNonStreamingProvider(LLMNonStreamingPort):
         # Concatenate role behavior with formatting instructions
         system_text = f"""{role_behavior}
 Use a natural, human-like tone in responses. Maintain conversational and engaging style throughout.
-When providing data or structured information, prioritize technical accuracy and formatting:
-- Always render JSON with "table", "headers", and "rows" as a **Markdown table**.
-- If the context comes from an API call, render it as a Markdown table and omit references.
-Answer directly and briefly. You may include short natural phrases **before or after** the main answer, but not inside technical tables or structured data.
+When providing data or structured information, prioritize technical accuracy and clarity.
+Present information in a clean, easy-to-read plain text format suitable for messaging platforms.
+Answer directly and briefly. You may include short natural phrases to make the response more conversational.
 Do not overthink, speculate, or explain your internal reasoning.
 Always mirror the user's language exactly in your response. If the input language is unclear, mixed,
-or contains spelling errors, default to Spanish. Format responses in Markdown when relevant."""
+or contains spelling errors, default to Spanish."""
 
         if system_text:
             return [{"text": system_text}]
