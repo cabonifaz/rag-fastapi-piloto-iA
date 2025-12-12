@@ -13,6 +13,7 @@ from app.services.users_service import UsersService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
+from app.domain.ports.llm_nonstreaming_port import LLMNonStreamingPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
 from app.domain.ports.transcribe_port import TranscribePort
@@ -22,6 +23,7 @@ from app.domain.ports.file_transcribe_port import FileTranscribePort
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
 from app.infrastructure.vectorstores.weaviate_repository import WeaviateRepository
 from app.infrastructure.llm.aws_bedrock_converse_provider import AWSBedrockConverseProvider
+from app.infrastructure.llm.aws_bedrock_converse_provider_nonstreaming import AWSBedrockConverseNonStreamingProvider
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 from app.infrastructure.transcriber.aws_transcribe_streaming import AWSTranscribeStreaming
@@ -38,6 +40,7 @@ class DIContainer:
         self._embeddings_provider = None
         self._vectorstore = None
         self._llm_provider = None
+        self._llm_nonstreaming_provider = None
         self._orchestrator_analyzer = None
         self._rag_service = None
         self._auth_service = None
@@ -119,12 +122,39 @@ class DIContainer:
 
         return self._llm_provider
 
+    def get_llm_nonstreaming_provider(self) -> LLMNonStreamingPort:
+        """Get non-streaming LLM provider instance (singleton)."""
+        if self._llm_nonstreaming_provider is None:
+            try:
+                if settings.llm_provider == "aws":
+                    if not settings.llm_region:
+                        raise ValueError("LLM region is required for AWS provider")
+                    if not settings.llm_model_id:
+                        raise ValueError("LLM model ID is required for AWS provider")
+
+                    # Using non-streaming Converse API for n8n
+                    self._llm_nonstreaming_provider = AWSBedrockConverseNonStreamingProvider(
+                        region=settings.llm_region,
+                        model_id=settings.llm_model_id,
+                        role_behavior=settings.llm_role_behavior,
+                        profile_name=settings.aws_profile,
+                        aws_access_key_id=settings.aws_access_key_id,
+                        aws_secret_access_key=settings.aws_secret_access_key
+                    )
+                else:
+                    raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+            except Exception as e:
+                raise ConnectionError(f"Failed to initialize non-streaming LLM provider: {str(e)}")
+
+        return self._llm_nonstreaming_provider
+
     def get_rag_service(self) -> RagService:
         """Get rag service as singleton (stateless, no db parameter)."""
         if self._rag_service is None:
             embeddings_provider = self.get_embeddings_provider()
             vectorstore = self.get_vectorstore()
             llm_provider = self.get_llm_provider()
+            llm_nonstreaming_provider = self.get_llm_nonstreaming_provider()
             message_service = self.get_message_service()
             ia_config_service = self.get_ia_config_service()
             recontextualizer = self.get_recontextualizer()
@@ -138,7 +168,8 @@ class DIContainer:
                 message_service=message_service,
                 ia_config_service=ia_config_service,
                 recontextualizer=recontextualizer,
-                orchestrator=orchestrator
+                orchestrator=orchestrator,
+                llm_nonstreaming_provider=llm_nonstreaming_provider
             )
 
         return self._rag_service

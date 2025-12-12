@@ -99,7 +99,7 @@ class MessageRepository:
                 'IndexName': 'chat_id_id_estado_registro_created_at_index',
                 'KeyConditionExpression': Key('chat_id#id_estado_registro').eq(gsi_pk_value),
                 'Limit': limit,
-                'ScanIndexForward': True  # True = ascending order (oldest first)
+                'ScanIndexForward': False  # False = descending order (newest first)
             }
 
             if last_evaluated_key:
@@ -109,9 +109,12 @@ class MessageRepository:
                 table = await dynamodb.Table(self.table_name)
                 response = await table.query(**query_params)
 
+            # Fetch newest first, then reverse to get oldest to newest for display
+            messages = response.get('Items', [])
+            messages.reverse()
+
             return {
-                # Return messages as is (newest to oldest)
-                'messages': response.get('Items', []),
+                'messages': messages,
                 'count': response.get('Count', 0),
                 'last_evaluated_key': response.get('LastEvaluatedKey')
             }
@@ -153,9 +156,12 @@ class MessageRepository:
                 table = await dynamodb.Table(self.table_name)
                 response = await table.query(**query_params)
 
+            # Fetch newest first, then reverse to get oldest to newest for display
+            messages = response.get('Items', [])
+            messages.reverse()
+
             return {
-                # Return messages as is (newest to oldest)
-                'messages': response.get('Items', []),
+                'messages': messages,
                 'count': response.get('Count', 0),
                 'last_evaluated_key': response.get('LastEvaluatedKey')
             }

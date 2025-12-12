@@ -4,8 +4,8 @@ from typing import AsyncGenerator, Optional, List, Dict
 
 class LLMPort(ABC):
     """
-    Puerto (interfaz) para servicios de LLM.
-    Define cómo la aplicación interactúa con cualquier proveedor de LLM.
+    Puerto (interfaz) para servicios de LLM con streaming.
+    Define cómo la aplicación interactúa con proveedores de LLM que generan respuestas en chunks.
     """
 
     @abstractmethod
@@ -27,5 +27,8 @@ class LLMPort(ABC):
             system_prompt: Optional system prompt
             messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                      If provided, prompt will be ignored and messages will be used instead
+
+        Yields:
+            Text chunks as they are generated
         """
         pass

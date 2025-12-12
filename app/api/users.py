@@ -10,7 +10,7 @@ from app.core.container import container
 from app.services.users_service import UsersService
 from app.models.response_models import create_success_response, create_error_response
 from app.models.user_models import CreateUserRequest, UpdateUserRequest, UpdateUserStatusRequest, UpdateUserPasswordRequest, UpdateUserAccessRequest
-from app.utils.jwt_auth import get_current_user_with_company_validation
+from app.utils.jwt_auth import get_current_user_with_company_validation, get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -155,12 +155,11 @@ async def create_usuario_endpoint(
             password=request.password,
             nombres=request.nombres,
             apellidos=request.apellidos,
+            telefono=request.telefono or "",
             nuevo_rol=request.nuevo_rol,
             id_empresa=request.id_empresa,
             areas_string=request.areas_string
         )
-
-        print(f"[CREATE_USUARIO] SP Response: {results}")
 
         # SP may not return results for now, so we just treat empty results as success
         # Check if the stored procedure returned an error message
@@ -252,7 +251,8 @@ async def update_usuario_endpoint(
             id_usuario=request.id_usuario,
             usuario=request.usuario,
             nombres=request.nombres,
-            apellidos=request.apellidos
+            apellidos=request.apellidos,
+            telefono=request.telefono
         )
 
         # Check if the stored procedure returned an error message
@@ -569,6 +569,109 @@ async def update_usuario_access_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in update_usuario_access endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+# N8N Integration Endpoints
+@router.post("/get_user_data_for_n8n")
+async def get_user_data_for_n8n_endpoint(
+    http_request: Request,
+    users_service: UsersService = Depends(get_users_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Get complete user data for n8n integration endpoint.
+
+    Retrieves user information and all context needed for RAG queries using SP_GET_USER_DATA_FOR_N8N.
+    Requires JWT authentication. Only accessible by users with role ID 4 (n8n/agent).
+
+    Request body:
+        {
+            "telefono": str  // Phone number (max 15 chars)
+        }
+
+    Returns:
+        List with:
+        - On failure (1 result set):
+            * {"ID_TIPO_MENSAJE": 1, "MENSAJE": "error message"}
+
+        - On success (5 result sets):
+            * {"ID_TIPO_MENSAJE": 2, "MENSAJE": "success message"}
+            * {"ID_USUARIO": int, "USUARIO": str, ...}  // User data
+            * {"ID_EMPRESA": int, "ID_AREA": int}       // Company and Area IDs
+            * {"ID_IA_AREA": int}                        // IA Area config ID
+            * {"ID_CHAT": int}                           // Existing chat ID (if any)
+
+    Example success response:
+        [
+            {"ID_TIPO_MENSAJE": 2, "MENSAJE": "Usuario encontrado"},
+            {"ID_USUARIO": 123, "USUARIO": "john_doe", "TELEFONO": "+51999888777"},
+            {"ID_EMPRESA": 1, "ID_AREA": 2},
+            {"ID_IA_AREA": 2},
+            {"ID_CHAT": 4045}
+        ]
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user has role ID 4 (agent role for N8N)
+        if role_id != 4:
+            raise HTTPException(
+                status_code=403,
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
+            )
+
+        # Parse request body
+        body = await http_request.json()
+        telefono = body.get('telefono')
+
+        # Validate input
+        if not telefono or not isinstance(telefono, str) or len(telefono.strip()) == 0:
+            error_response = create_error_response("Número de teléfono inválido")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Get user by phone using service (user_id is the agent ID)
+        results = await users_service.get_usuario_by_telefono(
+            db=db,
+            id_agente=user_id,
+            telefono=telefono
+        )
+
+        if not results:
+            error_response = create_error_response("Error al buscar usuario por teléfono")
+            raise HTTPException(
+                status_code=500,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Return only the results from the stored procedure (no extra fields)
+        return results
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_usuario_by_telefono endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,

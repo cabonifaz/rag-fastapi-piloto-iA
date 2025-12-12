@@ -64,6 +64,9 @@ class UsersRepository:
                                     for field in numeric_fields:
                                         if field in result_dict and result_dict[field] is not None:
                                             result_dict[field] = int(result_dict[field])
+                                    # Ensure TELEFONO field is always present (even if NULL)
+                                    if 'TELEFONO' not in result_dict:
+                                        result_dict['TELEFONO'] = None
                                     results.append(result_dict)
 
                     except Exception as fetch_error:
@@ -103,6 +106,7 @@ class UsersRepository:
         password: str,
         nombres: str,
         apellidos: str,
+        telefono: str,
         nuevo_rol: int,
         id_empresa: int,
         areas_string: str
@@ -116,6 +120,7 @@ class UsersRepository:
             password: Password (max 100 chars)
             nombres: First names (max 100 chars)
             apellidos: Last names (max 100 chars)
+            telefono: Phone number (max 15 chars)
             nuevo_rol: Role type ID
             id_empresa: Company ID
             areas_string: Comma-separated area IDs (max 100 chars)
@@ -131,12 +136,13 @@ class UsersRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_CREATE_USUARIO @ID_USUARIO = ?, @NUEVO_USUARIO = ?, @PASSWORD = ?, @NOMBRES = ?, @APELLIDOS = ?, @NUEVO_ROL = ?, @ID_EMPRESA = ?, @AREAS_STRING = ?",
+                    "EXEC SP_CREATE_USUARIO @ID_USUARIO = ?, @NUEVO_USUARIO = ?, @PASSWORD = ?, @NOMBRES = ?, @APELLIDOS = ?, @TELEFONO = ?, @NUEVO_ROL = ?, @ID_EMPRESA = ?, @AREAS_STRING = ?",
                     id_usuario,
                     nuevo_usuario,
                     password,
                     nombres,
                     apellidos,
+                    telefono,
                     nuevo_rol,
                     id_empresa,
                     areas_string
@@ -200,7 +206,8 @@ class UsersRepository:
         id_usuario: int,
         usuario: str,
         nombres: str,
-        apellidos: str
+        apellidos: str,
+        telefono: str = None
     ) -> List[Dict[str, Any]]:
         """
         Update user data using stored procedure SP_UPDATE_DATOS_USUARIO
@@ -211,6 +218,7 @@ class UsersRepository:
             usuario: New username (max 200 chars)
             nombres: New first names (max 200 chars)
             apellidos: New last names (max 200 chars)
+            telefono: Phone number (max 15 chars), optional (default None)
 
         Returns:
             List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
@@ -223,12 +231,13 @@ class UsersRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_UPDATE_DATOS_USUARIO @ID_ADMIN = ?, @ID_USUARIO = ?, @USUARIO = ?, @NOMBRES = ?, @APELLIDOS = ?",
+                    "EXEC SP_UPDATE_DATOS_USUARIO @ID_ADMIN = ?, @ID_USUARIO = ?, @USUARIO = ?, @NOMBRES = ?, @APELLIDOS = ?, @TELEFONO = ?",
                     id_admin,
                     id_usuario,
                     usuario,
                     nombres,
-                    apellidos
+                    apellidos,
+                    telefono
                 )
 
                 results = []
@@ -535,5 +544,108 @@ class UsersRepository:
 
         except Exception as e:
             logger.error(f"Error updating usuario access with SP_UPDATE_USUARIO_ACCESS: {e}")
+            self.db.rollback()
+            return []
+
+#FUNCIONES DE N8N
+
+    def get_user_data_for_n8n(self, id_agente: int, telefono: str) -> List[Dict[str, Any]]:
+        """
+        Get complete user data for n8n integration using stored procedure SP_GET_USER_DATA_FOR_N8N
+
+        Returns user data along with company, area, IA area, and chat information.
+
+        Args:
+            id_agente: ID agent
+            telefono: Cell Phone number
+
+        Returns:
+            List of dictionaries containing:
+            - Message result (status)
+            - User data (if found)
+            - Company and Area IDs (ID_EMPRESA, ID_AREA)
+            - IA Area ID (ID_IA_AREA)
+            - Chat ID (ID_CHAT)
+            Empty list if query failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_GET_USER_DATA_FOR_N8N @ID_AGENTE = ?, @TELEFONO = ?",
+                    id_agente,
+                    telefono
+                )
+
+                results = []
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            if rows:
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+
+                                    # Convert Decimal to int for numeric fields
+                                    numeric_fields = [
+                                        'ID_TIPO_MENSAJE', 'ID_USUARIO', 'ID_EMPRESA',
+                                        'ID_AREA', 'ID_IA_AREA', 'ID_CHAT'
+                                    ]
+                                    for field in numeric_fields:
+                                        if field in result_dict and result_dict[field] is not None:
+                                            result_dict[field] = int(result_dict[field])
+
+                                    # Include all relevant result sets:
+                                    # 1. Message result (ID_TIPO_MENSAJE, MENSAJE)
+                                    # 2. User data (ID_USUARIO, USUARIO, etc.)
+                                    # 3. Company/Area data (ID_EMPRESA, ID_AREA)
+                                    # 4. IA Area data (ID_IA_AREA)
+                                    # 5. Chat data (ID_CHAT)
+                                    is_message_result = 'ID_TIPO_MENSAJE' in result_dict and 'MENSAJE' in result_dict
+                                    is_user_data_result = 'ID_USUARIO' in result_dict and 'USUARIO' in result_dict
+                                    is_company_area_result = 'ID_EMPRESA' in result_dict and 'ID_AREA' in result_dict
+                                    is_ia_area_result = 'ID_IA_AREA' in result_dict
+                                    is_chat_result = 'ID_CHAT' in result_dict
+
+                                    # Include all relevant result types (exclude only agent info)
+                                    if (is_message_result or is_user_data_result or
+                                        is_company_area_result or is_ia_area_result or is_chat_result):
+                                        results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error in get_user_data_for_n8n: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error in get_user_data_for_n8n: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_user_data_for_n8n: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error getting user data for n8n with SP_GET_USER_DATA_FOR_N8N: {e}")
             self.db.rollback()
             return []

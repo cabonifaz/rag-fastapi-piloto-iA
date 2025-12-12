@@ -76,6 +76,7 @@ class UsersService:
         password: str,
         nombres: str,
         apellidos: str,
+        telefono: str,
         nuevo_rol: int,
         id_empresa: int,
         areas_string: str
@@ -90,6 +91,7 @@ class UsersService:
             password: Password (max 100 chars)
             nombres: First names (max 100 chars)
             apellidos: Last names (max 100 chars)
+            telefono: Phone number (max 15 chars)
             nuevo_rol: Role type ID (1=Super Admin, 2=Admin, 3=User)
             id_empresa: Company ID
             areas_string: Comma-separated area IDs (max 100 chars)
@@ -142,6 +144,7 @@ class UsersService:
             password = password.strip()[:100]
             nombres = nombres.strip()[:100]
             apellidos = apellidos.strip()[:100]
+            telefono = telefono.strip()[:15] if telefono else ""
             areas_string = areas_string.strip()[:100]
 
             # Use repository to create user with SP_CREATE_USUARIO
@@ -151,6 +154,7 @@ class UsersService:
                 password=password,
                 nombres=nombres,
                 apellidos=apellidos,
+                telefono=telefono,
                 nuevo_rol=nuevo_rol,
                 id_empresa=id_empresa,
                 areas_string=areas_string
@@ -174,7 +178,8 @@ class UsersService:
         id_usuario: int,
         usuario: str,
         nombres: str,
-        apellidos: str
+        apellidos: str,
+        telefono: str = None
     ) -> List[Dict[str, Any]]:
         """
         Update user data using stored procedure.
@@ -186,6 +191,7 @@ class UsersService:
             usuario: New username (max 200 chars)
             nombres: New first names (max 200 chars)
             apellidos: New last names (max 200 chars)
+            telefono: Phone number (max 15 chars), optional (default None)
 
         Returns:
             List of dictionaries containing:
@@ -222,6 +228,7 @@ class UsersService:
             usuario = usuario.strip()[:200]
             nombres = nombres.strip()[:200]
             apellidos = apellidos.strip()[:200]
+            telefono = telefono.strip()[:15]
 
             # Use repository to update user with SP_UPDATE_DATOS_USUARIO
             results = repository.update_usuario(
@@ -229,7 +236,8 @@ class UsersService:
                 id_usuario=id_usuario,
                 usuario=usuario,
                 nombres=nombres,
-                apellidos=apellidos
+                apellidos=apellidos,
+                telefono=telefono
             )
 
             if results:
@@ -433,4 +441,78 @@ class UsersService:
 
         except Exception as e:
             logger.error(f"Error in update_usuario_access service: {e}")
+            raise
+
+    async def get_usuario_by_telefono(
+        self,
+        db: Session,
+        id_agente: int,
+        telefono: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get complete user data for n8n integration using stored procedure.
+
+        Args:
+            db: Database session
+            id_agente: Agent ID
+            telefono: Phone number (max 15 chars)
+
+        Returns:
+            List of dictionaries containing:
+            - On failure (1 result set):
+                * ID_TIPO_MENSAJE, MENSAJE
+            - On success (5 result sets):
+                * ID_TIPO_MENSAJE, MENSAJE (status message)
+                * ID_USUARIO, USUARIO, ... (user data)
+                * ID_EMPRESA, ID_AREA (company and area IDs)
+                * ID_IA_AREA (IA area configuration ID)
+                * ID_CHAT (existing chat ID)
+            Empty list if query failed
+        """
+        try:
+            # Create repository for this request
+            repository = UsersRepository(db)
+
+            # Validate input
+            if not isinstance(id_agente, int) or id_agente <= 0:
+                logger.error(f"Invalid id_agente: {id_agente}")
+                return []
+
+            if not telefono or len(telefono.strip()) == 0:
+                logger.error("Phone number cannot be empty")
+                return []
+
+            # Trim input to match database constraints
+            telefono = telefono.strip()[:15]
+
+            # Use repository to get complete user data with SP_GET_USER_DATA_FOR_N8N
+            results = repository.get_user_data_for_n8n(
+                id_agente=id_agente,
+                telefono=telefono
+            )
+
+            if results:
+                # Check if user was found (user data result set present)
+                has_user_data = any('ID_USUARIO' in result for result in results)
+                has_company_area = any('ID_EMPRESA' in result and 'ID_AREA' in result for result in results)
+                has_ia_area = any('ID_IA_AREA' in result for result in results)
+                has_chat = any('ID_CHAT' in result for result in results)
+
+                if has_user_data:
+                    logger.info(
+                        f"User data found by phone: Telefono={telefono}, "
+                        f"Results count={len(results)}, "
+                        f"Has company/area={has_company_area}, "
+                        f"Has IA area={has_ia_area}, "
+                        f"Has chat={has_chat}"
+                    )
+                else:
+                    logger.info(f"User not found by phone: Telefono={telefono}, Results count={len(results)}")
+            else:
+                logger.warning(f"Get user data by phone returned no results: Telefono={telefono}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in get_usuario_by_telefono service: {e}")
             raise
