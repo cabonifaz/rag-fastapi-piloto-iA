@@ -201,3 +201,116 @@ class KnowledgeService:
         except Exception as e:
             logger.error(f"Error batch updating knowledge process state: {e}")
             raise
+
+    async def batch_delete_knowledge(
+        self,
+        id_usuario: int,
+        id_cargas: List[int],
+        usumod: str = "System"
+    ) -> Dict[str, Any]:
+        """
+        Delete multiple knowledge/document records in batch.
+        - Logical deletion in SQL Server (ID_ESTADO_REGISTRO = 0)
+        - Physical deletion in Weaviate (complete removal of all related objects)
+
+        Args:
+            id_usuario: User ID who is deleting (for audit purposes)
+            id_cargas: List of knowledge/document IDs to delete
+            usumod: User who deleted the records (max 200 chars, default: "System")
+
+        Returns:
+            Dictionary with:
+            - message_result: Status message from the stored procedure
+            - deleted_count: Number of records deleted from SQL Server
+            - weaviate_result: Result of Weaviate deletion (success, deleted_count, errors)
+        """
+        try:
+            # Phase 1: Logical deletion in SQL Server
+            logger.info(f"Starting batch deletion of {len(id_cargas)} knowledge records")
+            db_result = self.repository.batch_delete_knowledge(
+                id_usuario=id_usuario,
+                id_cargas=id_cargas,
+                usumod=usumod
+            )
+
+            if not db_result:
+                logger.error("Failed to delete knowledge records from SQL Server")
+                raise ValueError("Database deletion failed")
+
+            message_result = db_result.get('message_result')
+            deleted_records = db_result.get('deleted_records', [])
+
+            logger.info(f"Logically deleted {len(deleted_records)} records from SQL Server")
+
+            # Phase 2: Physical deletion from Weaviate
+            # Group deleted records by company to delete from appropriate collections
+            weaviate_results = []
+
+            if deleted_records:
+                # Import here to avoid circular dependency
+                from app.core.container import container
+                vectorstore = container.get_vectorstore()
+
+                # Group records by company
+                records_by_company = {}
+                for record in deleted_records:
+                    company_id = record.get('ID_EMPRESA')
+                    id_carga = record.get('ID_CARGA')
+
+                    if company_id and id_carga:
+                        company_key = f"EMPR{company_id}"
+                        if company_key not in records_by_company:
+                            records_by_company[company_key] = []
+                        records_by_company[company_key].append(str(id_carga))
+
+                # Delete from Weaviate for each company collection
+                for collection_name, doc_ids in records_by_company.items():
+                    try:
+                        # Check if collection exists first
+                        collection_exists = await vectorstore.collection_exists(collection_name)
+
+                        if not collection_exists:
+                            logger.warning(f"Collection {collection_name} does not exist in Weaviate, skipping physical deletion")
+                            weaviate_results.append({
+                                "collection": collection_name,
+                                "success": True,
+                                "deleted_count": 0,
+                                "message": "Collection does not exist (no action needed)"
+                            })
+                            continue
+
+                        # Delete from Weaviate
+                        logger.info(f"Deleting {len(doc_ids)} documents from Weaviate collection {collection_name}")
+                        delete_result = await vectorstore.delete_by_doc_ids(
+                            class_name=collection_name,
+                            doc_ids=doc_ids,
+                            company_id=collection_name.replace("EMPR", "")  # Extract company_id from collection name
+                        )
+
+                        weaviate_results.append({
+                            "collection": collection_name,
+                            **delete_result
+                        })
+
+                        logger.info(f"Weaviate deletion result for {collection_name}: {delete_result}")
+
+                    except Exception as weaviate_error:
+                        error_msg = f"Error deleting from Weaviate collection {collection_name}: {str(weaviate_error)}"
+                        logger.error(error_msg)
+                        weaviate_results.append({
+                            "collection": collection_name,
+                            "success": False,
+                            "deleted_count": 0,
+                            "errors": [error_msg]
+                        })
+
+            return {
+                "message_result": message_result,
+                "deleted_count": len(deleted_records),
+                "deleted_records": deleted_records,
+                "weaviate_result": weaviate_results
+            }
+
+        except Exception as e:
+            logger.error(f"Error batch deleting knowledge: {e}")
+            raise

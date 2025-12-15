@@ -8,7 +8,7 @@ import logging
 from app.core.database import get_db
 from app.services.knowledge_service import KnowledgeService
 from app.models.response_models import create_success_response, create_error_response
-from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest, BatchUpdateKnowledgeStateRequest
+from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest, BatchUpdateKnowledgeStateRequest, BatchDeleteKnowledgeRequest
 from app.utils.jwt_auth import get_current_user_with_company_validation, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -318,6 +318,101 @@ async def batch_update_knowledge_state_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in batch_update_knowledge_state endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.delete("")
+async def batch_delete_knowledge_endpoint(
+    http_request: Request,
+    request: BatchDeleteKnowledgeRequest,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Args:
+        request: BatchDeleteKnowledgeRequest with id_cargas list
+
+    Returns:
+        Dict with:
+        - message_result: Status message from the stored procedure
+        - deleted_count: Number of records deleted from SQL Server
+        - deleted_records: List of deleted records info
+        - weaviate_result: Result of Weaviate deletion (success, deleted_count, errors)
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes para eliminar documentos"}}
+            )
+
+        # Validate id_cargas parameter
+        if not isinstance(request.id_cargas, list) or len(request.id_cargas) == 0:
+            error_response = create_error_response("Lista de IDs de carga inválida o vacía")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Validate each id_carga is a positive integer
+        for id_carga in request.id_cargas:
+            if not isinstance(id_carga, int) or id_carga <= 0:
+                error_response = create_error_response("IDs de carga inválidos")
+                raise HTTPException(
+                    status_code=422,
+                    detail={"result": error_response.model_dump()}
+                )
+
+        # Batch delete knowledge using service
+        service = KnowledgeService(db)
+        deletion_result = await service.batch_delete_knowledge(
+            id_usuario=user_id,
+            id_cargas=request.id_cargas,
+            usumod=current_user.get('USUARIO', 'System')
+        )
+
+        if not deletion_result:
+            error_response = create_error_response("Error al eliminar los documentos")
+            raise HTTPException(
+                status_code=500,
+                detail={"result": error_response.model_dump()}
+            )
+
+        success_response = create_success_response("Documentos eliminados exitosamente")
+
+        return {
+            "message_result": deletion_result.get('message_result'),
+            "deleted_count": deletion_result.get('deleted_count', 0),
+            "deleted_records": deletion_result.get('deleted_records', []),
+            "weaviate_result": deletion_result.get('weaviate_result', []),
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in batch_delete_knowledge endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,

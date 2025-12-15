@@ -317,3 +317,116 @@ class KnowledgeRepository:
             logger.error(f"Error batch updating knowledge state with SP_CARGA_CONOC_ESTADO_PROCESO_BATCH_UPD: {e}")
             self.db.rollback()
             return None
+
+    def batch_delete_knowledge(
+        self,
+        id_usuario: int,
+        id_cargas: List[int],
+        usumod: str = "System"
+    ) -> Dict[str, Any]:
+        """
+        Logically delete multiple knowledge/document records using stored procedure
+        SP_CARGA_CONOCIMIENTO_BATCH_DEL with table-valued parameter.
+
+        Args:
+            id_usuario: User ID who is deleting (for audit purposes)
+            id_cargas: List of knowledge/document IDs to delete
+            usumod: User who deleted the records (max 200 chars, default: "System")
+
+        Returns:
+            Dictionary with:
+            - message_result: Dict with ID_TIPO_MENSAJE and MENSAJE from SP
+            - deleted_records: List of deleted records with ID_CARGA, NOMBRE_DOCUMENTO, ID_EMPRESA, ID_AREA
+        """
+        try:
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                # Each record is a tuple: (ID_CARGA INT)
+                tvp_data = [
+                    (id_carga,)
+                    for id_carga in id_cargas
+                ]
+
+                # Execute SP with table-valued parameter
+                cursor.execute(
+                    "EXEC SP_CARGA_CONOCIMIENTO_BATCH_DEL @ID_USUARIO = ?, @USUMOD = ?, @CARGAS = ?",
+                    id_usuario,
+                    usumod,
+                    tvp_data
+                )
+
+                message_result = None
+                deleted_records = []
+                result_set_num = 0
+
+                # Iterate through all result sets
+                while True:
+                    result_set_num += 1
+                    try:
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            # Check if this result set contains deleted records info
+                            has_deleted_records = 'ID_CARGA' in columns and 'NOMBRE_DOCUMENTO' in columns
+
+                            if has_message_columns and rows:
+                                # This is the result set with the message
+                                row = rows[0]
+                                result_dict = dict(zip(columns, row))
+                                # Convert Decimal to int for ID_TIPO_MENSAJE
+                                if 'ID_TIPO_MENSAJE' in result_dict:
+                                    result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                message_result = result_dict
+
+                            elif has_deleted_records and rows:
+                                # Capture the deleted records info
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert to int
+                                    if 'ID_CARGA' in result_dict and result_dict['ID_CARGA'] is not None:
+                                        result_dict['ID_CARGA'] = int(result_dict['ID_CARGA'])
+                                    if 'ID_EMPRESA' in result_dict and result_dict['ID_EMPRESA'] is not None:
+                                        result_dict['ID_EMPRESA'] = int(result_dict['ID_EMPRESA'])
+                                    if 'ID_AREA' in result_dict and result_dict['ID_AREA'] is not None:
+                                        result_dict['ID_AREA'] = int(result_dict['ID_AREA'])
+                                    deleted_records.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                logger.info(f"Batch deleted {len(deleted_records)} knowledge records")
+                return {
+                    'message_result': message_result,
+                    'deleted_records': deleted_records
+                }
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in batch_delete_knowledge: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error batch deleting knowledge with SP_CARGA_CONOCIMIENTO_BATCH_DEL: {e}")
+            self.db.rollback()
+            return None

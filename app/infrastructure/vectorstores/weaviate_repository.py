@@ -609,6 +609,89 @@ class WeaviateRepository(VectorStorePort):
 
         return await asyncio.to_thread(_is_ready)
 
+    async def delete_by_doc_ids(
+        self,
+        class_name: str,
+        doc_ids: List[str],
+        company_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Delete all objects with specific doc_ids from a collection.
+
+        Args:
+            class_name: Name of the collection (e.g., "EMPR123")
+            doc_ids: List of document IDs to delete (e.g., ["123", "124", "125"])
+            company_id: Optional company ID for additional filtering
+
+        Returns:
+            Dictionary with deletion results:
+            - success: bool
+            - deleted_count: int
+            - errors: List of errors if any
+        """
+        def _delete_sync() -> Dict[str, Any]:
+            try:
+                collection = self._client.collections.get(class_name)
+
+                deleted_count = 0
+                errors = []
+
+                for doc_id in doc_ids:
+                    try:
+                        # Build filter for doc_id
+                        filter_condition = Filter.by_property("doc_id").equal(doc_id)
+
+                        # Add company_id filter if provided
+                        if company_id:
+                            company_filter = Filter.by_property("company_id").equal(company_id)
+                            filter_condition = filter_condition & company_filter
+
+                        # Delete all objects matching the filter
+                        result = collection.data.delete_many(
+                            where=filter_condition
+                        )
+
+                        # Count successful deletions
+                        if hasattr(result, 'successful') and result.successful:
+                            deleted_count += result.successful
+                        elif hasattr(result, 'matches') and result.matches:
+                            deleted_count += result.matches
+
+                        logger.info(f"Deleted objects with doc_id={doc_id} from collection {class_name}")
+
+                    except WeaviateBaseError as e:
+                        error_msg = f"Error deleting doc_id {doc_id}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                    except Exception as e:
+                        error_msg = f"Unexpected error deleting doc_id {doc_id}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+
+                return {
+                    "success": len(errors) == 0,
+                    "deleted_count": deleted_count,
+                    "errors": errors
+                }
+
+            except WeaviateBaseError as e:
+                logger.error(f"Weaviate error in delete_by_doc_ids: {e}")
+                error_msg = str(e).lower()
+                if "unauthorized" in error_msg or "authentication" in error_msg:
+                    raise ConnectionError("Weaviate authentication failed")
+                elif "not found" in error_msg or "does not exist" in error_msg:
+                    raise ValueError(f"Collection '{class_name}' not found in Weaviate")
+                elif "connection" in error_msg or "network" in error_msg:
+                    raise ConnectionError("Cannot connect to Weaviate service")
+                else:
+                    raise ConnectionError(f"Weaviate service error: {str(e)}")
+
+            except Exception as e:
+                logger.error(f"Unexpected error in delete_by_doc_ids: {e}")
+                raise ConnectionError(f"Delete service error: {str(e)}")
+
+        return await asyncio.to_thread(_delete_sync)
+
     def close(self) -> None:
         """Cierra conexiones gRPC/HTTP."""
         if getattr(self, "_client", None) is not None:
