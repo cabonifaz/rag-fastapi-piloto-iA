@@ -18,6 +18,7 @@ from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
 from app.domain.ports.transcribe_port import TranscribePort
 from app.domain.ports.file_transcribe_port import FileTranscribePort
+from app.domain.ports.blob_storage_port import BlobStoragePort
 
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
@@ -28,6 +29,7 @@ from app.infrastructure.task_decomposition.aws_bedrock_provider import Orchestra
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 from app.infrastructure.transcriber.aws_transcribe_streaming import AWSTranscribeStreaming
 from app.infrastructure.transcriber.openai_transcribe import OpenAITranscribe
+from app.infrastructure.blob_storages.s3_storage import S3BlobStorage
 
 
 class DIContainer:
@@ -42,6 +44,7 @@ class DIContainer:
         self._llm_provider = None
         self._llm_nonstreaming_provider = None
         self._orchestrator_analyzer = None
+        self._blob_storage = None
         self._rag_service = None
         self._auth_service = None
         self._chat_service = None
@@ -85,7 +88,7 @@ class DIContainer:
                     raise ValueError("Vector database URL is required")
                 if not settings.vectordb_api_key:
                     raise ValueError("Vector database API key is required")
-                
+
                 self._vectorstore = WeaviateRepository(
                     url=settings.vectordb_url,
                     api_key=settings.vectordb_api_key,
@@ -94,6 +97,23 @@ class DIContainer:
             except Exception as e:
                 raise ConnectionError(f"Failed to initialize vector store: {str(e)}")
         return self._vectorstore
+
+    def get_blob_storage(self) -> BlobStoragePort:
+        """Get blob storage instance (singleton)."""
+        if self._blob_storage is None:
+            try:
+                if not settings.aws_region:
+                    raise ValueError("AWS region is required for S3 blob storage")
+
+                self._blob_storage = S3BlobStorage(
+                    region=settings.aws_region,
+                    profile_name=settings.aws_profile,
+                    aws_access_key_id=settings.aws_access_key_id,
+                    aws_secret_access_key=settings.aws_secret_access_key
+                )
+            except Exception as e:
+                raise ConnectionError(f"Failed to initialize blob storage: {str(e)}")
+        return self._blob_storage
 
     def get_llm_provider(self) -> LLMPort:
         """Get LLM provider instance (singleton)."""

@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from app.infrastructure.repositories.knowledge_repository import KnowledgeRepository
 from app.core.config import settings
-from app.core.aws_clients import get_s3_client
+from app.domain.ports.blob_storage_port import BlobStoragePort
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +14,10 @@ logger = logging.getLogger(__name__)
 class KnowledgeService:
     """Service for knowledge/document management operations."""
 
-    def __init__(self, db: Session):
-        """Initialize service with repository and S3 bucket."""
+    def __init__(self, db: Session, blob_storage: BlobStoragePort):
+        """Initialize service with repository and blob storage."""
         self.repository = KnowledgeRepository(db)
+        self.blob_storage = blob_storage
         self.bucket_name = settings.s3_pdfs_bucket
 
     async def get_knowledge_by_company(
@@ -86,7 +87,7 @@ class KnowledgeService:
 
             for pdf_filename in pdf_keys:
                 # Construct S3 key: <empresa_id>/<area_id>/<filename>
-                s3_key = f"{id_empresa}/{id_area}/{pdf_filename}"
+                s3_key = f"documents/{id_empresa}/{id_area}/{pdf_filename}"
 
                 # Store for later use
                 s3_keys_map[pdf_filename] = s3_key
@@ -127,7 +128,7 @@ class KnowledgeService:
         db_results: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Generate presigned URLs for all records using aioboto3 (truly async).
+        Generate presigned URLs for all records using blob storage port.
 
         Args:
             pdf_keys: List of PDF filenames
@@ -139,30 +140,24 @@ class KnowledgeService:
         """
         response_objects = []
 
-        # Use aioboto3 S3 client for async presigned URL generation
-        async with get_s3_client() as s3_client:
-            for pdf_filename in pdf_keys:
-                s3_key = s3_keys_map[pdf_filename]
+        for pdf_filename in pdf_keys:
+            s3_key = s3_keys_map[pdf_filename]
 
-                # Generate presigned PUT URL (5 min expiration)
-                presigned_url = await s3_client.generate_presigned_url(
-                    'put_object',
-                    Params={
-                        'Bucket': self.bucket_name,
-                        'Key': s3_key,
-                    },
-                    ExpiresIn=300,  # 5 minutes
-                    HttpMethod='PUT'
-                )
+            # Generate presigned PUT URL (5 min expiration)
+            presigned_url = await self.blob_storage.generate_presigned_upload_url(
+                bucket_name=self.bucket_name,
+                object_key=s3_key,
+                expiration_seconds=300  # 5 minutes
+            )
 
-                # Build upload object (without results)
-                upload_obj = {
-                    'presigned_url': presigned_url,
-                    's3_key': s3_key,
-                    'document_name': pdf_filename,
-                }
+            # Build upload object (without results)
+            upload_obj = {
+                'presigned_url': presigned_url,
+                's3_key': s3_key,
+                'document_name': pdf_filename,
+            }
 
-                response_objects.append(upload_obj)
+            response_objects.append(upload_obj)
 
         return {
             'uploads': response_objects,
@@ -210,11 +205,14 @@ class KnowledgeService:
         usumod: str = "System"
     ) -> Dict[str, Any]:
         """
-        Delete multiple knowledge/document records in batch.
-        - First queries SQL Server to verify existence and get company_id
-        - Validates existence in Weaviate (throws error if not found)
-        - Logical deletion in SQL Server (ID_ESTADO_REGISTRO = 0)
-        - Physical deletion in Weaviate (complete removal of all related objects)
+        Delete multiple knowledge/document records in batch with enhanced S3 and process state handling.
+
+        Deletion logic based on ID_ESTADO_PROCESO:
+        - Estado 6 (Completed): Validates Weaviate existence, deletes from SQL, Weaviate, and S3 (RUTA_EXTRACCION, RUTA_SEGMENTOS)
+        - Estado 7 (Error): Deletes from SQL and S3 if RUTA_* exist. Weaviate validation optional.
+        - Other estados: Deletes from SQL and S3 if RUTA_* exist. Weaviate validation optional.
+
+        Also handles EN_EJECUCION = 1 by setting to 0 after validation.
 
         Args:
             id_usuario: User ID who is deleting (for audit and permission validation)
@@ -225,16 +223,17 @@ class KnowledgeService:
             Dictionary with:
             - message_result: Status message from the stored procedure
             - deleted_count: Number of records deleted from SQL Server
-            - weaviate_result: Result of Weaviate deletion (success, deleted_count, errors)
+            - weaviate_result: Result of Weaviate deletion
+            - s3_results: Results of S3 deletions (by bucket)
 
         Raises:
-            ValueError: If documents are not found in SQL Server or Weaviate, or if user has insufficient permissions
+            ValueError: If documents are not found in SQL Server, or if estado 6 documents not found in Weaviate
         """
         try:
             logger.info(f"Starting batch deletion of {len(id_cargas)} knowledge records")
 
-            # PHASE 1: Query SQL Server to verify existence and get company_id
-            logger.info(f"Querying SQL Server to verify existence and get company information")
+            # PHASE 1: Query SQL Server to get detailed record information
+            logger.info(f"Querying SQL Server for detailed record information")
 
             sql_result = self.repository.get_knowledge_by_ids(
                 id_usuario=id_usuario,
@@ -250,7 +249,7 @@ class KnowledgeService:
             records = sql_result.get('records', [])
 
             # Check if the SP returned an error message (permission denied, user not found, etc.)
-            if message_result_check and message_result_check.get('ID_TIPO_MENSAJE') == 1:
+            if message_result_check and message_result_check.get('ID_TIPO_MENSAJE') != 2:
                 error_msg = message_result_check.get('MENSAJE', 'Error de permisos')
                 logger.error(f"Permission or validation error: {error_msg}")
                 raise ValueError(error_msg)
@@ -270,56 +269,91 @@ class KnowledgeService:
 
             logger.info(f"Found {len(records)} records in SQL Server for company {company_id}")
 
-            # PHASE 2: Validate existence in Weaviate BEFORE deleting from SQL Server
-            logger.info(f"Validating existence of documents in Weaviate (collection: EMPR{company_id})")
+            # PHASE 2: Group records by ID_ESTADO_PROCESO and handle EN_EJECUCION
+            records_estado_6 = []  # Completed ingest
+            records_estado_7 = []  # Error in ingest
+            records_other_estado = []  # Other states
+            records_with_en_ejecucion = []
 
-            # Import here to avoid circular dependency
-            from app.core.container import container
-            vectorstore = container.get_vectorstore()
+            for record in records:
+                estado_proceso = record.get('ID_ESTADO_PROCESO')
+                en_ejecucion = record.get('EN_EJECUCION')
 
-            collection_name = f"EMPR{company_id}"
+                if en_ejecucion == 1:
+                    records_with_en_ejecucion.append(record.get('ID_CARGA'))
 
-            # Check if collection exists
-            collection_exists = await vectorstore.collection_exists(collection_name)
+                if estado_proceso == 6:
+                    records_estado_6.append(record)
+                elif estado_proceso == 7:
+                    records_estado_7.append(record)
+                else:
+                    records_other_estado.append(record)
 
-            if not collection_exists:
-                error_msg = f"La colección {collection_name} no existe en la base de datos vectorial"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
+            logger.info(f"Records by estado: Estado 6={len(records_estado_6)}, Estado 7={len(records_estado_7)}, Other={len(records_other_estado)}")
+            logger.info(f"Records with EN_EJECUCION=1: {len(records_with_en_ejecucion)}")
 
-            # Check if each document exists in Weaviate
-            not_found_in_weaviate = []
-            from weaviate.classes.query import Filter
-
-            try:
-                collection = vectorstore._client.collections.get(collection_name)
-
-                for id_carga in id_cargas:
-                    doc_id = f"CONOC-{id_carga}"
-
-                    # Query to check if exists
-                    check_query = collection.query.fetch_objects(
-                        filters=Filter.by_property("doc_id").equal(doc_id),
-                        limit=1
+            # Update EN_EJECUCION if needed
+            if records_with_en_ejecucion:
+                logger.info(f"Updating EN_EJECUCION to 0 for {len(records_with_en_ejecucion)} records")
+                try:
+                    self.repository.batch_update_en_ejecucion(
+                        id_usuario=id_usuario,
+                        id_cargas=records_with_en_ejecucion,
+                        usumod=usumod
                     )
+                except Exception as e:
+                    logger.warning(f"Failed to update EN_EJECUCION: {e}")
 
-                    if len(check_query.objects) == 0:
-                        logger.warning(f"Document {doc_id} not found in {collection_name}")
-                        not_found_in_weaviate.append(f"ID: {id_carga}")
+            # PHASE 3: Validate Weaviate existence for Estado 6 records ONLY
+            if records_estado_6:
+                logger.info(f"Validating Weaviate existence for {len(records_estado_6)} Estado 6 records")
 
-            except Exception as check_error:
-                logger.error(f"Error checking existence in {collection_name}: {check_error}")
-                raise ValueError(f"Error al verificar existencia de documentos en la base de datos vectorial: {str(check_error)}")
+                from app.core.container import container
+                vectorstore = container.get_vectorstore()
+                collection_name = f"EMPR{company_id}"
 
-            # If any documents not found, raise error and don't proceed with deletion
-            if not_found_in_weaviate:
-                error_msg = f"Los siguientes documentos no se encontraron en la base de datos vectorial: {', '.join(not_found_in_weaviate)}"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
+                # Check if collection exists
+                collection_exists = await vectorstore.collection_exists(collection_name)
 
-            logger.info(f"All {len(id_cargas)} documents found in Weaviate. Proceeding with deletion.")
+                if not collection_exists:
+                    error_msg = f"La colección {collection_name} no existe en la base de datos vectorial para documentos en estado completado"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
 
-            # PHASE 3: Logical deletion in SQL Server (only if validation passed)
+                # Check if each Estado 6 document exists in Weaviate
+                not_found_in_weaviate = []
+                from weaviate.classes.query import Filter
+
+                try:
+                    collection = vectorstore._client.collections.get(collection_name)
+
+                    for record in records_estado_6:
+                        id_carga = record.get('ID_CARGA')
+                        doc_id = f"CONOC-{id_carga}"
+
+                        check_query = collection.query.fetch_objects(
+                            filters=Filter.by_property("doc_id").equal(doc_id),
+                            limit=1
+                        )
+
+                        if len(check_query.objects) == 0:
+                            logger.warning(f"Document {doc_id} (Estado 6) not found in {collection_name}")
+                            not_found_in_weaviate.append(f"ID: {id_carga}")
+
+                except Exception as check_error:
+                    logger.error(f"Error checking existence in {collection_name}: {check_error}")
+                    raise ValueError(f"Error al verificar existencia de documentos completados en la base de datos vectorial: {str(check_error)}")
+
+                # If any Estado 6 documents not found in Weaviate, raise error
+                if not_found_in_weaviate:
+                    error_msg = f"Los siguientes documentos completados (Estado 6) no se encontraron en la base de datos vectorial: {', '.join(not_found_in_weaviate)}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+
+                logger.info(f"All {len(records_estado_6)} Estado 6 documents found in Weaviate")
+
+            # PHASE 4: Logical deletion in SQL Server (all records)
+            logger.info(f"Performing logical deletion in SQL Server for all {len(records)} records")
             db_result = self.repository.batch_delete_knowledge(
                 id_usuario=id_usuario,
                 id_cargas=id_cargas,
@@ -335,24 +369,107 @@ class KnowledgeService:
 
             logger.info(f"Logically deleted {len(deleted_records)} records from SQL Server")
 
-            # PHASE 4: Physical deletion from Weaviate with retry and compensation
-            # Group deleted records by company to delete from appropriate collections
+            # PHASE 5: S3 deletions based on ID_ESTADO_PROCESO
+            s3_results = {
+                "pdfs_bucket": None,
+                "ingest_results_bucket": None
+            }
+
+            # Estado 6: Delete from S3_INGEST_RESULTS_BUCKET (RUTA_EXTRACCION, RUTA_SEGMENTOS)
+            if records_estado_6:
+                logger.info(f"Deleting S3 objects for {len(records_estado_6)} Estado 6 records from ingest results bucket")
+                try:
+                    s3_results["ingest_results_bucket"] = await self.blob_storage.delete_objects_for_records(
+                        records=records_estado_6,
+                        key_fields=['RUTA_EXTRACCION', 'RUTA_SEGMENTOS'],
+                        bucket_name=settings.s3_ingest_results_bucket
+                    )
+                except Exception as s3_error:
+                    logger.error(f"Error deleting S3 objects for Estado 6 records: {s3_error}")
+                    s3_results["ingest_results_bucket"] = {"success": False, "errors": [str(s3_error)]}
+
+            # Estado 7: Delete from S3_INGEST_RESULTS_BUCKET if RUTA_* exist
+            if records_estado_7:
+                logger.info(f"Deleting S3 objects for {len(records_estado_7)} Estado 7 records from ingest results bucket (if exists)")
+                try:
+                    if s3_results["ingest_results_bucket"] is None:
+                        s3_results["ingest_results_bucket"] = await self.blob_storage.delete_objects_for_records(
+                            records=records_estado_7,
+                            key_fields=['RUTA_EXTRACCION', 'RUTA_SEGMENTOS'],
+                            bucket_name=settings.s3_ingest_results_bucket
+                        )
+                    else:
+                        # Merge with Estado 6 results
+                        additional_result = await self.blob_storage.delete_objects_for_records(
+                            records=records_estado_7,
+                            key_fields=['RUTA_EXTRACCION', 'RUTA_SEGMENTOS'],
+                            bucket_name=settings.s3_ingest_results_bucket
+                        )
+                        # Merge results
+                        s3_results["ingest_results_bucket"]["moved"].extend(additional_result["moved"])
+                        s3_results["ingest_results_bucket"]["errors"].extend(additional_result["errors"])
+                        s3_results["ingest_results_bucket"]["skipped"].extend(additional_result["skipped"])
+                except Exception as s3_error:
+                    logger.error(f"Error deleting S3 objects for Estado 7 records: {s3_error}")
+
+            # Other estados: Delete from S3_INGEST_RESULTS_BUCKET if RUTA_* exist
+            if records_other_estado:
+                logger.info(f"Deleting S3 objects for {len(records_other_estado)} other estado records from ingest results bucket (if exists)")
+                try:
+                    if s3_results["ingest_results_bucket"] is None:
+                        s3_results["ingest_results_bucket"] = await self.blob_storage.delete_objects_for_records(
+                            records=records_other_estado,
+                            key_fields=['RUTA_EXTRACCION', 'RUTA_SEGMENTOS'],
+                            bucket_name=settings.s3_ingest_results_bucket
+                        )
+                    else:
+                        # Merge with previous results
+                        additional_result = await self.blob_storage.delete_objects_for_records(
+                            records=records_other_estado,
+                            key_fields=['RUTA_EXTRACCION', 'RUTA_SEGMENTOS'],
+                            bucket_name=settings.s3_ingest_results_bucket
+                        )
+                        # Merge results
+                        s3_results["ingest_results_bucket"]["moved"].extend(additional_result["moved"])
+                        s3_results["ingest_results_bucket"]["errors"].extend(additional_result["errors"])
+                        s3_results["ingest_results_bucket"]["skipped"].extend(additional_result["skipped"])
+                except Exception as s3_error:
+                    logger.error(f"Error deleting S3 objects for other estado records: {s3_error}")
+
+            # All records: Delete RUTA_DOCUMENTO from S3_PDFS_BUCKET
+            logger.info(f"Deleting document S3 objects for all {len(records)} records from PDFs bucket")
+            try:
+                s3_results["pdfs_bucket"] = await self.blob_storage.delete_objects_for_records(
+                    records=records,
+                    key_fields=['RUTA_DOCUMENTO'],
+                    bucket_name=self.bucket_name
+                )
+            except Exception as s3_error:
+                logger.error(f"Error deleting S3 documents: {s3_error}")
+                s3_results["pdfs_bucket"] = {"success": False, "errors": [str(s3_error)]}
+
+            # PHASE 6: Physical deletion from Weaviate (Estado 6 records only) with retry and compensation
             weaviate_results = []
             any_weaviate_failure = False
 
-            if deleted_records:
+            # Only delete from Weaviate for Estado 6 records
+            estado_6_deleted = [rec for rec in deleted_records if rec.get('ID_CARGA') in [r.get('ID_CARGA') for r in records_estado_6]]
+
+            if estado_6_deleted:
+                logger.info(f"Deleting {len(estado_6_deleted)} Estado 6 records from Weaviate")
+
                 # Import here to avoid circular dependency
                 from app.core.container import container
                 vectorstore = container.get_vectorstore()
 
-                # Group records by company
+                # Group Estado 6 records by company
                 records_by_company = {}
-                for record in deleted_records:
-                    company_id = record.get('ID_EMPRESA')
+                for record in estado_6_deleted:
+                    company_id_rec = record.get('ID_EMPRESA')
                     id_carga = record.get('ID_CARGA')
 
-                    if company_id and id_carga:
-                        company_key = f"EMPR{company_id}"
+                    if company_id_rec and id_carga:
+                        company_key = f"EMPR{company_id_rec}"
                         if company_key not in records_by_company:
                             records_by_company[company_key] = []
                         records_by_company[company_key].append(str(id_carga))
@@ -482,6 +599,7 @@ class KnowledgeService:
                             "deleted_records": [],
                             "restored_records": restore_result.get('restored_records', []),
                             "weaviate_result": weaviate_results,
+                            "s3_results": s3_results,
                             "rollback_performed": True
                         }
                     else:
@@ -497,6 +615,7 @@ class KnowledgeService:
                 "deleted_count": len(deleted_records),
                 "deleted_records": deleted_records,
                 "weaviate_result": weaviate_results,
+                "s3_results": s3_results,
                 "rollback_performed": False
             }
 
