@@ -8,6 +8,7 @@ import httpx
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.container import container
 from app.services.knowledge_service import KnowledgeService
 from app.models.response_models import create_success_response, create_error_response
 from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest, BatchUpdateKnowledgeStateRequest, BatchDeleteKnowledgeRequest
@@ -78,7 +79,8 @@ async def get_knowledge_endpoint(
             )
 
         # Get knowledge using service
-        service = KnowledgeService(db)
+        blob_storage = container.get_blob_storage()
+        service = KnowledgeService(db, blob_storage)
         knowledge_list = await service.get_knowledge_by_company(
             id_usuario=user_id,
             id_empresa=request.id_empresa,
@@ -188,7 +190,8 @@ async def batch_upload_knowledge_endpoint(
                 )
 
         # Batch upload knowledge using service
-        service = KnowledgeService(db)
+        blob_storage = container.get_blob_storage()
+        service = KnowledgeService(db, blob_storage)
         response = await service.generate_presigned_urls(
             id_usuario=user_id,
             id_empresa=request.id_empresa,
@@ -300,7 +303,8 @@ async def batch_update_knowledge_state_endpoint(
             )
 
         # Batch update knowledge process state using service
-        service = KnowledgeService(db)
+        blob_storage = container.get_blob_storage()
+        service = KnowledgeService(db, blob_storage)
         message_result = await service.batch_update_knowledge_state(
             id_usuario=user_id,
             id_cargas=request.id_cargas,
@@ -412,7 +416,8 @@ async def batch_delete_knowledge_endpoint(
                 )
 
         # Batch delete knowledge using service
-        service = KnowledgeService(db)
+        blob_storage = container.get_blob_storage()
+        service = KnowledgeService(db, blob_storage)
 
         try:
             deletion_result = await service.batch_delete_knowledge(
