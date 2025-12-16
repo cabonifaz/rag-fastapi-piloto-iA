@@ -79,6 +79,7 @@ class Settings(BaseSettings):
 
     # S3 Configuration
     s3_pdfs_bucket: str
+    s3_logos_bucket: str
     
     
     @field_validator('aws_region')

@@ -232,12 +232,12 @@ class CompanyService:
             if file_ext not in allowed_extensions:
                 raise ValueError(f"Invalid file type. Allowed: {', '.join(allowed_extensions)}")
 
-            # Get S3 bucket name (reuse PDFs bucket or use dedicated logos bucket)
-            bucket_name = settings.s3_pdfs_bucket
+            # Get S3 bucket name (use logos bucket)
+            bucket_name = settings.s3_logos_bucket
 
             # Generate deterministic S3 key: logos/{empresa_id}/logo.{extension}
             # This ensures old logos are overwritten when a new one is uploaded
-            s3_key = f"logos/{id_empresa}/logo{file_ext}"
+            s3_key = f"logos/{id_empresa}/logo-{id_empresa}{file_ext}"
 
             # Step 1: Generate presigned PUT URL using aioboto3 (async)
             try:
