@@ -79,8 +79,12 @@ class Settings(BaseSettings):
 
     # S3 Configuration
     s3_pdfs_bucket: str
-    
-    
+
+    # n8n Webhook Configuration
+    n8n_cc_webhook_url: Optional[str] = None
+    n8n_cc_jwt_secret: Optional[str] = None
+
+
     @field_validator('aws_region')
     @classmethod
     def validate_aws_region(cls, v):

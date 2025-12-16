@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List
 import logging
+import httpx
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.services.knowledge_service import KnowledgeService
 from app.models.response_models import create_success_response, create_error_response
 from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest, BatchUpdateKnowledgeStateRequest, BatchDeleteKnowledgeRequest
-from app.utils.jwt_auth import get_current_user_with_company_validation, get_current_user
+from app.utils.jwt_auth import get_current_user_with_company_validation, get_current_user, JWTAuth
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +307,33 @@ async def batch_update_knowledge_state_endpoint(
             id_estado_proceso=request.id_estado_proceso,
             usumod=current_user.get('USUARIO', 'System')
         )
+
+        # Call n8n webhook if configured
+        if settings.n8n_cc_webhook_url and settings.n8n_cc_jwt_secret:
+            try:
+                # Generate JWT token for n8n webhook
+                n8n_token = JWTAuth.create_n8n_jwt_token(user_id, settings.n8n_cc_jwt_secret)
+
+                # Call n8n webhook
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    webhook_response = await client.post(
+                        settings.n8n_cc_webhook_url,
+                        headers={
+                            "Authorization": f"Bearer {n8n_token}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "id_cargas": request.id_cargas,
+                            "id_estado_proceso": request.id_estado_proceso,
+                            "user_id": user_id
+                        }
+                    )
+                    webhook_response.raise_for_status()
+                    logger.info(f"n8n webhook called successfully for user {user_id}")
+            except Exception as webhook_error:
+                # Log error but don't fail the endpoint
+                logger.error(f"Error calling n8n webhook: {webhook_error}")
+                # Continue execution - webhook failure should not affect the main operation
 
         success_response = create_success_response("Estados de documentos actualizados exitosamente")
         return {
