@@ -625,9 +625,10 @@ class WeaviateRepository(VectorStorePort):
 
         Returns:
             Dictionary with deletion results:
-            - success: bool
-            - deleted_count: int
-            - errors: List of errors if any
+            - success: bool (True only if deleted_count > 0 and no errors)
+            - deleted_count: int (number of objects deleted)
+            - not_found: List[str] (doc_ids that were not found in Weaviate)
+            - errors: List[str] (error messages if any)
         """
         def _delete_sync() -> Dict[str, Any]:
             try:
@@ -635,8 +636,10 @@ class WeaviateRepository(VectorStorePort):
 
                 deleted_count = 0
                 errors = []
+                not_found_docs = []
 
-                for doc_id in doc_ids:
+                for doc_id_int in doc_ids:
+                    doc_id = f"CONOC-{doc_id_int}"
                     try:
                         # Build filter for doc_id
                         filter_condition = Filter.by_property("doc_id").equal(doc_id)
@@ -646,18 +649,45 @@ class WeaviateRepository(VectorStorePort):
                             company_filter = Filter.by_property("company_id").equal(company_id)
                             filter_condition = filter_condition & company_filter
 
-                        # Delete all objects matching the filter
+                        # STEP 1: Check if objects exist before attempting deletion
+                        try:
+                            check_query = collection.query.fetch_objects(
+                                filters=filter_condition,
+                                limit=1
+                            )
+
+                            objects_exist = len(check_query.objects) > 0
+
+                            if not objects_exist:
+                                warning_msg = f"No objects found with doc_id={doc_id} in collection {class_name}"
+                                logger.warning(warning_msg)
+                                not_found_docs.append(doc_id)
+                                continue  # Skip deletion if no objects found
+
+                        except Exception as check_error:
+                            logger.warning(f"Error checking existence of doc_id={doc_id}: {check_error}")
+                            # Continue with deletion attempt even if check fails
+
+                        # STEP 2: Delete all objects matching the filter
                         result = collection.data.delete_many(
                             where=filter_condition
                         )
 
                         # Count successful deletions
+                        objects_deleted = 0
                         if hasattr(result, 'successful') and result.successful:
+                            objects_deleted = result.successful
                             deleted_count += result.successful
                         elif hasattr(result, 'matches') and result.matches:
+                            objects_deleted = result.matches
                             deleted_count += result.matches
 
-                        logger.info(f"Deleted objects with doc_id={doc_id} from collection {class_name}")
+                        if objects_deleted > 0:
+                            logger.info(f"Deleted {objects_deleted} objects with doc_id={doc_id} from collection {class_name}")
+                        else:
+                            warning_msg = f"No objects deleted for doc_id={doc_id} (may not exist)"
+                            logger.warning(warning_msg)
+                            not_found_docs.append(doc_id)
 
                     except WeaviateBaseError as e:
                         error_msg = f"Error deleting doc_id {doc_id}: {str(e)}"
@@ -668,9 +698,16 @@ class WeaviateRepository(VectorStorePort):
                         logger.error(error_msg)
                         errors.append(error_msg)
 
+                # Check if nothing was deleted
+                if deleted_count == 0 and len(doc_ids) > 0:
+                    error_msg = f"No objects were deleted. Documents not found: {', '.join(not_found_docs)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+
                 return {
-                    "success": len(errors) == 0,
+                    "success": len(errors) == 0 and deleted_count > 0,
                     "deleted_count": deleted_count,
+                    "not_found": not_found_docs,
                     "errors": errors
                 }
 

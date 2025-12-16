@@ -210,11 +210,13 @@ class KnowledgeService:
     ) -> Dict[str, Any]:
         """
         Delete multiple knowledge/document records in batch.
+        - First queries SQL Server to verify existence and get company_id
+        - Validates existence in Weaviate (throws error if not found)
         - Logical deletion in SQL Server (ID_ESTADO_REGISTRO = 0)
         - Physical deletion in Weaviate (complete removal of all related objects)
 
         Args:
-            id_usuario: User ID who is deleting (for audit purposes)
+            id_usuario: User ID who is deleting (for audit and permission validation)
             id_cargas: List of knowledge/document IDs to delete
             usumod: User who deleted the records (max 200 chars, default: "System")
 
@@ -223,10 +225,100 @@ class KnowledgeService:
             - message_result: Status message from the stored procedure
             - deleted_count: Number of records deleted from SQL Server
             - weaviate_result: Result of Weaviate deletion (success, deleted_count, errors)
+
+        Raises:
+            ValueError: If documents are not found in SQL Server or Weaviate, or if user has insufficient permissions
         """
         try:
-            # Phase 1: Logical deletion in SQL Server
             logger.info(f"Starting batch deletion of {len(id_cargas)} knowledge records")
+
+            # PHASE 1: Query SQL Server to verify existence and get company_id
+            logger.info(f"Querying SQL Server to verify existence and get company information")
+
+            sql_result = self.repository.get_knowledge_by_ids(
+                id_usuario=id_usuario,
+                id_cargas=id_cargas
+            )
+
+            if not sql_result:
+                error_msg = "Error al consultar documentos en la base de datos"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+            message_result_check = sql_result.get('message_result')
+            records = sql_result.get('records', [])
+
+            # Check if the SP returned an error message (permission denied, user not found, etc.)
+            if message_result_check and message_result_check.get('ID_TIPO_MENSAJE') == 1:
+                error_msg = message_result_check.get('MENSAJE', 'Error de permisos')
+                logger.error(f"Permission or validation error: {error_msg}")
+                raise ValueError(error_msg)
+
+            # Check if we got any records
+            if not records:
+                error_msg = "Los documentos especificados no existen o ya fueron eliminados"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+            # Extract company_id from the first record (all records should have the same company)
+            company_id = records[0].get('ID_EMPRESA')
+            if not company_id:
+                error_msg = "No se pudo obtener el ID de empresa de los documentos"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+            logger.info(f"Found {len(records)} records in SQL Server for company {company_id}")
+
+            # PHASE 2: Validate existence in Weaviate BEFORE deleting from SQL Server
+            logger.info(f"Validating existence of documents in Weaviate (collection: EMPR{company_id})")
+
+            # Import here to avoid circular dependency
+            from app.core.container import container
+            vectorstore = container.get_vectorstore()
+
+            collection_name = f"EMPR{company_id}"
+
+            # Check if collection exists
+            collection_exists = await vectorstore.collection_exists(collection_name)
+
+            if not collection_exists:
+                error_msg = f"La colección {collection_name} no existe en la base de datos vectorial"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+            # Check if each document exists in Weaviate
+            not_found_in_weaviate = []
+            from weaviate.classes.query import Filter
+
+            try:
+                collection = vectorstore._client.collections.get(collection_name)
+
+                for id_carga in id_cargas:
+                    doc_id = f"CONOC-{id_carga}"
+
+                    # Query to check if exists
+                    check_query = collection.query.fetch_objects(
+                        filters=Filter.by_property("doc_id").equal(doc_id),
+                        limit=1
+                    )
+
+                    if len(check_query.objects) == 0:
+                        logger.warning(f"Document {doc_id} not found in {collection_name}")
+                        not_found_in_weaviate.append(f"ID: {id_carga}")
+
+            except Exception as check_error:
+                logger.error(f"Error checking existence in {collection_name}: {check_error}")
+                raise ValueError(f"Error al verificar existencia de documentos en la base de datos vectorial: {str(check_error)}")
+
+            # If any documents not found, raise error and don't proceed with deletion
+            if not_found_in_weaviate:
+                error_msg = f"Los siguientes documentos no se encontraron en la base de datos vectorial: {', '.join(not_found_in_weaviate)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+            logger.info(f"All {len(id_cargas)} documents found in Weaviate. Proceeding with deletion.")
+
+            # PHASE 3: Logical deletion in SQL Server (only if validation passed)
             db_result = self.repository.batch_delete_knowledge(
                 id_usuario=id_usuario,
                 id_cargas=id_cargas,
@@ -242,7 +334,7 @@ class KnowledgeService:
 
             logger.info(f"Logically deleted {len(deleted_records)} records from SQL Server")
 
-            # Phase 2: Physical deletion from Weaviate
+            # PHASE 3: Physical deletion from Weaviate
             # Group deleted records by company to delete from appropriate collections
             weaviate_results = []
 
@@ -284,7 +376,7 @@ class KnowledgeService:
                         delete_result = await vectorstore.delete_by_doc_ids(
                             class_name=collection_name,
                             doc_ids=doc_ids,
-                            company_id=collection_name.replace("EMPR", "")  # Extract company_id from collection name
+                            company_id=None  # Collection already scoped by company, no need to filter by company_id
                         )
 
                         weaviate_results.append({
@@ -292,7 +384,15 @@ class KnowledgeService:
                             **delete_result
                         })
 
-                        logger.info(f"Weaviate deletion result for {collection_name}: {delete_result}")
+                        # Log detailed results
+                        if delete_result.get('deleted_count', 0) > 0:
+                            logger.info(f"Weaviate deletion successful for {collection_name}: {delete_result['deleted_count']} objects deleted")
+
+                        if delete_result.get('not_found'):
+                            logger.warning(f"Documents not found in {collection_name}: {delete_result['not_found']}")
+
+                        if not delete_result.get('success', False):
+                            logger.error(f"Weaviate deletion failed for {collection_name}: {delete_result.get('errors', [])}")
 
                     except Exception as weaviate_error:
                         error_msg = f"Error deleting from Weaviate collection {collection_name}: {str(weaviate_error)}"

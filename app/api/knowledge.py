@@ -384,11 +384,22 @@ async def batch_delete_knowledge_endpoint(
 
         # Batch delete knowledge using service
         service = KnowledgeService(db)
-        deletion_result = await service.batch_delete_knowledge(
-            id_usuario=user_id,
-            id_cargas=request.id_cargas,
-            usumod=current_user.get('USUARIO', 'System')
-        )
+
+        try:
+            deletion_result = await service.batch_delete_knowledge(
+                id_usuario=user_id,
+                id_cargas=request.id_cargas,
+                usumod=current_user.get('USUARIO', 'System')
+            )
+        except ValueError as ve:
+            # Handle "not found" errors from Weaviate validation
+            error_msg = str(ve)
+            logger.warning(f"Documents not found in vector database: {error_msg}")
+            error_response = create_error_response(error_msg)
+            raise HTTPException(
+                status_code=404,
+                detail={"result": error_response.model_dump()}
+            )
 
         if not deletion_result:
             error_response = create_error_response("Error al eliminar los documentos")
