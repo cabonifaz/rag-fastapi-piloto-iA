@@ -1,6 +1,7 @@
 """Service for handling knowledge/document operations."""
 
 import logging
+import asyncio
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from app.infrastructure.repositories.knowledge_repository import KnowledgeRepository
@@ -334,9 +335,10 @@ class KnowledgeService:
 
             logger.info(f"Logically deleted {len(deleted_records)} records from SQL Server")
 
-            # PHASE 3: Physical deletion from Weaviate
+            # PHASE 4: Physical deletion from Weaviate with retry and compensation
             # Group deleted records by company to delete from appropriate collections
             weaviate_results = []
+            any_weaviate_failure = False
 
             if deleted_records:
                 # Import here to avoid circular dependency
@@ -355,7 +357,7 @@ class KnowledgeService:
                             records_by_company[company_key] = []
                         records_by_company[company_key].append(str(id_carga))
 
-                # Delete from Weaviate for each company collection
+                # Delete from Weaviate for each company collection (with retry)
                 for collection_name, doc_ids in records_by_company.items():
                     try:
                         # Check if collection exists first
@@ -371,32 +373,83 @@ class KnowledgeService:
                             })
                             continue
 
-                        # Delete from Weaviate
-                        logger.info(f"Deleting {len(doc_ids)} documents from Weaviate collection {collection_name}")
-                        delete_result = await vectorstore.delete_by_doc_ids(
-                            class_name=collection_name,
-                            doc_ids=doc_ids,
-                            company_id=None  # Collection already scoped by company, no need to filter by company_id
-                        )
+                        # RETRY MECHANISM: Attempt deletion with exponential backoff (max 3 attempts)
+                        max_retries = 3
+                        delete_result = None
+                        last_error = None
 
+                        for attempt in range(max_retries):
+                            try:
+                                logger.info(f"Deleting {len(doc_ids)} documents from Weaviate collection {collection_name} (attempt {attempt + 1}/{max_retries})")
+
+                                delete_result = await vectorstore.delete_by_doc_ids(
+                                    class_name=collection_name,
+                                    doc_ids=doc_ids,
+                                    company_id=None  # Collection already scoped by company
+                                )
+
+                                # Check if deletion was successful
+                                if delete_result.get('success', False):
+                                    logger.info(f"Weaviate deletion successful for {collection_name}: {delete_result['deleted_count']} objects deleted")
+                                    break  # Success - exit retry loop
+                                else:
+                                    last_error = f"Deletion failed: {delete_result.get('errors', [])}"
+                                    logger.warning(f"Attempt {attempt + 1} failed for {collection_name}: {last_error}")
+
+                                    # If not last attempt, wait before retry (exponential backoff)
+                                    if attempt < max_retries - 1:
+                                        wait_time = 2 ** attempt  # 1s, 2s, 4s
+                                        logger.info(f"Retrying in {wait_time} seconds...")
+                                        await asyncio.sleep(wait_time)
+
+                            except TimeoutError as timeout_error:
+                                last_error = f"Timeout on attempt {attempt + 1}: {str(timeout_error)}"
+                                logger.error(last_error)
+
+                                if attempt < max_retries - 1:
+                                    wait_time = 2 ** attempt
+                                    logger.info(f"Retrying after timeout in {wait_time} seconds...")
+                                    await asyncio.sleep(wait_time)
+                                else:
+                                    delete_result = {
+                                        "success": False,
+                                        "deleted_count": 0,
+                                        "errors": [last_error]
+                                    }
+
+                            except Exception as retry_error:
+                                last_error = f"Error on attempt {attempt + 1}: {str(retry_error)}"
+                                logger.error(last_error)
+
+                                if attempt < max_retries - 1:
+                                    wait_time = 2 ** attempt
+                                    logger.info(f"Retrying after error in {wait_time} seconds...")
+                                    await asyncio.sleep(wait_time)
+                                else:
+                                    delete_result = {
+                                        "success": False,
+                                        "deleted_count": 0,
+                                        "errors": [last_error]
+                                    }
+
+                        # Record result
                         weaviate_results.append({
                             "collection": collection_name,
                             **delete_result
                         })
 
-                        # Log detailed results
-                        if delete_result.get('deleted_count', 0) > 0:
-                            logger.info(f"Weaviate deletion successful for {collection_name}: {delete_result['deleted_count']} objects deleted")
+                        # Check for failures
+                        if not delete_result.get('success', False):
+                            any_weaviate_failure = True
+                            logger.error(f"All retry attempts failed for {collection_name}: {delete_result.get('errors', [])}")
 
                         if delete_result.get('not_found'):
                             logger.warning(f"Documents not found in {collection_name}: {delete_result['not_found']}")
 
-                        if not delete_result.get('success', False):
-                            logger.error(f"Weaviate deletion failed for {collection_name}: {delete_result.get('errors', [])}")
-
                     except Exception as weaviate_error:
-                        error_msg = f"Error deleting from Weaviate collection {collection_name}: {str(weaviate_error)}"
+                        error_msg = f"Unexpected error deleting from Weaviate collection {collection_name}: {str(weaviate_error)}"
                         logger.error(error_msg)
+                        any_weaviate_failure = True
                         weaviate_results.append({
                             "collection": collection_name,
                             "success": False,
@@ -404,11 +457,47 @@ class KnowledgeService:
                             "errors": [error_msg]
                         })
 
+            # COMPENSATION LOGIC: If any Weaviate deletion failed, rollback SQL changes
+            if any_weaviate_failure and deleted_records:
+                logger.warning(f"Weaviate deletion failed - initiating SQL rollback for {len(id_cargas)} records")
+
+                try:
+                    # Restore SQL records (undo soft delete)
+                    restore_result = self.repository.batch_restore_knowledge(
+                        id_usuario=id_usuario,
+                        id_cargas=id_cargas,
+                        usumod=f"{usumod} (auto-rollback)"
+                    )
+
+                    if restore_result and restore_result.get('restored_records'):
+                        logger.info(f"Successfully restored {len(restore_result['restored_records'])} records in SQL (compensation)")
+
+                        # Add rollback info to response
+                        return {
+                            "message_result": {
+                                "ID_TIPO_MENSAJE": 1,  # Error
+                                "MENSAJE": "Eliminación de Weaviate falló. Los registros fueron restaurados automáticamente en SQL."
+                            },
+                            "deleted_count": 0,  # No net deletion due to rollback
+                            "deleted_records": [],
+                            "restored_records": restore_result.get('restored_records', []),
+                            "weaviate_result": weaviate_results,
+                            "rollback_performed": True
+                        }
+                    else:
+                        logger.error("Failed to restore SQL records after Weaviate failure")
+                        raise ValueError("Weaviate deletion failed and SQL rollback also failed - data may be inconsistent")
+
+                except Exception as rollback_error:
+                    logger.error(f"CRITICAL: Failed to rollback SQL after Weaviate failure: {rollback_error}")
+                    raise ValueError(f"Weaviate deletion failed and SQL rollback failed: {str(rollback_error)}. Manual intervention required.")
+
             return {
                 "message_result": message_result,
                 "deleted_count": len(deleted_records),
                 "deleted_records": deleted_records,
-                "weaviate_result": weaviate_results
+                "weaviate_result": weaviate_results,
+                "rollback_performed": False
             }
 
         except Exception as e:

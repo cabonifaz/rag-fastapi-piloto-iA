@@ -408,6 +408,25 @@ async def batch_delete_knowledge_endpoint(
                 detail={"result": error_response.model_dump()}
             )
 
+        # Check if rollback was performed (Weaviate failed, SQL was restored)
+        if deletion_result.get('rollback_performed', False):
+            # HTTP 409 Conflict - Partial failure with automatic rollback
+            error_response = create_error_response(
+                deletion_result.get('message_result', {}).get('MENSAJE',
+                    'Eliminación de Weaviate falló. Los registros fueron restaurados automáticamente.')
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message_result": deletion_result.get('message_result'),
+                    "deleted_count": 0,  # No net deletion due to rollback
+                    "restored_records": deletion_result.get('restored_records', []),
+                    "weaviate_result": deletion_result.get('weaviate_result', []),
+                    "rollback_performed": True,
+                    "result": error_response.model_dump()
+                }
+            )
+
         success_response = create_success_response("Documentos eliminados exitosamente")
 
         return {
@@ -415,6 +434,7 @@ async def batch_delete_knowledge_endpoint(
             "deleted_count": deletion_result.get('deleted_count', 0),
             "deleted_records": deletion_result.get('deleted_records', []),
             "weaviate_result": deletion_result.get('weaviate_result', []),
+            "rollback_performed": False,
             "result": success_response.model_dump()
         }
 
