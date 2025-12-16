@@ -2,8 +2,11 @@
 
 from typing import List, Dict, Any
 import logging
+import time
 from sqlalchemy.orm import Session
 from app.infrastructure.repositories.company_repository import CompanyRepository
+from app.core.config import settings
+from app.core.aws_clients import get_s3_client
 
 logger = logging.getLogger(__name__)
 
@@ -185,3 +188,102 @@ class CompanyService:
         except Exception as e:
             logger.error(f"Error in get_companies_login service: {e}")
             return []
+
+    async def generate_logo_presigned_url(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_empresa: int,
+        logo_filename: str
+    ) -> Dict[str, Any]:
+        """
+        Generate presigned URL for company logo upload and update database.
+
+        This method combines both operations:
+        1. Generates presigned S3 URL for upload
+        2. Updates company record in database with logo path
+        3. Frontend then uploads directly to S3 using presigned URL
+
+        Args:
+            db: Database session
+            id_usuario: User ID performing the update
+            id_empresa: Company ID
+            logo_filename: Original filename (e.g., "logo.png")
+
+        Returns:
+            Dictionary containing:
+            - presigned_url: S3 presigned PUT URL (5 min expiration)
+            - s3_key: S3 object key path
+            - logo_filename: Original filename
+            - results: DB update results (ID_TIPO_MENSAJE, MENSAJE)
+
+        Raises:
+            ValueError: If file extension is not allowed or company ID is invalid
+        """
+        try:
+            # Validate company ID
+            if id_empresa <= 0:
+                raise ValueError("Invalid company ID")
+
+            # Validate file extension
+            allowed_extensions = ['.jpg', '.jpeg', '.png', '.svg']
+            file_ext = logo_filename.lower()[logo_filename.rfind('.'):]
+
+            if file_ext not in allowed_extensions:
+                raise ValueError(f"Invalid file type. Allowed: {', '.join(allowed_extensions)}")
+
+            # Get S3 bucket name (reuse PDFs bucket or use dedicated logos bucket)
+            bucket_name = settings.s3_pdfs_bucket
+
+            # Generate deterministic S3 key: logos/{empresa_id}/logo.{extension}
+            # This ensures old logos are overwritten when a new one is uploaded
+            s3_key = f"logos/{id_empresa}/logo{file_ext}"
+
+            # Step 1: Generate presigned PUT URL using aioboto3 (async)
+            try:
+                async with get_s3_client() as s3_client:
+                    presigned_url = await s3_client.generate_presigned_url(
+                        'put_object',
+                        Params={
+                            'Bucket': bucket_name,
+                            'Key': s3_key,
+                        },
+                        ExpiresIn=300,  # 5 minutes
+                        HttpMethod='PUT'
+                    )
+            except Exception as s3_error:
+                logger.error(f"Error generating presigned URL for S3: {s3_error}")
+                return {
+                    'presigned_url': None,
+                    's3_key': s3_key,
+                    'logo_filename': logo_filename,
+                    'results': [{
+                        'ID_TIPO_MENSAJE': 1,
+                        'MENSAJE': 'Generacion de URL prefirmada fallo'
+                    }]
+                }
+
+            # Step 2: Update database with logo path AFTER presigned URL is generated
+            # Only updates DB if presigned URL generation was successful
+            repository = CompanyRepository(db)
+            db_results = repository.update_company_logo(
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                logo_url=s3_key
+            )
+
+            logger.info(f"Generated presigned URL and updated DB for logo: {s3_key}")
+
+            return {
+                'presigned_url': presigned_url,
+                's3_key': s3_key,
+                'logo_filename': logo_filename,
+                'results': db_results
+            }
+
+        except ValueError as ve:
+            logger.error(f"Validation error in generate_logo_presigned_url: {ve}")
+            raise
+        except Exception as e:
+            logger.error(f"Error generating logo presigned URL: {e}")
+            raise
