@@ -79,6 +79,13 @@ class Settings(BaseSettings):
 
     # S3 Configuration
     s3_pdfs_bucket: str
+    s3_ingest_results_bucket: str
+
+    # n8n Webhook Configuration
+    n8n_cc_webhook_url: Optional[str] = None
+    n8n_cc_jwt_secret: Optional[str] = None
+
+
     s3_logos_bucket: str
     
     

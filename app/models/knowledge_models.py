@@ -26,3 +26,8 @@ class BatchUpdateKnowledgeStateRequest(BaseModel):
     """Request model for batch updating knowledge process state"""
     id_cargas: List[int]
     id_estado_proceso: int
+
+
+class BatchDeleteKnowledgeRequest(BaseModel):
+    """Request model for batch deleting knowledge/documents"""
+    id_cargas: List[int]
