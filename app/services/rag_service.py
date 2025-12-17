@@ -270,7 +270,7 @@ class RagService:
     #         }
 
 
-    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, area_id: int, id_ia_area: int, db: Session, created_at: str, chat_id: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, area_id: int, id_ia_area: int, db: Session, created_at: str, chat_id: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, request_timezone: str = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
