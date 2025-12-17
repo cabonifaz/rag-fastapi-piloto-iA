@@ -609,6 +609,126 @@ class WeaviateRepository(VectorStorePort):
 
         return await asyncio.to_thread(_is_ready)
 
+    async def delete_by_doc_ids(
+        self,
+        class_name: str,
+        doc_ids: List[str],
+        company_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Delete all objects with specific doc_ids from a collection.
+
+        Args:
+            class_name: Name of the collection (e.g., "EMPR123")
+            doc_ids: List of document IDs to delete (e.g., ["123", "124", "125"])
+            company_id: Optional company ID for additional filtering
+
+        Returns:
+            Dictionary with deletion results:
+            - success: bool (True only if deleted_count > 0 and no errors)
+            - deleted_count: int (number of objects deleted)
+            - not_found: List[str] (doc_ids that were not found in Weaviate)
+            - errors: List[str] (error messages if any)
+        """
+        def _delete_sync() -> Dict[str, Any]:
+            try:
+                collection = self._client.collections.get(class_name)
+
+                deleted_count = 0
+                errors = []
+                not_found_docs = []
+
+                for doc_id_int in doc_ids:
+                    doc_id = f"CONOC-{doc_id_int}"
+                    try:
+                        # Build filter for doc_id
+                        filter_condition = Filter.by_property("doc_id").equal(doc_id)
+
+                        # Add company_id filter if provided
+                        if company_id:
+                            company_filter = Filter.by_property("company_id").equal(company_id)
+                            filter_condition = filter_condition & company_filter
+
+                        # STEP 1: Check if objects exist before attempting deletion
+                        try:
+                            check_query = collection.query.fetch_objects(
+                                filters=filter_condition,
+                                limit=1
+                            )
+
+                            objects_exist = len(check_query.objects) > 0
+
+                            if not objects_exist:
+                                warning_msg = f"No objects found with doc_id={doc_id} in collection {class_name}"
+                                logger.warning(warning_msg)
+                                not_found_docs.append(doc_id)
+                                continue  # Skip deletion if no objects found
+
+                        except Exception as check_error:
+                            logger.warning(f"Error checking existence of doc_id={doc_id}: {check_error}")
+                            # Continue with deletion attempt even if check fails
+
+                        # STEP 2: Delete all objects matching the filter
+                        result = collection.data.delete_many(
+                            where=filter_condition
+                        )
+
+                        # Count successful deletions
+                        objects_deleted = 0
+                        if hasattr(result, 'successful') and result.successful:
+                            objects_deleted = result.successful
+                            deleted_count += result.successful
+                        elif hasattr(result, 'matches') and result.matches:
+                            objects_deleted = result.matches
+                            deleted_count += result.matches
+
+                        if objects_deleted > 0:
+                            logger.info(f"Deleted {objects_deleted} objects with doc_id={doc_id} from collection {class_name}")
+                        else:
+                            warning_msg = f"No objects deleted for doc_id={doc_id} (may not exist)"
+                            logger.warning(warning_msg)
+                            not_found_docs.append(doc_id)
+
+                    except WeaviateBaseError as e:
+                        error_msg = f"Error deleting doc_id {doc_id}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                    except Exception as e:
+                        error_msg = f"Unexpected error deleting doc_id {doc_id}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+
+                # Check if nothing was deleted
+                if deleted_count == 0 and len(doc_ids) > 0:
+                    error_msg = f"No objects were deleted. Documents not found: {', '.join(not_found_docs)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+
+                return {
+                    "success": len(errors) == 0 and deleted_count > 0,
+                    "deleted_count": deleted_count,
+                    "not_found": not_found_docs,
+                    "errors": errors
+                }
+
+            except WeaviateBaseError as e:
+                logger.error(f"Weaviate error in delete_by_doc_ids: {e}")
+                error_msg = str(e).lower()
+                if "unauthorized" in error_msg or "authentication" in error_msg:
+                    raise ConnectionError("Weaviate authentication failed")
+                elif "not found" in error_msg or "does not exist" in error_msg:
+                    raise ValueError(f"Collection '{class_name}' not found in Weaviate")
+                elif "connection" in error_msg or "network" in error_msg:
+                    raise ConnectionError("Cannot connect to Weaviate service")
+                else:
+                    raise ConnectionError(f"Weaviate service error: {str(e)}")
+
+            except Exception as e:
+                logger.error(f"Unexpected error in delete_by_doc_ids: {e}")
+                raise ConnectionError(f"Delete service error: {str(e)}")
+
+        return await asyncio.to_thread(_delete_sync)
+
     def close(self) -> None:
         """Cierra conexiones gRPC/HTTP."""
         if getattr(self, "_client", None) is not None:

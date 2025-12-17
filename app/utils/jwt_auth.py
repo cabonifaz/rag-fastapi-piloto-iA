@@ -63,6 +63,32 @@ class JWTAuth:
             raise
 
     @staticmethod
+    def create_n8n_jwt_token(user_id: int, jwt_secret: str) -> str:
+        """
+        Create JWT token for n8n webhook authentication
+
+        Args:
+            user_id: User ID from the current user token
+            jwt_secret: Secret key for n8n JWT (from N8N_CC_JWT_SECRET env var)
+
+        Returns:
+            JWT token string for n8n webhook
+        """
+        try:
+            payload = {
+                "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+                "iat": datetime.now(timezone.utc),
+                "user_id": user_id
+            }
+
+            token = jwt.encode(payload, jwt_secret, algorithm='HS256')
+            return token
+
+        except Exception as e:
+            logger.error(f"Error creating n8n JWT token: {e}")
+            raise
+
+    @staticmethod
     def _extract_payload(token: str) -> Dict[str, Any]:
         """Extract JWT payload without validation"""
         return jwt.decode(

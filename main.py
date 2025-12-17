@@ -8,7 +8,21 @@ import uvicorn
 import os
 import logging
 
-# Configure logging to filter health checks BEFORE other imports
+# Configure logging FIRST - load settings to get LOG_LEVEL
+from dotenv import load_dotenv
+load_dotenv()
+
+# Get log level from environment (default to INFO if not set)
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# Configure logging with the specified level
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# Configure logging to filter health checks AFTER basic config
 class HealthCheckFilter(logging.Filter):
     def filter(self, record):
         # Check if this is an access log record for health check endpoint
