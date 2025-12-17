@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     n8n_cc_jwt_secret: Optional[str] = None
 
 
+    s3_logos_bucket: str
+    
+    
     @field_validator('aws_region')
     @classmethod
     def validate_aws_region(cls, v):
