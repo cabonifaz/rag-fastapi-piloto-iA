@@ -75,7 +75,8 @@ async def chat_streaming_endpoint(
                     similarity_threshold=request.similarity_threshold,
                     alpha=request.alpha,
                     temperature=request.temperature,
-                    max_tokens=request.max_tokens
+                    max_tokens=request.max_tokens,
+                    request_timezone=request.request_timezone
                 ):
                     if chunk_data["type"] == "chunk":
                         # Concatenate content

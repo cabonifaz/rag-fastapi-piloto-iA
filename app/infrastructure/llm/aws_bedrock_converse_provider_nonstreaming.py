@@ -128,28 +128,20 @@ class AWSBedrockConverseNonStreamingProvider(LLMNonStreamingPort):
         """Update the system prompt for this provider instance."""
         self.system_prompt = system_prompt
 
-    def _build_system_config(self, custom_system: Optional[str] = None, timestamp_utc: Optional[int] = None, request_timezone: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
+    def _build_system_config(self, custom_system: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
         """Build system configuration for Converse API."""
         # Use custom role behavior or default
         role_behavior = custom_system or self.default_role_behavior
 
-        # Build time context text if timestamp and timezone are provided
-        time_context = ""
-        if timestamp_utc is not None and request_timezone is not None:
-            time_context = f"\nCurrent Time Context: The current timestamp is {timestamp_utc} (Unix UTC format) and the user's timezone is {request_timezone}. Use this information to provide accurate temporal references."
-        elif timestamp_utc is not None:
-            time_context = f"\nCurrent Time Context: The current timestamp is {timestamp_utc} (Unix UTC format). Use this information to provide accurate temporal references."
-        elif request_timezone is not None:
-            time_context = f"\nCurrent Time Context: The user's timezone is {request_timezone}. Use this information to provide accurate temporal references."
-
         # Concatenate role behavior with formatting instructions
         system_text = f"""{role_behavior}
-Core Principles:
-Communication: Use natural, conversational language matching the user's tone and exact language. Default to Spanish if input is unclear/mixed.
-Response Style: Be concise yet complete. Add brief conversational phrases only when they enhance clarity.
-Technical Content: Prioritize accuracy over completeness. Present structured data in clean, plain text optimized for messaging.
-Limitations: Never speculate beyond retrieved context. If information is insufficient, clearly state what you cannot answer.
-Process: Never explain your internal reasoning or overthink responses.{time_context}"""
+Use a natural, human-like tone in responses. Maintain conversational and engaging style throughout.
+When providing data or structured information, prioritize technical accuracy and clarity.
+Present information in a clean, easy-to-read plain text format suitable for messaging platforms.
+Answer directly and briefly. You may include short natural phrases to make the response more conversational.
+Do not overthink, speculate, or explain your internal reasoning.
+Always mirror the user's language exactly in your response. If the input language is unclear, mixed,
+or contains spelling errors, default to Spanish."""
 
         if system_text:
             return [{"text": system_text}]
@@ -162,9 +154,7 @@ Process: Never explain your internal reasoning or overthink responses.{time_cont
         temperature: float = 0.3,
         role_behavior: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
-        fallback_models: Optional[List[str]] = None,
-        timestamp_utc: Optional[int] = None,
-        request_timezone: Optional[str] = None
+        fallback_models: Optional[List[str]] = None
     ) -> str:
         """
         Generate text using AWS Bedrock Converse API with automatic fallback.
@@ -185,8 +175,6 @@ Process: Never explain your internal reasoning or overthink responses.{time_cont
                      If provided, prompt will be ignored and messages will be used instead
             fallback_models: Optional list of fallback model IDs to try if primary is saturated.
                            If not provided, uses hardcoded MODELS list.
-            timestamp_utc: Optional Unix timestamp in UTC format
-            request_timezone: Optional timezone string for the request
 
         Returns:
             Complete generated text as a single string
@@ -230,9 +218,7 @@ Process: Never explain your internal reasoning or overthink responses.{time_cont
                     max_tokens=max_tokens,
                     temperature=temperature,
                     role_behavior=role_behavior,
-                    messages=messages,
-                    timestamp_utc=timestamp_utc,
-                    request_timezone=request_timezone
+                    messages=messages
                 )
 
                 # Success - return complete response
@@ -290,9 +276,7 @@ Process: Never explain your internal reasoning or overthink responses.{time_cont
         max_tokens: int = 2048,
         temperature: float = 0.3,
         role_behavior: Optional[str] = None,
-        messages: Optional[List[Dict[str, Any]]] = None,
-        timestamp_utc: Optional[int] = None,
-        request_timezone: Optional[str] = None
+        messages: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """
         Generate from a specific model (internal helper).
@@ -309,8 +293,6 @@ Process: Never explain your internal reasoning or overthink responses.{time_cont
             temperature: Temperature for sampling
             role_behavior: Optional role behavior override
             messages: Optional conversation history
-            timestamp_utc: Optional Unix timestamp in UTC format
-            request_timezone: Optional timezone string for the request
 
         Returns:
             Complete generated text as a single string
@@ -363,8 +345,8 @@ Process: Never explain your internal reasoning or overthink responses.{time_cont
                 additional_fields = model_config.get_converse_additional_fields()
                 request_params["additionalModelRequestFields"] = additional_fields
 
-            # Add system prompt with timestamp and timezone context
-            request_params["system"] = self._build_system_config(role_behavior, timestamp_utc, request_timezone)
+            # Add system prompt
+            request_params["system"] = self._build_system_config(role_behavior)
 
             # Use aioboto3 async client for truly non-blocking Bedrock calls
             session = aioboto3.Session(**self.session_params)

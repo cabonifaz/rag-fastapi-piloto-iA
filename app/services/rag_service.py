@@ -527,7 +527,9 @@ class RagService:
             max_tokens=llm_max_tokens,
             temperature=llm_temperature,
             role_behavior=role_behavior,
-            messages=conversation_history_for_prompt if conversation_history_for_prompt else None
+            messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
+            timestamp_utc=created_at,
+            request_timezone=request_timezone
         ):
             assistant_response += chunk
 
