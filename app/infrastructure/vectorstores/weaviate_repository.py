@@ -375,7 +375,8 @@ class WeaviateRepository(VectorStorePort):
         area_id: int,
         query_vector: List[float],
         top_k: Optional[int] = None,
-        similarity_threshold: Optional[float] = None
+        similarity_threshold: Optional[float] = None,
+        general_area: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar vectors in a company-scoped collection with area filtering.
 
@@ -385,12 +386,14 @@ class WeaviateRepository(VectorStorePort):
             query_vector: Vector for semantic search
             top_k: Number of results to return
             similarity_threshold: Minimum similarity score
+            general_area: Area ID for general/shared documents. If None, uses area_id.
         """
 
         try:
             # Format IDs with prefixes for Weaviate collection and area filtering
             collection_name = f"EMPR{company_id}"
             area = f"AREA{area_id}"
+            general = f"AREA{general_area if general_area is not None else area_id}"
 
             # Use environment defaults if not provided
             actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
@@ -410,12 +413,11 @@ class WeaviateRepository(VectorStorePort):
 
             # Build area filter using v4 Filter class
             # Note: No company filter needed - collection itself is scoped to company
-            # Include both the specific area_id AND General area documents
+            # Include both the specific area_id AND general area documents
             # area_id contains concatenated values like "AREA123"
-            # area contains "General" for shared documents
             area_filter = (
                 Filter.by_property("area_id").equal(area) |
-                Filter.by_property("area").equal("General")
+                Filter.by_property("area_id").equal(general)
             )
 
             filters = area_filter
@@ -480,7 +482,7 @@ class WeaviateRepository(VectorStorePort):
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
         alpha: Optional[float] = None,
-        general_area: Optional[float] = None
+        general_area: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Hybrid search (vector + BM25) in a company-scoped collection with area filtering.
 
@@ -492,13 +494,14 @@ class WeaviateRepository(VectorStorePort):
             top_k: Number of results to return
             similarity_threshold: Minimum similarity score
             alpha: Hybrid search weight (0.0 = pure BM25, 1.0 = pure vector)
-            general_area: Include general area documents if > 0
+            general_area: Area ID for general/shared documents. If None, uses area_id.
         """
 
         try:
             # Format IDs with prefixes for Weaviate collection and area filtering
             collection_name = f"EMPR{company_id}"
             area = f"AREA{area_id}"
+            general = f"AREA{general_area if general_area is not None else area_id}"
 
             # Use environment defaults if not provided
             actual_top_k = top_k if top_k is not None else settings.rag_top_k_results
@@ -525,7 +528,7 @@ class WeaviateRepository(VectorStorePort):
             # area contains "General" for shared documents
             area_filter = (
                 Filter.by_property("area_id").equal(area) |
-                Filter.by_property("area").equal("General")
+                Filter.by_property("area_id").equal(general)
             )
 
             filters = area_filter

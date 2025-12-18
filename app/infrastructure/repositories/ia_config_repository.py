@@ -158,6 +158,16 @@ class IaConfigRepository:
 
                     if row:
                         config_dict = dict(zip(columns, row))
+
+                        # Convert Decimal types to proper Python types
+                        for key, value in config_dict.items():
+                            if isinstance(value, Decimal):
+                                # Convert to int if it's a whole number, otherwise float
+                                if value % 1 == 0:
+                                    config_dict[key] = int(value)
+                                else:
+                                    config_dict[key] = float(value)
+
                         result['config'] = config_dict
                     else:
                         logger.info(f"No RAG config found for id_empresa={id_empresa}, id_area={id_area}")
@@ -172,7 +182,13 @@ class IaConfigRepository:
 
                         if row:
                             general_area_dict = dict(zip(columns, row))
-                            result['general_area'] = general_area_dict.get('GENERAL_AREA')
+                            general_area_value = general_area_dict.get('GENERAL_AREA')
+
+                            # Convert Decimal to int if needed
+                            if isinstance(general_area_value, Decimal):
+                                general_area_value = int(general_area_value)
+
+                            result['general_area'] = general_area_value
 
                 cursor.close()
 

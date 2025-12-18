@@ -457,7 +457,8 @@ class RagService:
             query_vector=query_embedding,
             top_k=rag_config['config']['RAG_TOP_K_RESULTS'],
             similarity_threshold=rag_config['config']['RAG_SIMILARITY_THRESHOLD'],
-            alpha=rag_config['config']['RAG_ALPHA']
+            alpha=rag_config['config']['RAG_ALPHA'],
+            general_area=rag_config.get('general_area')
         )
 
         # Step 3: Prepare context text for LLM with source metadata using utility function
@@ -675,8 +676,9 @@ class RagService:
                     logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
                     recontextualized_result = None
 
-            # Load IA area role behavior configuration
-            role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
+            # Load IA area RAG configuration
+            rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
+            logger.info(f"Retrieved RAG config: {rag_config}")
 
             # Save user message to DynamoDB
             try:
@@ -712,9 +714,10 @@ class RagService:
                 area_id=area_id,
                 query_text=query_for_search,
                 query_vector=query_embedding,
-                top_k=top_k,
-                similarity_threshold=similarity_threshold,
-                alpha=alpha
+                top_k=top_k if top_k is not None else rag_config['config']['RAG_TOP_K_RESULTS'],
+                similarity_threshold=similarity_threshold if similarity_threshold is not None else rag_config['config']['RAG_SIMILARITY_THRESHOLD'],
+                alpha=alpha if alpha is not None else rag_config['config']['RAG_ALPHA'],
+                general_area=rag_config.get('general_area')
             )
 
             # Prepare context text for LLM
@@ -739,9 +742,10 @@ class RagService:
             model_config = self.llm_nonstreaming_provider.get_model_config()
             rag_prompt = model_config.build_rag_prompt(cleaned_message, context_text)
 
-            # Use provided parameters or fall back to environment defaults
-            llm_temperature = temperature if temperature is not None else settings.llm_temperature
-            llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
+            # Use provided parameters or fall back to rag_config values
+            llm_temperature = temperature if temperature is not None else rag_config['config']['LLM_TEMPERATURE']
+            llm_max_tokens = max_tokens if max_tokens is not None else rag_config['config']['LLM_MAX_TOKENS']
+            role_behavior = rag_config['config']['ROLE_BEHAVIOR']
 
             # Generate complete response using non-streaming provider
             assistant_response = await self.llm_nonstreaming_provider.generate(
