@@ -67,15 +67,9 @@ async def chat_streaming_endpoint(
                     message=request.message,
                     company_id=request.company_id,
                     area_id=request.area_id,
-                    id_ia_area=request.id_ia_area,
                     db=db,
                     created_at=request.created_at,
                     chat_id=request.chat_id,
-                    top_k=request.top_k,
-                    similarity_threshold=request.similarity_threshold,
-                    alpha=request.alpha,
-                    temperature=request.temperature,
-                    max_tokens=request.max_tokens,
                     request_timezone=request.request_timezone
                 ):
                     if chunk_data["type"] == "chunk":
@@ -197,15 +191,10 @@ async def chat_n8n_endpoint(
             message=request.message,
             company_id=request.company_id,
             area_id=request.area_id,
-            id_ia_area=request.id_ia_area,
             db=db,
             created_at=request.created_at,
             chat_id=request.chat_id,
-            top_k=request.top_k,
-            similarity_threshold=request.similarity_threshold,
-            alpha=request.alpha,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens
+            request_timezone=request.request_timezone
         )
 
         logger.info(f"[N8N RESPONSE] Result type: {result.get('result', {}).get('idTipoMensaje')}")

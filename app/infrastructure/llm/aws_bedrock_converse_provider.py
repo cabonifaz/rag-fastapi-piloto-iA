@@ -73,8 +73,8 @@ class AWSBedrockConverseProvider(LLMPort):
     def __init__(
         self,
         region: str,
-        model_id: str,
-        role_behavior: str,
+        model_id: Optional[str] = None,
+        role_behavior: Optional[str] = None,
         profile_name: Optional[str] = None,
         aws_access_key_id: Optional[str] = None,
         aws_secret_access_key: Optional[str] = None,
@@ -84,8 +84,8 @@ class AWSBedrockConverseProvider(LLMPort):
 
         Args:
             region: AWS region
-            model_id: Bedrock model ID
-            role_behavior: Role behavior instructions for the model
+            model_id: Bedrock model ID (optional, will be provided per-request from database)
+            role_behavior: Role behavior instructions (optional, will be provided per-request from database)
             profile_name: AWS profile name (optional)
             aws_access_key_id: AWS access key ID (optional)
             aws_secret_access_key: AWS secret access key (optional)
@@ -115,8 +115,8 @@ class AWSBedrockConverseProvider(LLMPort):
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
 
-        # Get model-specific configuration for optimized prompts
-        self.model_config = ModelConfigFactory.get_model_config(model_id)
+        # Get model-specific configuration for optimized prompts (will be retrieved per-request)
+        self.model_config = ModelConfigFactory.get_model_config(model_id) if model_id else None
 
         # Get reference to global saturation tracker
         self.saturation_tracker = get_saturation_tracker()
@@ -156,9 +156,11 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
 
     async def generate_stream(
         self,
+        model_id: str,
         prompt: str = None,
         max_tokens: int = 2048,
         temperature: float = 0.3,
+        top_p: float = 0.9,
         role_behavior: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
         fallback_models: Optional[List[str]] = None,
@@ -174,9 +176,11 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         Uses aioboto3 for fully async, non-blocking AWS API calls.
 
         Args:
+            model_id: Model ID to use as primary model (from database config)
             prompt: User prompt (used if messages is None)
             max_tokens: Maximum tokens to generate (default: 2048)
             temperature: Temperature for sampling (default: 0.3)
+            top_p: Top-p (nucleus) sampling parameter (default: 0.9)
             role_behavior: Optional role behavior (overrides instance system_prompt)
             messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                      If provided, prompt will be ignored and messages will be used instead
@@ -189,21 +193,21 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             Text chunks as they are generated
         """
         # Build list of models to try
-        models_to_try = [self.model_id]
+        models_to_try = [model_id]
         if fallback_models:
             models_to_try.extend(fallback_models)
         else:
             # Use hardcoded MODELS list as fallback (all models except current one)
-            fallback_list = [m["model_id"] for m in MODELS if m["model_id"] != self.model_id]
+            fallback_list = [m["model_id"] for m in MODELS if m["model_id"] != model_id]
             models_to_try.extend(fallback_list)
 
         # Filter out saturated models
         available_models = []
-        for model_id in models_to_try:
-            if not await self.saturation_tracker.is_saturated(model_id):
-                available_models.append(model_id)
+        for model in models_to_try:
+            if not await self.saturation_tracker.is_saturated(model):
+                available_models.append(model)
             else:
-                logger.debug(f"⏭️ Skipping {model_id} (currently marked as saturated)")
+                logger.debug(f"⏭️ Skipping {model} (currently marked as saturated)")
 
         if not available_models:
             saturated = await self.saturation_tracker.get_active_saturated_models()
@@ -226,6 +230,7 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
                     prompt=prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    top_p=top_p,
                     role_behavior=role_behavior,
                     messages=messages,
                     timestamp_utc=timestamp_utc,
@@ -287,6 +292,7 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
         prompt: str = None,
         max_tokens: int = 2048,
         temperature: float = 0.3,
+        top_p: float = 0.9,
         role_behavior: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
         timestamp_utc: Optional[str] = None,
@@ -303,6 +309,7 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             prompt: User prompt
             max_tokens: Maximum tokens to generate
             temperature: Temperature for sampling
+            top_p: Top-p (nucleus) sampling parameter
             role_behavior: Optional role behavior override
             messages: Optional conversation history
             timestamp_utc: Optional Unix timestamp in UTC format (as string)
@@ -343,14 +350,14 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             # Get model-specific config for this attempt
             model_config = ModelConfigFactory.get_model_config(model_id)
 
-            # Build request parameters
+            # Build request parameters - use model_id from config (normalized for AWS)
             request_params = {
-                "modelId": model_id,
+                "modelId": model_config.model_id,
                 "messages": converse_messages,
                 "inferenceConfig": {
                     "maxTokens": max_tokens,
                     "temperature": temperature,
-                    "topP": getattr(settings, 'llm_top_p', 0.9)
+                    "topP": top_p
                 }
             }
 

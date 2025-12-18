@@ -112,7 +112,7 @@ class Llama4_Maverick17BConfig(MetaModelConfig):
     """Specific configuration for Llama 4 Maverick 17B - focused on request/response formatting."""
 
     def __init__(self):
-        super().__init__("meta.llama4-maverick-17b-instruct-v1:0")
+        super().__init__("us.meta.llama4-maverick-17b-instruct-v1:0")
 
 
 def get_meta_config(model_id: str) -> MetaModelConfig:

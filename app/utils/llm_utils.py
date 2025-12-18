@@ -7,9 +7,11 @@ logger = logging.getLogger(__name__)
 
 async def generate_text_stream_with_validation(
     llm_provider,
+    model_id: str,
     prompt: str = None,
     max_tokens: int = None,
     temperature: float = None,
+    top_p: float = None,
     role_behavior: str = None,
     messages: Optional[List[Dict[str, str]]] = None,
     timestamp_utc: Optional[str] = None,
@@ -25,9 +27,11 @@ async def generate_text_stream_with_validation(
 
     Args:
         llm_provider: The LLM provider instance (port implementation)
+        model_id: Model ID to use (from database config)
         prompt: The user prompt (used if messages is None)
         max_tokens: Maximum tokens to generate
         temperature: Temperature for sampling
+        top_p: Top-p (nucleus) sampling parameter
         role_behavior: Optional role behavior (system prompt)
         messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                  If provided, prompt will be ignored and messages will be used instead
@@ -47,24 +51,22 @@ async def generate_text_stream_with_validation(
     if messages is None and (not prompt or not prompt.strip()):
         raise ValueError("Either prompt or messages must be provided")
 
-    # Use provided values or fall back to config defaults
-    llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
-    llm_temperature = temperature if temperature is not None else settings.llm_temperature
-
     # Validate parameters
-    if llm_max_tokens <= 0:
+    if max_tokens is not None and max_tokens <= 0:
         raise ValueError("max_tokens must be greater than 0")
 
-    if not (0.0 <= llm_temperature <= 2.0):
+    if temperature is not None and not (0.0 <= temperature <= 2.0):
         raise ValueError("temperature must be between 0.0 and 2.0")
 
     try:
         has_content = False
 
         async for chunk in llm_provider.generate_stream(
+            model_id=model_id,
             prompt=prompt,
-            max_tokens=llm_max_tokens,
-            temperature=llm_temperature,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
             role_behavior=role_behavior,
             messages=messages,
             timestamp_utc=timestamp_utc,
@@ -84,6 +86,93 @@ async def generate_text_stream_with_validation(
 
         if not has_content:
             raise ValueError("El modelo no generó una respuesta. Por favor, intenta reformular tu pregunta.")
+
+    except ConnectionError as e:
+        logger.error(f"Connection error during LLM generation: {e}")
+        raise ConnectionError(f"LLM service unavailable: {str(e)}")
+    except ValueError as e:
+        logger.error(f"Invalid input for LLM: {e}")
+        raise ValueError(f"Invalid prompt or parameters: {str(e)}")
+    except TimeoutError as e:
+        logger.error(f"Timeout error during LLM generation: {e}")
+        raise TimeoutError(f"LLM generation timeout: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error during LLM generation: {e}")
+        raise ConnectionError(f"LLM generation failed: {str(e)}")
+
+
+async def generate_text_with_validation(
+    llm_provider,
+    model_id: str,
+    prompt: str = None,
+    max_tokens: int = None,
+    temperature: float = None,
+    top_p: float = None,
+    role_behavior: str = None,
+    messages: Optional[List[Dict[str, str]]] = None,
+    timestamp_utc: Optional[str] = None,
+    request_timezone: Optional[str] = None
+) -> str:
+    """
+    Generate complete text response using non-streaming LLM provider with validation and error handling.
+
+    This utility wraps the LLM provider's generate method to add:
+    - Parameter validation
+    - Empty response validation
+    - Consistent error handling
+
+    Args:
+        llm_provider: The LLM provider instance (non-streaming port implementation)
+        model_id: Model ID to use (from database config)
+        prompt: The user prompt (used if messages is None)
+        max_tokens: Maximum tokens to generate
+        temperature: Temperature for sampling
+        top_p: Top-p (nucleus) sampling parameter
+        role_behavior: Optional role behavior (system prompt)
+        messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
+                 If provided, prompt will be ignored and messages will be used instead
+        timestamp_utc: Optional Unix timestamp in UTC format (as string)
+        request_timezone: Optional timezone string for the request
+
+    Returns:
+        Complete generated text as a single string
+
+    Raises:
+        ValueError: If parameters are invalid or no response generated
+        ConnectionError: If LLM service is unavailable
+        TimeoutError: If LLM generation times out
+    """
+
+    # Validate that either prompt or messages is provided
+    if messages is None and (not prompt or not prompt.strip()):
+        raise ValueError("Either prompt or messages must be provided")
+
+    # Validate parameters
+    if max_tokens is not None and max_tokens <= 0:
+        raise ValueError("max_tokens must be greater than 0")
+
+    if temperature is not None and not (0.0 <= temperature <= 2.0):
+        raise ValueError("temperature must be between 0.0 and 2.0")
+
+    try:
+        # Call non-streaming provider
+        response = await llm_provider.generate(
+            model_id=model_id,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            role_behavior=role_behavior,
+            messages=messages,
+            timestamp_utc=timestamp_utc,
+            request_timezone=request_timezone
+        )
+
+        # Validate response
+        if not response or not response.strip():
+            raise ValueError("El modelo no generó una respuesta. Por favor, intenta reformular tu pregunta.")
+
+        return response
 
     except ConnectionError as e:
         logger.error(f"Connection error during LLM generation: {e}")
