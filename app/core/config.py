@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     
     llm_provider: str
     llm_region: str
-    llm_top_p: float
 
     orchestrator_model_id: str
     orchestrator_max_tokens: int
