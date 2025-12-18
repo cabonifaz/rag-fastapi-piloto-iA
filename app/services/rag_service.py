@@ -348,8 +348,9 @@ class RagService:
                 logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
                 recontextualized_result = None
 
-        # Load IA area role behavior configuration
-        role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
+        # Load IA area RAG configuration
+        rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
+        logger.info(f"Retrieved RAG config: {rag_config}")
 
         # Track if a new chat was created and store the title
         new_chat_created = False
@@ -454,9 +455,9 @@ class RagService:
             area_id=area_id,
             query_text=query_for_search,
             query_vector=query_embedding,
-            top_k=top_k,
-            similarity_threshold=similarity_threshold,
-            alpha=alpha
+            top_k=rag_config['config']['RAG_TOP_K_RESULTS'],
+            similarity_threshold=rag_config['config']['RAG_SIMILARITY_THRESHOLD'],
+            alpha=rag_config['config']['RAG_ALPHA']
         )
 
         # Step 3: Prepare context text for LLM with source metadata using utility function
@@ -524,9 +525,9 @@ class RagService:
         async for chunk in generate_text_stream_with_validation(
             llm_provider=self.llm_provider,
             prompt=rag_prompt,
-            max_tokens=llm_max_tokens,
-            temperature=llm_temperature,
-            role_behavior=role_behavior,
+            max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
+            temperature=rag_config['config']['LLM_TEMPERATURE'],
+            role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
             messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
             timestamp_utc=created_at,
             request_timezone=request_timezone

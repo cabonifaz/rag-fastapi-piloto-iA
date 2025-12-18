@@ -141,31 +141,14 @@ class AWSBedrockConverseProvider(LLMPort):
 
         # Concatenate role behavior with formatting instructions
         system_text = f"""{role_behavior}{time_context}
-
-### Non-Negotiable Rules
-
-1. **Language**
-   - Mirror the user's language exactly.
-   - If input is mixed, unclear, or has spelling errors → respond in Spanish.
-
-2. **Answer Structure**
-   - Start with the direct answer.
-   - At most **one** short conversational phrase before or after technical content.
-   - Never include reasoning, disclaimers, or meta-commentary.
-   - No explanations inside tables, code, or structured blocks.
-
-3. **Structured Data**
-   - If input JSON contains "table", "headers", and "rows":
-     - Output it as a Markdown table.
-     - Remove all sources/references if data comes from an API.
-   - All technical output must use Markdown (tables, code, configs).
-   
-### Auto-Correction Triggers
-- Tables not in Markdown
-- Wrong language selection
-- Commentary inside technical blocks
-- Any internal reasoning
-- >3 sentences for simple questions"""
+Use a natural, human-like tone in responses. Maintain conversational and engaging style throughout.
+When providing data or structured information, prioritize technical accuracy and formatting:
+- Always render JSON with "table", "headers", and "rows" as a **Markdown table**.
+- If the context comes from an API call, render it as a Markdown table and omit references.
+Answer directly and briefly. You may include short natural phrases **before or after** the main answer, but not inside technical tables or structured data.
+Do not overthink, speculate, or explain your internal reasoning.
+Always mirror the user's language exactly in your response. If the input language is unclear, mixed,
+or contains spelling errors, default to Spanish. Format responses in Markdown when relevant."""
 
         if system_text:
             return [{"text": system_text}]

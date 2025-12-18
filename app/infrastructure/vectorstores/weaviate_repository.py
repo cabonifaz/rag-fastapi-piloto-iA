@@ -479,7 +479,8 @@ class WeaviateRepository(VectorStorePort):
         query_vector: List[float],
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
-        alpha: Optional[float] = None
+        alpha: Optional[float] = None,
+        general_area: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """Hybrid search (vector + BM25) in a company-scoped collection with area filtering.
 
@@ -491,6 +492,7 @@ class WeaviateRepository(VectorStorePort):
             top_k: Number of results to return
             similarity_threshold: Minimum similarity score
             alpha: Hybrid search weight (0.0 = pure BM25, 1.0 = pure vector)
+            general_area: Include general area documents if > 0
         """
 
         try:
