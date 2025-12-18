@@ -18,9 +18,10 @@ from app.services.message_service import MessageService
 from app.services.ia_config_service import IaConfigService
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 from app.infrastructure.repositories.chat_repository import ChatRepository
+from app.infrastructure.llm.model_factory import ModelConfigFactory
 from app.utils.query_utils import clean_user_query
 from app.utils.search_utils import build_context_from_search_results
-from app.utils.llm_utils import generate_text_stream_with_validation
+from app.utils.llm_utils import generate_text_stream_with_validation, generate_text_with_validation
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -270,7 +271,7 @@ class RagService:
     #         }
 
 
-    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, area_id: int, id_ia_area: int, db: Session, created_at: str, chat_id: str = None, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: str = None, request_timezone: str = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -284,8 +285,6 @@ class RagService:
                 raise ValueError("Company ID is required and cannot be empty")
             if not area_id:
                 raise ValueError("Area is required and cannot be empty")
-            if id_ia_area is None:
-                raise ValueError("ID IA Area is required and cannot be empty")
 
         except ValueError as e:
             logger.error(f"Validation error in process_rag_query_stream: {e}")
@@ -348,8 +347,9 @@ class RagService:
                 logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
                 recontextualized_result = None
 
-        # Load IA area role behavior configuration
-        role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
+        # Load IA area RAG configuration
+        rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
+        logger.info(f"Retrieved RAG config: {rag_config}")
 
         # Track if a new chat was created and store the title
         new_chat_created = False
@@ -454,9 +454,10 @@ class RagService:
             area_id=area_id,
             query_text=query_for_search,
             query_vector=query_embedding,
-            top_k=top_k,
-            similarity_threshold=similarity_threshold,
-            alpha=alpha
+            top_k=rag_config['config']['RAG_TOP_K_RESULTS'],
+            similarity_threshold=rag_config['config']['RAG_SIMILARITY_THRESHOLD'],
+            alpha=rag_config['config']['RAG_ALPHA'],
+            general_area=rag_config.get('general_area')
         )
 
         # Step 3: Prepare context text for LLM with source metadata using utility function
@@ -493,13 +494,10 @@ class RagService:
 
         # Step 5: Generate LLM answer
         # Build RAG prompt with context (conversation history handled by Converse API messages)
-        model_config = self.llm_provider.get_model_config()
+        model_config = ModelConfigFactory.get_model_config(rag_config['config']['LLM_MODEL'])
         rag_prompt = model_config.build_rag_prompt(cleaned_message, context_text)
 
         # Step 6: Generate streaming response using LLM
-        # Use provided parameters or fall back to environment defaults
-        llm_temperature = temperature if temperature is not None else settings.llm_temperature
-        llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
 
         # Send assistant_metadata BEFORE starting LLM streaming
         # This gives frontend time to render the empty "Pensando..." placeholder
@@ -523,11 +521,15 @@ class RagService:
         # Stream the LLM response with role behavior and conversation history using utility function
         async for chunk in generate_text_stream_with_validation(
             llm_provider=self.llm_provider,
+            model_id=rag_config['config']['LLM_MODEL'],
             prompt=rag_prompt,
-            max_tokens=llm_max_tokens,
-            temperature=llm_temperature,
-            role_behavior=role_behavior,
-            messages=conversation_history_for_prompt if conversation_history_for_prompt else None
+            max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
+            temperature=rag_config['config']['LLM_TEMPERATURE'],
+            top_p=rag_config['config']['LLM_TOP_P'],
+            role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
+            messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
+            timestamp_utc=created_at,
+            request_timezone=request_timezone
         ):
             assistant_response += chunk
 
@@ -572,7 +574,7 @@ class RagService:
             "status": "success"
         }
 
-    async def process_rag_query_n8n(self, user_id: int, user: str, message: str, company_id: int, area_id: int, id_ia_area: int, db: Session, created_at: str, chat_id: int, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None) -> Dict[str, Any]:
+    async def process_rag_query_n8n(self, user_id: int, user: str, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
         """
         Proceso RAG completo sin streaming (para n8n): embeddings → search → LLM → response completa
         Retorna directamente la respuesta completa del LLM con resultado estructurado.
@@ -615,13 +617,6 @@ class RagService:
                     "result": {
                         "idTipoMensaje": 1,
                         "mensaje": "ID de área requerido"
-                    }
-                }
-            if id_ia_area is None:
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "ID de área IA requerido"
                     }
                 }
 
@@ -672,8 +667,9 @@ class RagService:
                     logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
                     recontextualized_result = None
 
-            # Load IA area role behavior configuration
-            role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
+            # Load IA area RAG configuration
+            rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
+            logger.info(f"Retrieved RAG config: {rag_config}")
 
             # Save user message to DynamoDB
             try:
@@ -709,9 +705,10 @@ class RagService:
                 area_id=area_id,
                 query_text=query_for_search,
                 query_vector=query_embedding,
-                top_k=top_k,
-                similarity_threshold=similarity_threshold,
-                alpha=alpha
+                top_k=rag_config['config']['RAG_TOP_K_RESULTS'],
+                similarity_threshold=rag_config['config']['RAG_SIMILARITY_THRESHOLD'],
+                alpha=rag_config['config']['RAG_ALPHA'],
+                general_area=rag_config.get('general_area')
             )
 
             # Prepare context text for LLM
@@ -733,31 +730,22 @@ class RagService:
                     conversation_history_for_prompt = conversation_history[-messages_to_use:] if len(conversation_history) >= messages_to_use else conversation_history
 
             # Build RAG prompt
-            model_config = self.llm_nonstreaming_provider.get_model_config()
+            model_config = ModelConfigFactory.get_model_config(rag_config['config']['LLM_MODEL'])
             rag_prompt = model_config.build_rag_prompt(cleaned_message, context_text)
 
-            # Use provided parameters or fall back to environment defaults
-            llm_temperature = temperature if temperature is not None else settings.llm_temperature
-            llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
-
-            # Generate complete response using non-streaming provider
-            assistant_response = await self.llm_nonstreaming_provider.generate(
+            # Generate complete response using non-streaming provider with validation
+            assistant_response = await generate_text_with_validation(
+                llm_provider=self.llm_nonstreaming_provider,
+                model_id=rag_config['config']['LLM_MODEL'],
                 prompt=rag_prompt,
-                max_tokens=llm_max_tokens,
-                temperature=llm_temperature,
-                role_behavior=role_behavior,
-                messages=conversation_history_for_prompt if conversation_history_for_prompt else None
+                max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
+                temperature=rag_config['config']['LLM_TEMPERATURE'],
+                top_p=rag_config['config']['LLM_TOP_P'],
+                role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
+                messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
+                timestamp_utc=created_at,
+                request_timezone=request_timezone
             )
-
-            # Validate response
-            if not assistant_response or not assistant_response.strip():
-                logger.error("Empty response from LLM")
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "No se pudo generar una respuesta"
-                    }
-                }
 
             # Update chat last message date
             chat_repo = ChatRepository(db)

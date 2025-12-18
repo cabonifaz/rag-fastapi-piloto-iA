@@ -89,6 +89,41 @@ class IaConfigService:
             logger.error(f"Error in get_ia_area_config_full service for id_area={id_area}: {e}")
             raise
 
+    async def get_ia_area_config_rag(self, db: Session, id_empresa: int, id_area: int) -> Optional[Dict[str, Any]]:
+        """
+        Load IA area RAG configuration from database using stored procedure.
+
+        Args:
+            db: Database session
+            id_empresa: ID of the company
+            id_area: ID of the area
+
+        Returns:
+            Dictionary containing 'config' (configuration parameters) and 'general_area',
+            or None if not found
+        """
+        try:
+            if not db:
+                logger.warning("Database session not available in IaConfigService")
+                return None
+
+            # Create repository for this request
+            repository = IaConfigRepository(db)
+
+            # Get RAG configuration from database
+            config = repository.get_ia_area_config_rag(id_empresa, id_area)
+
+            if config:
+                logger.info(f"Retrieved IA area RAG config for id_empresa={id_empresa}, id_area={id_area}")
+                return config
+
+            logger.info(f"No RAG config found for id_empresa={id_empresa}, id_area={id_area}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error in get_ia_area_config_rag service for id_empresa={id_empresa}, id_area={id_area}: {e}")
+            raise
+
     async def update_ia_area_config(
         self,
         db: Session,

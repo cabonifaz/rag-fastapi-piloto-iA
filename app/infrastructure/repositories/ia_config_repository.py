@@ -119,6 +119,94 @@ class IaConfigRepository:
             logger.error(f"Error loading full IA area config for id_area={id_area}: {e}")
             raise
 
+    def get_ia_area_config_rag(self, id_empresa: int, id_area: int) -> Optional[Dict[str, Any]]:
+        """
+        Load IA area RAG configuration from database using stored procedure.
+
+        Calls SP_GET_IA_AREA_CONFIG_RAG to retrieve RAG-specific configuration parameters
+        for the specified company and area.
+
+        Args:
+            id_empresa: ID of the company
+            id_area: ID of the area
+
+        Returns:
+            Dictionary containing 'config' (first result set with all config params) and
+            'general_area' (second result set), or None if not found
+
+        Raises:
+            Exception: If database operation fails
+        """
+        try:
+            # Use raw connection to handle multiple result sets
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_GET_IA_AREA_CONFIG_RAG @ID_EMPRESA = ?, @ID_AREA = ?",
+                    id_empresa,
+                    id_area
+                )
+
+                result = {}
+
+                # First result set - config parameters
+                if cursor.description:
+                    columns = [desc[0] for desc in cursor.description]
+                    row = cursor.fetchone()
+
+                    if row:
+                        config_dict = dict(zip(columns, row))
+
+                        # Convert Decimal types to proper Python types
+                        for key, value in config_dict.items():
+                            if isinstance(value, Decimal):
+                                # Convert to int if it's a whole number, otherwise float
+                                if value % 1 == 0:
+                                    config_dict[key] = int(value)
+                                else:
+                                    config_dict[key] = float(value)
+
+                        result['config'] = config_dict
+                    else:
+                        logger.info(f"No RAG config found for id_empresa={id_empresa}, id_area={id_area}")
+                        cursor.close()
+                        return None
+
+                # Second result set - GENERAL_AREA
+                if cursor.nextset():
+                    if cursor.description:
+                        columns = [desc[0] for desc in cursor.description]
+                        row = cursor.fetchone()
+
+                        if row:
+                            general_area_dict = dict(zip(columns, row))
+                            general_area_value = general_area_dict.get('GENERAL_AREA')
+
+                            # Convert Decimal to int if needed
+                            if isinstance(general_area_value, Decimal):
+                                general_area_value = int(general_area_value)
+
+                            result['general_area'] = general_area_value
+
+                cursor.close()
+
+                if result:
+                    logger.info(f"Retrieved IA area RAG config for id_empresa={id_empresa}, id_area={id_area}")
+                    return result
+
+                return None
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_ia_area_config_rag: {cursor_error}")
+                cursor.close()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error loading IA area RAG config for id_empresa={id_empresa}, id_area={id_area}: {e}")
+            raise
+
     async def update_ia_area_config(
         self,
         id_usuario: int,
