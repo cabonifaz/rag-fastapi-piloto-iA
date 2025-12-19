@@ -5,6 +5,7 @@ from sqlalchemy import text, and_
 from app.models.user_models import Usuario
 from typing import Optional, List, Dict, Any, Tuple
 import logging
+from app.core.database import retry_on_db_error
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class UserRepository:
     # Stored Procedure Calls - Raw DB Operations
     # =============================================
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def verify_user_acceso_sp(self, usuario: str, password: str, secret_key: str) -> Tuple[int, Optional[int]]:
         """
         Execute SP_VERIFY_USUARIO_ACCESO and return status with company ID
@@ -66,6 +68,7 @@ class UserRepository:
             logger.error(f"Error executing SP_VERIFY_USUARIO_ACCESO: {e}")
             raise
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_user_login_data_sp(self, usuario: str, id_empresa: int) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Execute SP_USUARIO_LOGIN_DATA and return all result sets
@@ -139,6 +142,7 @@ class UserRepository:
             logger.error(f"Error executing SP_USUARIO_LOGIN_DATA: {e}")
             raise
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_user_company_areas_sp(self, user_id: int, role_id: int) -> List[Dict[str, Any]]:
         """
         Execute SP_USUARIO_EMPR_AREA_LST and return company areas
@@ -177,7 +181,7 @@ class UserRepository:
             logger.error(f"Error executing SP_USUARIO_EMPR_AREA_LST: {e}")
             raise
 
-
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_login_status(self, user_id: int) -> None:
         """
         Update user login status using SP_USUARIO_LOGIN_STATUS
@@ -199,6 +203,7 @@ class UserRepository:
             self.db.rollback()
             raise
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_logout_status(self, user_id: int) -> None:
         """
         Update user logout status using SP_USUARIO_LOGOUT

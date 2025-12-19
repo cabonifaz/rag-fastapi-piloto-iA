@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional, List, Dict, Any
 import logging
+from app.core.database import retry_on_db_error
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class CompanyRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def create_company(
         self,
         id_usuario: int,
@@ -109,6 +111,7 @@ class CompanyRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_companies(self) -> List[Dict[str, Any]]:
         """
         Get all companies using stored procedure SP_EMPRESAS_LST
@@ -149,6 +152,7 @@ class CompanyRepository:
             logger.error(f"Error fetching companies with SP: {e}")
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_company_status(
         self,
         id_usuario: int,
@@ -229,6 +233,7 @@ class CompanyRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_companies_login(self) -> List[Dict[str, Any]]:
         """
         Get companies with their secret keys using stored procedure SP_EMPRESAS_LST_LOGIN
@@ -269,6 +274,7 @@ class CompanyRepository:
             logger.error(f"Error fetching companies login with SP: {e}")
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_company_logo(
         self,
         id_usuario: int,
