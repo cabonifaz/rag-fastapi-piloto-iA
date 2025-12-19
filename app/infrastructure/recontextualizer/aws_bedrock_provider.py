@@ -72,6 +72,11 @@ class QueryRecontextualizer(RecontextualizerPort):
             # Create aioboto3 session (don't create client yet)
             self.session = aioboto3.Session(**session_params)
 
+            # Log session creation
+            session_info = {k: '***' if 'key' in k.lower() or 'secret' in k.lower() else v
+                           for k, v in session_params.items()}
+            logger.info(f"✨ Created NEW aioboto3.Session (id: {id(self.session)}) [Recontextualizer] | Config: {session_info}")
+
             # Get model-specific configuration based on model_id
             self.model_config = ModelFactory.get_model_config(self.model_id)
 
@@ -145,6 +150,10 @@ class QueryRecontextualizer(RecontextualizerPort):
             }
 
             # Use aioboto3 async client for truly non-blocking Bedrock calls
+            logger.info(
+                f"♻️ Reusing session (id: {id(self.session)}) [Recontextualizer] | "
+                f"Request params: model={self.model_id}, max_tokens=1024, temp=0.0, top_p=0.1"
+            )
             async with self.session.client("bedrock-runtime", config=self.boto_config) as client:
                 response = await client.converse(**request_params)
 
