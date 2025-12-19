@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional, List, Dict, Any
 import logging
+from app.core.database import retry_on_db_error
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class AreaRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def create_area(
         self,
         id_usuario: int,
@@ -99,6 +101,7 @@ class AreaRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_area_status(
         self,
         id_usuario: int,
@@ -185,6 +188,7 @@ class AreaRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_area_nombre(
         self,
         id_usuario: int,
@@ -271,6 +275,7 @@ class AreaRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_areas(self, id_empresa: int) -> List[Dict[str, Any]]:
         """
         Get all areas for a company using stored procedure SP_AREAS_LST

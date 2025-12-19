@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional, List, Dict, Any
 import logging
+from app.core.database import retry_on_db_error
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class ChatRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def create_chat(
         self,
         id_usuario: int,
@@ -84,6 +86,7 @@ class ChatRepository:
             self.db.rollback()
             return None
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_chats_by_user(self, user_id: int) -> List[Dict[str, Any]]:
         """
         List chats for a specific user using SP_GET_USER_CHATS
@@ -126,6 +129,7 @@ class ChatRepository:
             logger.error(f"Error listing chats for user {user_id}: {e}")
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_chat_titulo(
         self,
         chat_id: int,
@@ -160,6 +164,7 @@ class ChatRepository:
             self.db.rollback()
             return False
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def delete_chat(self, chat_id: int) -> bool:
         """
         Soft delete chat using stored procedure SP_UPDATE_CHAT_ESTADO_REGISTRO
@@ -190,6 +195,7 @@ class ChatRepository:
             self.db.rollback()
             return False
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_ultimo_mensaje_fecha(self, chat_id: int) -> bool:
         """
         Update ULTIMO_MENSAJE_FECHA using stored procedure SP_UPDATE_CHAT_ULTIMO_MENSAJE_FECHA

@@ -19,6 +19,7 @@ class UnifiedRequest(BaseModel):
     alpha: Optional[float] = None           # Optional, hybrid search alpha (0.0=keyword, 1.0=vector), defaults to env config
     temperature: Optional[float] = None      # Optional, defaults to env config
     max_tokens: Optional[int] = None         # Optional, defaults to env config
+    request_timezone: Optional[str] = None   # Optional, user's timezone for time-aware responses
 
 
 class N8NRequest(BaseModel):
@@ -36,6 +37,7 @@ class N8NRequest(BaseModel):
     alpha: Optional[float] = None           # Optional, hybrid search alpha (0.0=keyword, 1.0=vector), defaults to env config
     temperature: Optional[float] = None      # Optional, defaults to env config
     max_tokens: Optional[int] = None         # Optional, defaults to env config
+    request_timezone: Optional[str] = None   # Optional, user's timezone for time-aware responses
 
 
 class AgentStreamingRequest(BaseModel):

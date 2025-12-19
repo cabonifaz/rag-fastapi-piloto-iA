@@ -29,12 +29,7 @@ class Settings(BaseSettings):
     embeddings_dimensions: int
     
     llm_provider: str
-    llm_model_id: str
     llm_region: str
-    llm_max_tokens: int
-    llm_temperature: float
-    llm_top_p: float
-    llm_role_behavior: str
 
     orchestrator_model_id: str
     orchestrator_max_tokens: int
@@ -57,11 +52,6 @@ class Settings(BaseSettings):
     weaviate_api_key: Optional[str] = None
     weaviate_class_name: str
     weaviate_grpc: Optional[str] = None
-    
-    rag_top_k_results: int
-    rag_similarity_threshold: float
-    rag_hybrid_alpha: float = 0.5
-
 
     log_level: str
 
@@ -117,53 +107,11 @@ class Settings(BaseSettings):
             raise ValueError("Embeddings model ID is required")
         return v
     
-    @field_validator('llm_model_id')
-    @classmethod
-    def validate_llm_model_id(cls, v):
-        if not v:
-            raise ValueError("LLM model ID is required")
-        return v
-
     @field_validator('recontextualizer_model_id')
     @classmethod
     def validate_recontextualizer_model_id(cls, v):
         if not v:
             raise ValueError("Recontextualizer model ID is required")
-        return v
-    
-    @field_validator('llm_max_tokens')
-    @classmethod
-    def validate_llm_max_tokens(cls, v):
-        if v <= 0:
-            raise ValueError("LLM max tokens must be greater than 0")
-        return v
-    
-    @field_validator('llm_temperature')
-    @classmethod
-    def validate_llm_temperature(cls, v):
-        if not (0.0 <= v <= 2.0):
-            raise ValueError("LLM temperature must be between 0.0 and 2.0")
-        return v
-    
-    @field_validator('rag_top_k_results')
-    @classmethod
-    def validate_rag_top_k_results(cls, v):
-        if v <= 0:
-            raise ValueError("RAG top_k results must be greater than 0")
-        return v
-    
-    @field_validator('rag_similarity_threshold')
-    @classmethod
-    def validate_rag_similarity_threshold(cls, v):
-        if not (0.0 <= v <= 1.0):
-            raise ValueError("RAG similarity threshold must be between 0.0 and 1.0")
-        return v
-
-    @field_validator('rag_hybrid_alpha')
-    @classmethod
-    def validate_rag_hybrid_alpha(cls, v):
-        if not (0.0 <= v <= 1.0):
-            raise ValueError("RAG hybrid alpha must be between 0.0 and 1.0")
         return v
 
     @field_validator('jwt_secret_key')

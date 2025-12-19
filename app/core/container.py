@@ -122,15 +122,13 @@ class DIContainer:
                 if settings.llm_provider == "aws":
                     if not settings.llm_region:
                         raise ValueError("LLM region is required for AWS provider")
-                    if not settings.llm_model_id:
-                        raise ValueError("LLM model ID is required for AWS provider")
 
                     # Using Converse API - stateless (no message history)
-                    # Each request is independent with only current user prompt
+                    # Initialize with default model, actual model_id comes per-request from database
                     self._llm_provider = AWSBedrockConverseProvider(
                         region=settings.llm_region,
-                        model_id=settings.llm_model_id,
-                        role_behavior=settings.llm_role_behavior,
+                        model_id="us.meta.llama4-maverick-17b-instruct-v1:0",  # Default/fallback model
+                        role_behavior=None,  # Will be provided per-request from database
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
                         aws_secret_access_key=settings.aws_secret_access_key
@@ -149,14 +147,13 @@ class DIContainer:
                 if settings.llm_provider == "aws":
                     if not settings.llm_region:
                         raise ValueError("LLM region is required for AWS provider")
-                    if not settings.llm_model_id:
-                        raise ValueError("LLM model ID is required for AWS provider")
 
                     # Using non-streaming Converse API for n8n
+                    # Initialize with default model, actual model_id comes per-request from database
                     self._llm_nonstreaming_provider = AWSBedrockConverseNonStreamingProvider(
                         region=settings.llm_region,
-                        model_id=settings.llm_model_id,
-                        role_behavior=settings.llm_role_behavior,
+                        model_id="us.meta.llama4-maverick-17b-instruct-v1:0",  # Default/fallback model
+                        role_behavior=None,  # Will be provided per-request from database
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
                         aws_secret_access_key=settings.aws_secret_access_key

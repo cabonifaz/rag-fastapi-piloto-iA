@@ -3,6 +3,7 @@
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict, Any
 import logging
+from app.core.database import retry_on_db_error
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class KnowledgeRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_knowledge_by_company(
         self,
         id_usuario: int,
@@ -107,6 +109,7 @@ class KnowledgeRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def batch_create_knowledge(
         self,
         id_usuario: int,
@@ -222,6 +225,7 @@ class KnowledgeRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def batch_update_knowledge_state(
         self,
         id_usuario: int,
@@ -317,6 +321,7 @@ class KnowledgeRepository:
             self.db.rollback()
             return None
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_knowledge_by_ids(
         self,
         id_usuario: int,
@@ -435,6 +440,7 @@ class KnowledgeRepository:
             self.db.rollback()
             return None
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def batch_delete_knowledge(
         self,
         id_usuario: int,
@@ -548,6 +554,7 @@ class KnowledgeRepository:
             self.db.rollback()
             return None
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def batch_restore_knowledge(
         self,
         id_usuario: int,
@@ -662,7 +669,8 @@ class KnowledgeRepository:
             logger.error(f"Error batch restoring knowledge with SP_CARGA_CONOCIMIENTO_BATCH_RESTORE: {e}")
             self.db.rollback()
             return None
-
+    
+    @retry_on_db_error(max_retries=3, delay=1)
     def batch_update_en_ejecucion(
         self,
         id_usuario: int,
