@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional, List, Dict, Any
 import logging
+from app.core.database import retry_on_db_error
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class UsersRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_usuarios(self, id_empresa: int) -> List[Dict[str, Any]]:
         """
         Get all users for a company using stored procedure SP_USUARIOS_LST
@@ -99,6 +101,7 @@ class UsersRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def create_usuario(
         self,
         id_usuario: int,
@@ -200,6 +203,7 @@ class UsersRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_usuario(
         self,
         id_admin: int,
@@ -292,6 +296,7 @@ class UsersRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_usuario_status(
         self,
         id_admin: int,
@@ -375,6 +380,7 @@ class UsersRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_usuario_password(
         self,
         id_admin: int,
@@ -458,6 +464,7 @@ class UsersRepository:
             self.db.rollback()
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def update_usuario_access(
         self,
         id_admin: int,
@@ -549,6 +556,7 @@ class UsersRepository:
 
 #FUNCIONES DE N8N
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_user_data_for_n8n(self, id_agente: int, telefono: str) -> List[Dict[str, Any]]:
         """
         Get complete user data for n8n integration using stored procedure SP_GET_USER_DATA_FOR_N8N

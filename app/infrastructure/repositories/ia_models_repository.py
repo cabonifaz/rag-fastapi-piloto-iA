@@ -3,6 +3,7 @@
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 import logging
+from app.core.database import retry_on_db_error
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class IAModelsRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    @retry_on_db_error(max_retries=3, delay=1)
     def get_models(self) -> List[Dict[str, Any]]:
         """
         Get all available IA models using stored procedure SP_MODELS_LST
@@ -61,6 +63,7 @@ class IAModelsRepository:
             logger.error(f"Error fetching models with SP_MODELS_LST: {e}")
             return []
 
+    @retry_on_db_error(max_retries=3, delay=1)
     async def create_model(
         self,
         id_usuario: int,
