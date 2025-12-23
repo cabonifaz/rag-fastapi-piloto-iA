@@ -118,6 +118,7 @@ class AgentsRepository:
         self,
         id_usuario: int,
         numero_telf: str,
+        codigo_pais: str,
         id_tipo_agente: int,
         id_empresa: int,
         acceso_general: int,
@@ -129,6 +130,7 @@ class AgentsRepository:
         Args:
             id_usuario: User ID
             numero_telf: Phone number (max 20 chars)
+            codigo_pais: Country code composite (max 8 chars, e.g., '51-PE')
             id_tipo_agente: Agent type ID
             id_empresa: Company ID
             acceso_general: General access flag
@@ -145,9 +147,10 @@ class AgentsRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_CREATE_AGENTE @ID_USUARIO = ?, @NUMERO_TELF = ?, @ID_TIPO_AGENTE = ?, @ID_EMPRESA = ?, @ACCESO_GENERAL = ?, @AREAS_STRING = ?",
+                    "EXEC SP_CREATE_AGENTE @ID_USUARIO = ?, @NUMERO_TELF = ?, @CODIGO_PAIS = ?, @ID_TIPO_AGENTE = ?, @ID_EMPRESA = ?, @ACCESO_GENERAL = ?, @AREAS_STRING = ?",
                     id_usuario,
                     numero_telf,
+                    codigo_pais,
                     id_tipo_agente,
                     id_empresa,
                     acceso_general,

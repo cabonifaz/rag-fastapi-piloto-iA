@@ -72,6 +72,7 @@ class AgentsService:
         db: Session,
         id_usuario: int,
         numero_telf: str,
+        codigo_pais: str,
         id_tipo_agente: int,
         id_empresa: int,
         acceso_general: int,
@@ -84,6 +85,7 @@ class AgentsService:
             db: Database session
             id_usuario: User ID
             numero_telf: Phone number (max 20 chars)
+            codigo_pais: Country code composite (max 8 chars, e.g., '51-PE')
             id_tipo_agente: Agent type ID
             id_empresa: Company ID
             acceso_general: General access flag
@@ -108,6 +110,10 @@ class AgentsService:
                 logger.error("Phone number cannot be empty")
                 return []
 
+            if not codigo_pais or len(codigo_pais.strip()) == 0:
+                logger.error("Country code cannot be empty")
+                return []
+
             if not isinstance(id_tipo_agente, int) or id_tipo_agente <= 0:
                 logger.error(f"Invalid id_tipo_agente: {id_tipo_agente}")
                 return []
@@ -126,12 +132,14 @@ class AgentsService:
 
             # Trim inputs to match database constraints
             numero_telf = numero_telf.strip()[:20]
+            codigo_pais = codigo_pais.strip()[:8]
             areas_string = areas_string.strip()[:100]
 
             # Use repository to create agent with SP_CREATE_AGENTE
             results = repository.create_agente(
                 id_usuario=id_usuario,
                 numero_telf=numero_telf,
+                codigo_pais=codigo_pais,
                 id_tipo_agente=id_tipo_agente,
                 id_empresa=id_empresa,
                 acceso_general=acceso_general,

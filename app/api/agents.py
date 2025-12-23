@@ -157,6 +157,7 @@ async def create_agente_endpoint(
             db=db,
             id_usuario=user_id,
             numero_telf=request.numero_telf,
+            codigo_pais=request.codigo_pais,
             id_tipo_agente=request.id_tipo_agente,
             id_empresa=request.id_empresa,
             acceso_general=request.acceso_general,
