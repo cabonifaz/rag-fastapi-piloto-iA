@@ -200,7 +200,7 @@ class JWTAuth:
             # Validate input parameters
             if not isinstance(company_id, int) or company_id <= 0:
                 return False
-            if area_id is not None and (not isinstance(area_id, int) or area_id < 0):
+            if area_id is not None and (not isinstance(area_id, int) or area_id <= 0):
                 return False
 
             # Extract full payload
