@@ -182,6 +182,46 @@ ENVIRONMENT=development
 
 ### Setup
 
+#### 1. Install System Dependencies (Ubuntu/WSL)
+
+```bash
+# Install Python virtual environment support
+sudo apt update && sudo apt install python3.12-venv -y
+```
+
+#### 2. Install AWS CLI
+
+```bash
+# Download and install AWS CLI v2
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+sudo apt install unzip -y
+unzip awscliv2.zip
+sudo ./aws/install
+
+# Verify installation
+aws --version
+
+# Configure AWS credentials
+aws configure
+# AWS Access Key ID: [your_key]
+# AWS Secret Access Key: [your_secret]
+# Default region name: us-east-1
+# Default output format: json
+```
+
+#### 3. Install SQL Server ODBC Driver (Linux)
+
+```bash
+curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+echo "deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" | \
+  sudo tee /etc/apt/sources.list.d/msprod.list
+
+sudo apt-get update
+sudo apt-get install -y msodbcsql17 unixodbc-dev
+```
+
+#### 4. Clone Repository and Setup Project
+
 ```bash
 # Clone repository
 git clone <repository-url>
@@ -199,18 +239,6 @@ pip install -r requirements.txt
 # Configure environment
 cp .env.example .env
 # Edit .env with your configuration
-```
-
-### Database Setup (SQL Server)
-
-```bash
-# Install ODBC Driver for SQL Server (Linux)
-curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-echo "deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" | \
-  sudo tee /etc/apt/sources.list.d/msprod.list
-
-sudo apt-get update
-sudo apt-get install -y msodbcsql17 unixodbc-dev
 ```
 
 ### Required SQL Server Stored Procedures
