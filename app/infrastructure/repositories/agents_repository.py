@@ -208,3 +208,126 @@ class AgentsRepository:
             logger.error(f"Error creating agente with SP_CREATE_AGENTE: {e}")
             self.db.rollback()
             return []
+
+    @retry_on_db_error(max_retries=3, delay=1)
+    def verify_acceso_agente(
+        self,
+        numero_telf: str,
+        secret_key: str
+    ) -> Dict[str, Any]:
+        """
+        Verify agent access using stored procedure SP_VERIFY_ACCESO_AGENTE
+
+        Args:
+            numero_telf: Phone number (max 20 chars)
+            secret_key: Secret key (max 64 chars)
+
+        Returns:
+            Dictionary containing:
+            - mensaje: Dict with ID_TIPO_MENSAJE, MENSAJE
+            - agente: Dict with ID_AGENTE, ID_EMPRESA
+            - rol: Dict with ID_TIPO_ROL, ROL
+            - company_areas: List of dicts with ID_EMPRESA, EMPRESA, ID_AREA, AREA
+            Empty dict if verification failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_VERIFY_ACCESO_AGENTE @NUMERO_TELF = ?, @SECRET_KEY = ?",
+                    numero_telf,
+                    secret_key
+                )
+
+                result = {
+                    'mensaje': None,
+                    'agente': None,
+                    'rol': None,
+                    'company_areas': []
+                }
+
+                result_set_index = 0
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            if rows:
+                                # Process based on result set index
+                                if result_set_index == 0:
+                                    # First result set: ID_TIPO_MENSAJE, MENSAJE (always present)
+                                    row = rows[0]
+                                    result['mensaje'] = dict(zip(columns, row))
+                                    if 'ID_TIPO_MENSAJE' in result['mensaje']:
+                                        result['mensaje']['ID_TIPO_MENSAJE'] = int(result['mensaje']['ID_TIPO_MENSAJE'])
+
+                                    # If authentication failed (ID_TIPO_MENSAJE != 2), SP returns only this result set
+                                    if result['mensaje']['ID_TIPO_MENSAJE'] != 2:
+                                        cursor.close()
+                                        self.db.commit()
+                                        return {'mensaje': result['mensaje']}
+
+                                elif result_set_index == 1:
+                                    # Second result set: ID_AGENTE, ID_EMPRESA
+                                    row = rows[0]
+                                    result['agente'] = dict(zip(columns, row))
+                                    if 'ID_AGENTE' in result['agente']:
+                                        result['agente']['ID_AGENTE'] = int(result['agente']['ID_AGENTE'])
+                                    if 'ID_EMPRESA' in result['agente']:
+                                        result['agente']['ID_EMPRESA'] = int(result['agente']['ID_EMPRESA'])
+
+                                elif result_set_index == 2:
+                                    # Third result set: ID_TIPO_ROL, ROL
+                                    row = rows[0]
+                                    result['rol'] = dict(zip(columns, row))
+                                    if 'ID_TIPO_ROL' in result['rol']:
+                                        result['rol']['ID_TIPO_ROL'] = int(result['rol']['ID_TIPO_ROL'])
+
+                                elif result_set_index == 3:
+                                    # Fourth result set: ID_EMPRESA, EMPRESA, ID_AREA, AREA (multiple rows)
+                                    for row in rows:
+                                        area_dict = dict(zip(columns, row))
+                                        if 'ID_EMPRESA' in area_dict:
+                                            area_dict['ID_EMPRESA'] = int(area_dict['ID_EMPRESA'])
+                                        if 'ID_AREA' in area_dict:
+                                            area_dict['ID_AREA'] = int(area_dict['ID_AREA'])
+                                        result['company_areas'].append(area_dict)
+
+                                result_set_index += 1
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return result
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in verify_acceso_agente: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error verifying acceso agente with SP_VERIFY_ACCESO_AGENTE: {e}")
+            self.db.rollback()
+            return {}

@@ -1,9 +1,10 @@
 """Service for managing agents operations following hexagonal architecture."""
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 from sqlalchemy.orm import Session
 from app.infrastructure.repositories.agents_repository import AgentsRepository
+from app.utils.agent_jwt_auth import AgentJWTAuth
 
 logger = logging.getLogger(__name__)
 
@@ -156,3 +157,98 @@ class AgentsService:
         except Exception as e:
             logger.error(f"Error in create_agente service: {e}")
             raise
+
+    async def verify_acceso_agente(
+        self,
+        db: Session,
+        numero_telf: str,
+        secret_key: str
+    ) -> Dict[str, Any]:
+        """
+        Verify agent access credentials and generate JWT token on success.
+
+        Args:
+            db: Database session
+            numero_telf: Phone number (max 20 chars)
+            secret_key: Secret key (max 64 chars)
+
+        Returns:
+            On success (ID_TIPO_MENSAJE = 2):
+                {
+                    'token': str,
+                    'id_tipo_mensaje': int,
+                    'mensaje': str
+                }
+            On failure:
+                {
+                    'id_tipo_mensaje': int,
+                    'mensaje': str
+                }
+            Empty dict on error
+        """
+        try:
+            # Create repository for this request
+            repository = AgentsRepository(db)
+
+            # Validate input
+            if not numero_telf or len(numero_telf.strip()) == 0:
+                logger.error("Phone number cannot be empty")
+                return {
+                    'id_tipo_mensaje': 1,
+                    'mensaje': 'Número de teléfono requerido'
+                }
+
+            if not secret_key or len(secret_key.strip()) == 0:
+                logger.error("Secret key cannot be empty")
+                return {
+                    'id_tipo_mensaje': 1,
+                    'mensaje': 'Secret key requerido'
+                }
+
+            # Trim inputs to match database constraints
+            numero_telf = numero_telf.strip()[:20]
+            secret_key = secret_key.strip()[:64]
+
+            # Use repository to verify agent access with SP_VERIFY_ACCESO_AGENTE
+            result = repository.verify_acceso_agente(
+                numero_telf=numero_telf,
+                secret_key=secret_key
+            )
+
+            # Extract mensaje info
+            if not result or not result.get('mensaje'):
+                logger.warning(f"Agent verification returned no results: Telefono={numero_telf}")
+                return {
+                    'id_tipo_mensaje': 1,
+                    'mensaje': 'Error en la verificación'
+                }
+
+            mensaje_info = result['mensaje']
+            id_tipo_mensaje = mensaje_info.get('ID_TIPO_MENSAJE')
+            mensaje = mensaje_info.get('MENSAJE')
+
+            logger.info(f"Agent verification completed: Telefono={numero_telf}, ID_TIPO_MENSAJE={id_tipo_mensaje}, Mensaje={mensaje}")
+
+            # Check if authentication was successful (ID_TIPO_MENSAJE = 2)
+            if id_tipo_mensaje == 2:
+                # Generate JWT token
+                jwt_token = AgentJWTAuth.create_agent_jwt_token(result)
+
+                return {
+                    'token': jwt_token,
+                    'id_tipo_mensaje': id_tipo_mensaje,
+                    'mensaje': mensaje
+                }
+            else:
+                # Authentication failed
+                return {
+                    'id_tipo_mensaje': id_tipo_mensaje,
+                    'mensaje': mensaje
+                }
+
+        except Exception as e:
+            logger.error(f"Error in verify_acceso_agente service: {e}")
+            return {
+                'id_tipo_mensaje': 1,
+                'mensaje': 'Error interno del servidor'
+            }

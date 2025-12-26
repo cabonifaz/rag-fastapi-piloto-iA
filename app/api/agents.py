@@ -9,8 +9,9 @@ from app.core.database import get_db
 from app.core.container import container
 from app.services.agents_service import AgentsService
 from app.models.response_models import create_success_response, create_error_response
-from app.models.agent_models import CreateAgentRequest
+from app.models.agent_models import CreateAgentRequest, AgentLoginRequest, AgentLoginResponse
 from app.utils.jwt_auth import get_current_user_with_company_validation, get_current_user
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,82 @@ router = APIRouter()
 def get_agents_service() -> AgentsService:
     """Get singleton AgentsService from container."""
     return container.get_agents_service()
+
+
+@router.post("/login", response_model=AgentLoginResponse)
+async def agent_login_endpoint(
+    login_request: AgentLoginRequest,
+    agents_service: AgentsService = Depends(get_agents_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Agent login endpoint
+
+    Authenticates agent credentials using phone number and secret key.
+    Returns JWT token on successful authentication.
+
+    Args:
+        login_request: AgentLoginRequest containing numero_telf and secret_key
+
+    Returns:
+        AgentLoginResponse with:
+        - token: JWT token (only on success)
+        - id_tipo_mensaje: Message type (2 = success, 1 = error)
+        - mensaje: Status message
+
+    Raises:
+        HTTPException: 401 for invalid credentials, 422 for validation errors, 500 for server errors
+    """
+    try:
+        # Validate and authenticate agent
+        result = await agents_service.verify_acceso_agente(
+            db=db,
+            numero_telf=login_request.numero_telf,
+            secret_key=login_request.secret_key
+        )
+
+        if not result:
+            raise HTTPException(
+                status_code=500,
+                detail={"id_tipo_mensaje": 1, "mensaje": "Error interno del servidor"}
+            )
+
+        # Extract response data
+        id_tipo_mensaje = result.get('id_tipo_mensaje')
+        mensaje = result.get('mensaje')
+        token = result.get('token')
+
+        # Check if authentication failed
+        if id_tipo_mensaje != 2:
+            raise HTTPException(
+                status_code=401,
+                detail={"id_tipo_mensaje": id_tipo_mensaje, "mensaje": mensaje}
+            )
+
+        # Authentication successful
+        return AgentLoginResponse(
+            token=token,
+            id_tipo_mensaje=id_tipo_mensaje,
+            mensaje=mensaje
+        )
+
+    except ValidationError as e:
+        logger.error(f"Validation error in agent login endpoint: {e}")
+        raise HTTPException(
+            status_code=422,
+            detail={"id_tipo_mensaje": 1, "mensaje": f"Datos de solicitud inválidos: {str(e)}"}
+        )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in agent login endpoint: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"id_tipo_mensaje": 1, "mensaje": "Error interno del servidor"}
+        )
 
 
 @router.get("/get_agentes/{id_empresa}")
