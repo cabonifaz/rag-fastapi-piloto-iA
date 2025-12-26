@@ -2,7 +2,7 @@ from typing import Dict, Any, Optional
 import jwt
 from datetime import datetime, timezone, timedelta
 import logging
-from fastapi import HTTPException, Depends
+from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.config import settings
 
@@ -188,11 +188,10 @@ class AgentJWTAuth:
 
 # Dependency function
 async def get_current_agent_with_company_area_validation(
-    request,
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
     """Get current agent and validate company/area access from request by company_id and area_id"""
-    from fastapi import Request
 
     if not credentials:
         logger.warning("No agent JWT token found in Authorization header")
