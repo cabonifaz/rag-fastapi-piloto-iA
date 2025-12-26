@@ -187,10 +187,12 @@ class AgentJWTAuth:
 
 
 # Dependency function
-async def get_current_agent(
+async def get_current_agent_with_company_area_validation(
+    request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
-    """Get current agent from JWT token in Authorization header"""
+    """Get current agent and validate company/area access from request by company_id and area_id"""
+    from fastapi import Request
 
     if not credentials:
         logger.warning("No agent JWT token found in Authorization header")
@@ -199,4 +201,37 @@ async def get_current_agent(
             detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
         )
 
-    return AgentJWTAuth.verify_agent_jwt_token(credentials.credentials)
+    token = credentials.credentials
+
+    # Verify JWT expiration and get agent info
+    agent_data = AgentJWTAuth.verify_agent_jwt_token(token)
+
+    # Extract company_id and area_id from request body
+    if request.method == "POST":
+        content_type = request.headers.get("content-type", "")
+
+        if "application/json" in content_type:
+            # For JSON requests
+            body = await request.json()
+            company_id = body.get("company_id")
+            area_id = body.get("area_id")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported content type")
+
+        # Validate input parameters first
+        if company_id is None:
+            raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "company_id is required"}})
+        if area_id is None:
+            raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "area_id is required"}})
+
+        # Validate agent has access to the requested company_id and area_id
+        has_access = AgentJWTAuth.validate_agent_company_area_access(token, company_id, area_id)
+
+        if not has_access:
+            logger.warning(f"Access denied for agent {agent_data.get('ID_AGENTE')} to company_id: {company_id}, area_id: {area_id}")
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Acceso denegado"}}
+            )
+
+    return agent_data

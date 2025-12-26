@@ -7,7 +7,7 @@ import json
 import logging
 from sqlalchemy.orm import Session
 from app.utils.jwt_auth import get_current_user, get_current_user_with_company_area_validation
-from app.utils.agent_jwt_auth import get_current_agent, AgentJWTAuth
+from app.utils.agent_jwt_auth import get_current_agent_with_company_area_validation
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.services.rag_service import RagService
 from app.domain.ports.llm_port import LLMPort
@@ -150,12 +150,13 @@ async def chat_n8n_endpoint(
     request: N8NRequest,
     rag_service: RagService = Depends(get_rag_service),
     db: Session = Depends(get_db),
-    current_agent: Dict[str, Any] = Depends(get_current_agent)
+    current_agent: Dict[str, Any] = Depends(get_current_agent_with_company_area_validation)
 ):
     """
     Non-streaming chat endpoint for n8n integration with RAG-powered answer generation.
 
     Requires agent JWT authentication token in Authorization header.
+    Validates agent access to requested company_id and area_id.
 
     Returns complete response in a single JSON object (no streaming).
 
@@ -185,24 +186,7 @@ async def chat_n8n_endpoint(
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
             )
 
-        # Validate agent access to requested company and area
         agent_id = current_agent.get('ID_AGENTE')
-        company_areas = current_agent.get('company_areas', [])
-
-        # Check if agent has access to the requested company_id and area_id
-        has_access = any(
-            ca.get('ID_EMPRESA') == request.company_id and
-            ca.get('ID_AREA') == request.area_id
-            for ca in company_areas
-        )
-
-        if not has_access:
-            logger.warning(f"Access denied for agent {agent_id} to company_id: {request.company_id}, area_id: {request.area_id}")
-            raise HTTPException(
-                status_code=403,
-                detail={"result": {"idTipoMensaje": 1, "mensaje": "Acceso denegado a la empresa/área solicitada"}}
-            )
-
         logger.info(f"[N8N REQUEST] Agent ID: {agent_id}, User: {request.user}, Message: {request.message}")
 
         # Call non-streaming RAG service
