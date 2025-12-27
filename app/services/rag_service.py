@@ -11,6 +11,8 @@ from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
+from app.domain.ports.state_builder import StateBuilderPort
+from app.domain.ports.query_rewriter import QueryRewriterPort
 from app.core.config import settings
 from app.infrastructure.task_decomposition.task_generator import TaskGenerator
 from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
@@ -346,6 +348,24 @@ class RagService:
             except Exception as e:
                 logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
                 recontextualized_result = None
+
+            # Build query state for RAG (using last 6 messages, assistant messages set to empty)
+            try:
+                conversation_for_state_building = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
+                # Set assistant messages to empty string (only user queries matter for state building)
+                conversation_for_state_building = [
+                    {**msg, "content": ""} if msg["role"] == "assistant" else msg
+                    for msg in conversation_for_state_building
+                ]
+
+                state_builder_result = await self.state_builder.build_query_state(
+                    user_query=cleaned_message,
+                    conversation_history=conversation_for_state_building
+                )
+                logger.info(f"State builder result: {state_builder_result}")
+            except Exception as e:
+                logger.warning(f"Failed to build query state: {e}, continuing without state building")
+                state_builder_result = None
 
         # Load IA area RAG configuration
         rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)

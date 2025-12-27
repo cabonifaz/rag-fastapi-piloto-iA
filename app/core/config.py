@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     orchestrator_top_p: float
 
     recontextualizer_model_id: str
+    state_builder_model_id: str
+    query_rewriter_model_id: str
 
     # Transcribe Configuration
     transcribe_language_code: str
@@ -112,6 +114,20 @@ class Settings(BaseSettings):
     def validate_recontextualizer_model_id(cls, v):
         if not v:
             raise ValueError("Recontextualizer model ID is required")
+        return v
+
+    @field_validator('state_builder_model_id')
+    @classmethod
+    def validate_state_builder_model_id(cls, v):
+        if not v:
+            raise ValueError("State builder model ID is required")
+        return v
+
+    @field_validator('query_rewriter_model_id')
+    @classmethod
+    def validate_query_rewriter_model_id(cls, v):
+        if not v:
+            raise ValueError("Query rewriter model ID is required")
         return v
 
     @field_validator('jwt_secret_key')
