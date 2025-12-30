@@ -1,8 +1,8 @@
 from typing import Union
-from app.infrastructure.recontextualizer.amazon_models import AmazonRecontextualizerConfig
-from app.infrastructure.recontextualizer.anthropic_models import AnthropicRecontextualizerConfig
-from app.infrastructure.recontextualizer.openai_models import OpenAIRecontextualizerConfig
-from app.infrastructure.recontextualizer.meta_models import MetaRecontextualizerConfig
+from app.infrastructure.state_builder.amazon_models import AmazonRecontextualizerConfig
+from app.infrastructure.state_builder.anthropic_models import AnthropicRecontextualizerConfig
+from app.infrastructure.state_builder.openai_models import OpenAIRecontextualizerConfig
+from app.infrastructure.state_builder.meta_models import MetaRecontextualizerConfig
 
 class ModelFactory:
     """Factory to get the appropriate model-specific configuration for query recontextualization."""

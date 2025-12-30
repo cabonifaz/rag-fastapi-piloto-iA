@@ -184,7 +184,8 @@ class DIContainer:
             llm_nonstreaming_provider = self.get_llm_nonstreaming_provider()
             message_service = self.get_message_service()
             ia_config_service = self.get_ia_config_service()
-            recontextualizer = self.get_recontextualizer()
+            state_builder = self.get_state_builder()
+            query_rewriter = self.get_query_rewriter()
             orchestrator = self.get_orchestrator_analyzer()
 
             # Create ONCE - singleton with all dependencies injected
@@ -194,7 +195,8 @@ class DIContainer:
                 llm_provider=llm_provider,
                 message_service=message_service,
                 ia_config_service=ia_config_service,
-                recontextualizer=recontextualizer,
+                state_builder=state_builder,
+                query_rewriter=query_rewriter,
                 orchestrator=orchestrator,
                 llm_nonstreaming_provider=llm_nonstreaming_provider
             )

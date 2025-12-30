@@ -96,32 +96,32 @@ class StateBuilder(StateBuilderPort):
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, any]:
         """
-        Builds optimal query state for RAG by analyzing conversation history with aioboto3 (truly async).
-        Creates a recontextualized, standalone query that incorporates necessary context.
+        Builds conversation state by analyzing conversation history with aioboto3 (truly async).
+        Extracts topic, entities, and goal from previous user messages.
 
         Args:
-            user_query: The user's query text.
+            user_query: The user's query text (not included in state extraction).
             conversation_history: Optional list of recent message dicts with 'role' and 'content'.
 
         Returns:
             Dictionary with:
-                - needs_context: bool (whether the query needed context)
-                - response: str (the state-built query ready for RAG)
-                - summary_intent: bool (whether user is asking for a summary)
-            Returns a default dict with the original query if state building fails.
+                - topic: str (the conversation topic)
+                - entities: list[str] (entities mentioned)
+                - goal: str (user's goal)
+            Returns empty state if no conversation history or if state building fails.
         """
         # Default response if no conversation history
         if not conversation_history or len(conversation_history) == 0:
-            logger.info("No conversation history provided, returning original query")
+            logger.info("No conversation history provided, returning empty state")
             return {
-                "needs_context": False,
-                "response": user_query,
-                "summary_intent": False
+                "topic": "",
+                "entities": [],
+                "goal": ""
             }
 
         try:
-            # Build messages array using proper Converse API format
-            # Convert conversation history to Converse messages format
+            # Convert conversation history to Converse API messages format
+            # (includes user messages with content and assistant messages with empty content)
             converse_messages = []
             for msg in conversation_history:
                 converse_messages.append({
@@ -129,13 +129,11 @@ class StateBuilder(StateBuilderPort):
                     "content": [{"text": msg["content"]}]
                 })
 
-            # Build the current query prompt with any model-specific instructions
-            prompt = self.model_config.build_user_prompt(user_query, conversation_history)
-
-            # Append current query as the latest user message
+            # Add instruction as the final user message
+            instruction = "Analyze the previous user messages and extract the conversation state as JSON."
             converse_messages.append({
                 "role": "user",
-                "content": [{"text": prompt}]
+                "content": [{"text": instruction}]
             })
 
             # Build request parameters
@@ -144,7 +142,7 @@ class StateBuilder(StateBuilderPort):
                 "messages": converse_messages,
                 "system": self._build_system_config(),
                 "inferenceConfig": {
-                    "maxTokens": 1024,  # Sufficient for state-built queries
+                    "maxTokens": 2048,  # Sufficient for state-built queries
                     "temperature": 0.0,  # Low temperature for consistent state building
                     "topP": 0.1
                 }
@@ -153,7 +151,7 @@ class StateBuilder(StateBuilderPort):
             # Use aioboto3 async client for truly non-blocking Bedrock calls
             logger.info(
                 f"♻️ Reusing session (id: {id(self.session)}) [RAG State Builder] | "
-                f"Request params: model={self.model_id}, max_tokens=1024, temp=0.0, top_p=0.1"
+                f"Request params: model={self.model_id}, max_tokens=2048, temp=0.0, top_p=0.1"
             )
             async with self.session.client("bedrock-runtime", config=self.boto_config) as client:
                 response = await client.converse(**request_params)
@@ -162,20 +160,28 @@ class StateBuilder(StateBuilderPort):
                 result = self._extract_result(response)
 
             if result:
+                # Safely access the result with logging
+                logger.info(f"Raw result from parser (type: {type(result)}): {result}")
+                logger.info(f"Result keys: {result.keys() if isinstance(result, dict) else 'Not a dict'}")
+
+                topic = result.get('topic', '') if isinstance(result, dict) else ''
+                entities = result.get('entities', []) if isinstance(result, dict) else []
+                goal = result.get('goal', '') if isinstance(result, dict) else ''
+
                 logger.info(
-                    f"Query state built for RAG:\n"
-                    f"  Original: {user_query}\n"
-                    f"  State-built query: {result['response']}\n"
-                    f"  Needs context: {result['needs_context']}\n"
-                    f"  Summary intent: {result['summary_intent']}"
+                    f"Conversation state extracted:\n"
+                    f"  Topic: {topic}\n"
+                    f"  Entities: {entities}\n"
+                    f"  Goal: {goal}\n"
+                    f"  Complete result: {result}"
                 )
                 return result
             else:
-                logger.warning("Failed to build query state, returning original")
+                logger.warning("Failed to build query state, returning empty state")
                 return {
-                    "needs_context": False,
-                    "response": user_query,
-                    "summary_intent": False
+                    "topic": "",
+                    "entities": [],
+                    "goal": ""
                 }
 
         except ClientError as e:
@@ -193,19 +199,19 @@ class StateBuilder(StateBuilderPort):
             elif error_code == 'ResourceNotFoundException':
                 logger.error(f"Model {self.model_id} not found or not accessible")
 
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return {"topic": "", "entities": [], "goal": ""}
 
         except NoCredentialsError as e:
             logger.error(f"AWS credentials error in RAG State Builder: {e}")
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return {"topic": "", "entities": [], "goal": ""}
 
         except EndpointConnectionError as e:
             logger.error(f"AWS endpoint connection error in RAG State Builder: {e}")
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return {"topic": "", "entities": [], "goal": ""}
 
         except asyncio.TimeoutError as e:
             logger.error(f"Timeout error in RAG State Builder: {e}")
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return {"topic": "", "entities": [], "goal": ""}
 
         except Exception as e:
             # Check if it's a timeout exception
@@ -215,17 +221,17 @@ class StateBuilder(StateBuilderPort):
             else:
                 logger.error(f"Unexpected error in RAG State Builder: {e}")
 
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return {"topic": "", "entities": [], "goal": ""}
 
     def _extract_result(self, response) -> Optional[Dict[str, any]]:
         """
-        Extract the state-built query from the Converse API response.
+        Extract the conversation state from the Converse API response.
 
         Args:
             response: The response from bedrock_client.converse()
 
         Returns:
-            Dictionary with needs_context, response (state-built query for RAG), and summary_intent, or None if extraction fails.
+            Dictionary with topic, entities, and goal, or None if extraction fails.
         """
         # Delegate to the model config's extract_response method
         return self.model_config.extract_response(response)

@@ -12,29 +12,29 @@ class QueryRewriterPort(ABC):
     Abstract interface for query rewriting.
 
     Implementations should optimize user queries for RAG retrieval by:
-    1. Expanding abbreviations and technical terms
-    2. Adding relevant domain-specific keywords
-    3. Reformulating complex questions into clearer search queries
-    4. Generating multiple query variations for better coverage
+    1. Using conversation state to add context
+    2. Resolving ambiguous references
+    3. Reformulating unclear queries
+    4. Detecting summary requests
     """
 
     @abstractmethod
     async def rewrite_query(
         self,
         user_query: str,
-        domain_context: Optional[str] = None
+        state: Optional[Dict[str, any]] = None
     ) -> Dict[str, any]:
         """
-        Rewrite and optimize the user query for better RAG retrieval.
+        Rewrite and optimize the user query using conversation state.
 
         Args:
             user_query: The user's query text to be rewritten
-            domain_context: Optional domain/industry context for better query optimization
+            state: Optional conversation state from state builder with {topic, entities, goal}
 
         Returns:
             Dictionary with:
+                - needs_rewrite: bool (whether the query needed rewriting)
                 - rewritten_query: str (the optimized query for RAG)
-                - variations: List[str] (alternative query formulations)
-                - keywords: List[str] (extracted/added keywords)
+                - is_summary_request: bool (whether user is requesting a summary)
         """
         pass

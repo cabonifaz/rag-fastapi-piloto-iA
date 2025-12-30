@@ -94,38 +94,34 @@ class QueryRewriter(QueryRewriterPort):
     async def rewrite_query(
         self,
         user_query: str,
-        domain_context: Optional[str] = None
+        state: Optional[Dict[str, any]] = None
     ) -> Dict[str, any]:
         """
-        Rewrites user query to optimize it for RAG retrieval with aioboto3 (truly async).
-        Expands terms, adds keywords, and creates query variations.
+        Rewrites user query using conversation state for better RAG retrieval with aioboto3 (truly async).
 
         Args:
             user_query: The user's query text to be rewritten.
-            domain_context: Optional domain/industry context for better query optimization.
+            state: Optional conversation state from state builder with {topic, entities, goal}.
 
         Returns:
             Dictionary with:
+                - needs_rewrite: bool (whether the query needed rewriting)
                 - rewritten_query: str (the optimized query for RAG)
-                - variations: List[str] (alternative query formulations)
-                - keywords: List[str] (extracted/added keywords)
+                - is_summary_request: bool (whether user is requesting a summary)
             Returns a default dict with the original query if rewriting fails.
         """
         # If query is too short, return as-is
         if len(user_query.strip()) < 3:
             logger.info("Query too short, returning original query")
             return {
+                "needs_rewrite": False,
                 "rewritten_query": user_query,
-                "variations": [user_query],
-                "keywords": []
+                "is_summary_request": False
             }
 
         try:
-            # Build the query rewriting prompt
-            if domain_context:
-                prompt = f"Rewrite this query to optimize it for document retrieval in the domain of {domain_context}:\n\nQuery: {user_query}\n\nProvide the rewritten query, alternative variations, and key search terms."
-            else:
-                prompt = f"Rewrite this query to optimize it for document retrieval:\n\nQuery: {user_query}\n\nProvide the rewritten query, alternative variations, and key search terms."
+            # Build the query rewriting prompt with state
+            prompt = self.model_config.build_user_prompt(user_query, state)
 
             # Build messages array using proper Converse API format
             converse_messages = [{
@@ -139,7 +135,7 @@ class QueryRewriter(QueryRewriterPort):
                 "messages": converse_messages,
                 "system": self._build_system_config(),
                 "inferenceConfig": {
-                    "maxTokens": 512,  # Sufficient for rewritten queries
+                    "maxTokens": 2048,  # Sufficient for rewritten queries
                     "temperature": 0.3,  # Slightly higher for creative query variations
                     "topP": 0.5
                 }
@@ -148,7 +144,7 @@ class QueryRewriter(QueryRewriterPort):
             # Use aioboto3 async client for truly non-blocking Bedrock calls
             logger.info(
                 f"♻️ Reusing session (id: {id(self.session)}) [Query Rewriter] | "
-                f"Request params: model={self.model_id}, max_tokens=512, temp=0.3, top_p=0.5"
+                f"Request params: model={self.model_id}, max_tokens=2048, temp=0.3, top_p=0.5"
             )
             async with self.session.client("bedrock-runtime", config=self.boto_config) as client:
                 response = await client.converse(**request_params)
@@ -158,19 +154,19 @@ class QueryRewriter(QueryRewriterPort):
 
             if result:
                 logger.info(
-                    f"Query rewritten:\n"
+                    f"Query rewriter result:\n"
                     f"  Original: {user_query}\n"
+                    f"  Needs rewrite: {result.get('needs_rewrite', False)}\n"
                     f"  Rewritten: {result.get('rewritten_query', user_query)}\n"
-                    f"  Variations count: {len(result.get('variations', []))}\n"
-                    f"  Keywords: {', '.join(result.get('keywords', []))}"
+                    f"  Is summary request: {result.get('is_summary_request', False)}"
                 )
                 return result
             else:
                 logger.warning("Failed to extract rewritten query, returning original")
                 return {
+                    "needs_rewrite": False,
                     "rewritten_query": user_query,
-                    "variations": [user_query],
-                    "keywords": []
+                    "is_summary_request": False
                 }
 
         except ClientError as e:
@@ -188,19 +184,19 @@ class QueryRewriter(QueryRewriterPort):
             elif error_code == 'ResourceNotFoundException':
                 logger.error(f"Model {self.model_id} not found or not accessible")
 
-            return {"rewritten_query": user_query, "variations": [user_query], "keywords": []}
+            return {"needs_rewrite": False, "rewritten_query": user_query, "is_summary_request": False}
 
         except NoCredentialsError as e:
             logger.error(f"AWS credentials error in QueryRewriter: {e}")
-            return {"rewritten_query": user_query, "variations": [user_query], "keywords": []}
+            return {"needs_rewrite": False, "rewritten_query": user_query, "is_summary_request": False}
 
         except EndpointConnectionError as e:
             logger.error(f"AWS endpoint connection error in QueryRewriter: {e}")
-            return {"rewritten_query": user_query, "variations": [user_query], "keywords": []}
+            return {"needs_rewrite": False, "rewritten_query": user_query, "is_summary_request": False}
 
         except asyncio.TimeoutError as e:
             logger.error(f"Timeout error in QueryRewriter: {e}")
-            return {"rewritten_query": user_query, "variations": [user_query], "keywords": []}
+            return {"needs_rewrite": False, "rewritten_query": user_query, "is_summary_request": False}
 
         except Exception as e:
             # Check if it's a timeout exception
@@ -210,7 +206,7 @@ class QueryRewriter(QueryRewriterPort):
             else:
                 logger.error(f"Unexpected error in QueryRewriter: {e}")
 
-            return {"rewritten_query": user_query, "variations": [user_query], "keywords": []}
+            return {"needs_rewrite": False, "rewritten_query": user_query, "is_summary_request": False}
 
     def _extract_result(self, response) -> Optional[Dict[str, any]]:
         """
@@ -220,7 +216,7 @@ class QueryRewriter(QueryRewriterPort):
             response: The response from bedrock_client.converse()
 
         Returns:
-            Dictionary with rewritten_query, variations, and keywords, or None if extraction fails.
+            Dictionary with needs_rewrite, rewritten_query, and is_summary_request, or None if extraction fails.
         """
         # Delegate to the model config's extract_response method
         return self.model_config.extract_response(response)
