@@ -10,13 +10,13 @@ from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
-from app.domain.ports.recontextualizer_port import RecontextualizerPort
+from app.domain.ports.state_builder import StateBuilderPort
+from app.domain.ports.query_rewriter import QueryRewriterPort
 from app.core.config import settings
 from app.infrastructure.task_decomposition.task_generator import TaskGenerator
 from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
 from app.services.message_service import MessageService
 from app.services.ia_config_service import IaConfigService
-from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 from app.infrastructure.repositories.chat_repository import ChatRepository
 from app.infrastructure.llm.model_factory import ModelConfigFactory
 from app.utils.query_utils import clean_user_query
@@ -46,7 +46,8 @@ class RagService:
         llm_provider: LLMPort,
         message_service: MessageService,
         ia_config_service: IaConfigService,
-        recontextualizer: RecontextualizerPort,
+        state_builder: StateBuilderPort,
+        query_rewriter: QueryRewriterPort,
         orchestrator: QueryAnalysisPort = None,
         llm_nonstreaming_provider = None
     ):
@@ -59,7 +60,8 @@ class RagService:
             llm_provider: Port for LLM operations (streaming)
             message_service: Service for managing chat messages in DynamoDB
             ia_config_service: Service for loading IA area configuration
-            recontextualizer: Service for query recontextualization
+            state_builder: Service for building query state from conversation history
+            query_rewriter: Service for rewriting queries based on state
             orchestrator: Optional port for query analysis and task decomposition
             llm_nonstreaming_provider: Optional port for non-streaming LLM operations (for n8n)
         """
@@ -68,7 +70,8 @@ class RagService:
         self.llm_provider = llm_provider
         self.message_service = message_service
         self.ia_config_service = ia_config_service
-        self.recontextualizer = recontextualizer
+        self.state_builder = state_builder
+        self.query_rewriter = query_rewriter
         self.orchestrator = orchestrator
         self.llm_nonstreaming_provider = llm_nonstreaming_provider
 
@@ -301,7 +304,7 @@ class RagService:
                     chat_id=f"chat-{chat_id}",
                     n=20
                 )
-                # Format messages for context
+                # Format messages for context (already in oldest-to-newest order from repository)
                 conversation_history = [
                     {
                         "role": "user" if msg.sender == 0 else "assistant",
@@ -309,8 +312,6 @@ class RagService:
                     }
                     for msg in messages_response
                 ]
-                # Reverse the list so messages are in correct chronological order (oldest first)
-                conversation_history.reverse()
                 filtered_history = []
                 for i, msg in enumerate(conversation_history):
                     if i > 0 and msg["role"] == "user" and conversation_history[i-1]["role"] == "user":
@@ -331,21 +332,40 @@ class RagService:
 
         cleaned_message = clean_user_query(message)
 
-        # Recontextualize query if chat_id exists, using only the last 6 messages
-        recontextualized_result = None
+        # Build query state and rewrite query if chat_id exists and conversation history available
+        state_builder_result = None
+        query_rewriter_result = None
         if chat_id is not None and conversation_history:
+            # Build query state for RAG (using last 6 messages, replace assistant content)
             try:
-                # Use only the last 6 messages for recontextualization (most recent context)
-                conversation_for_recontextualization = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
+                conversation_for_state_building = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
+                # Replace assistant messages content with placeholder (Bedrock doesn't allow empty content)
+                conversation_for_state_building = [
+                    {**msg, "content": "assistant message"} if msg["role"] == "assistant" else msg
+                    for msg in conversation_for_state_building
+                ]
 
-                recontextualized_result = await self.recontextualizer.recontextualize_query(
+                state_builder_result = await self.state_builder.build_query_state(
                     user_query=cleaned_message,
-                    conversation_history=conversation_for_recontextualization
+                    conversation_history=conversation_for_state_building
                 )
-                logger.info(f"Recontextualization result: {recontextualized_result}")
+                logger.info(f"State builder result: {state_builder_result}")
             except Exception as e:
-                logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
-                recontextualized_result = None
+                logger.warning(f"Failed to build query state: {e}, continuing without state building")
+                state_builder_result = None
+
+            # Rewrite query based on state builder result
+            query_rewriter_result = None
+            if state_builder_result:
+                try:
+                    query_rewriter_result = await self.query_rewriter.rewrite_query(
+                        user_query=cleaned_message,
+                        state=state_builder_result
+                    )
+                    logger.info(f"Query rewriter result: {query_rewriter_result}")
+                except Exception as e:
+                    logger.warning(f"Failed to rewrite query: {e}, continuing without query rewriting")
+                    query_rewriter_result = None
 
         # Load IA area RAG configuration
         rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
@@ -435,15 +455,15 @@ class RagService:
 
         # Step 1: Determine query to use for embedding and search
         query_for_search = cleaned_message
-        if recontextualized_result and recontextualized_result.get("needs_context", False):
-            recontextualized_query = recontextualized_result.get("response", "").strip()
-            if recontextualized_query:
-                query_for_search = recontextualized_query
-                logger.info(f"Using recontextualized query for search: {query_for_search}")
+        if query_rewriter_result and query_rewriter_result.get("needs_rewrite", False):
+            rewritten_query = query_rewriter_result.get("rewritten_query", "").strip()
+            if rewritten_query:
+                query_for_search = rewritten_query
+                logger.info(f"Using rewritten query for search: {query_for_search}")
             else:
-                logger.warning("Recontextualized response is empty, using original cleaned message")
+                logger.warning("Rewritten query is empty, using original cleaned message")
         else:
-            logger.info(f"Using original query for search (needs_context={recontextualized_result.get('needs_context', 'N/A') if recontextualized_result else 'N/A'})")
+            logger.info(f"Using original query for search (needs_rewrite={query_rewriter_result.get('needs_rewrite', 'N/A') if query_rewriter_result else 'N/A'})")
 
         # Generate embedding for the query (either original or recontextualized)
         query_embedding = await self.embeddings_provider.embed(query_for_search)
@@ -466,20 +486,20 @@ class RagService:
         # Step 4: Select conversation history for LLM prompt based on recontextualization flags
         # Use the already-fetched conversation_history to avoid duplicate DB calls
         conversation_history_for_prompt = []
-        if chat_id and conversation_history and recontextualized_result:
-            needs_context = recontextualized_result.get("needs_context", False)
-            summary_intent = recontextualized_result.get("summary_intent", False)
+        if chat_id and conversation_history and query_rewriter_result:
+            needs_rewrite = query_rewriter_result.get("needs_rewrite", False)
+            summary_intent = query_rewriter_result.get("is_summary_request", False)
 
             # Determine how many messages to use based on flags
             messages_to_use = 0
-            if needs_context and summary_intent:
+            if needs_rewrite and summary_intent:
                 # Both flags true: use all 16 messages
                 messages_to_use = 16
-                logger.info("Using 16 messages for LLM prompt (needs_context=true, summary_intent=true)")
-            elif needs_context:
-                # Only needs_context true: use 8 messages
+                logger.info("Using 16 messages for LLM prompt (needs_rewrite=true, summary_intent=true)")
+            elif needs_rewrite:
+                # Only needs_rewrite true: use 8 messages
                 messages_to_use = 8
-                logger.info("Using 8 messages for LLM prompt (needs_context=true)")
+                logger.info("Using 8 messages for LLM prompt (needs_rewrite=true)")
             elif summary_intent:
                 # Only summary_intent true: use 16 messages
                 messages_to_use = 16
@@ -634,7 +654,6 @@ class RagService:
                     }
                     for msg in messages_response
                 ]
-                conversation_history.reverse()
                 filtered_history = []
                 for i, msg in enumerate(conversation_history):
                     if i > 0 and msg["role"] == "user" and conversation_history[i-1]["role"] == "user":
@@ -653,19 +672,39 @@ class RagService:
 
             cleaned_message = clean_user_query(message)
 
-            # Recontextualize query if conversation history exists
-            recontextualized_result = None
+            # Build query state and rewrite query if conversation history exists
+            state_builder_result = None
+            query_rewriter_result = None
             if conversation_history:
+                # Build query state for RAG (using last 6 messages, replace assistant content)
                 try:
-                    conversation_for_recontextualization = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
-                    recontextualized_result = await self.recontextualizer.recontextualize_query(
+                    conversation_for_state_building = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
+                    # Replace assistant messages content with placeholder (Bedrock doesn't allow empty content)
+                    conversation_for_state_building = [
+                        {**msg, "content": "assistant message"} if msg["role"] == "assistant" else msg
+                        for msg in conversation_for_state_building
+                    ]
+
+                    state_builder_result = await self.state_builder.build_query_state(
                         user_query=cleaned_message,
-                        conversation_history=conversation_for_recontextualization
+                        conversation_history=conversation_for_state_building
                     )
-                    logger.info(f"Recontextualization result: {recontextualized_result}")
+                    logger.info(f"State builder result: {state_builder_result}")
                 except Exception as e:
-                    logger.warning(f"Failed to recontextualize query: {e}, continuing without recontextualization")
-                    recontextualized_result = None
+                    logger.warning(f"Failed to build query state: {e}, continuing without state building")
+                    state_builder_result = None
+
+                # Rewrite query based on state builder result
+                if state_builder_result:
+                    try:
+                        query_rewriter_result = await self.query_rewriter.rewrite_query(
+                            user_query=cleaned_message,
+                            state=state_builder_result
+                        )
+                        logger.info(f"Query rewriter result: {query_rewriter_result}")
+                    except Exception as e:
+                        logger.warning(f"Failed to rewrite query: {e}, continuing without query rewriting")
+                        query_rewriter_result = None
 
             # Load IA area RAG configuration
             rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
@@ -690,11 +729,11 @@ class RagService:
 
             # Determine query to use for embedding and search
             query_for_search = cleaned_message
-            if recontextualized_result and recontextualized_result.get("needs_context", False):
-                recontextualized_query = recontextualized_result.get("response", "").strip()
-                if recontextualized_query:
-                    query_for_search = recontextualized_query
-                    logger.info(f"Using recontextualized query for search: {query_for_search}")
+            if query_rewriter_result and query_rewriter_result.get("needs_rewrite", False):
+                rewritten_query = query_rewriter_result.get("rewritten_query", "").strip()
+                if rewritten_query:
+                    query_for_search = rewritten_query
+                    logger.info(f"Using rewritten query for search: {query_for_search}")
 
             # Generate embedding for the query
             query_embedding = await self.embeddings_provider.embed(query_for_search)
@@ -716,13 +755,13 @@ class RagService:
 
             # Select conversation history for LLM prompt
             conversation_history_for_prompt = []
-            if conversation_history and recontextualized_result:
-                needs_context = recontextualized_result.get("needs_context", False)
-                summary_intent = recontextualized_result.get("summary_intent", False)
+            if conversation_history and query_rewriter_result:
+                needs_rewrite = query_rewriter_result.get("needs_rewrite", False)
+                summary_intent = query_rewriter_result.get("is_summary_request", False)
                 messages_to_use = 0
-                if needs_context and summary_intent:
+                if needs_rewrite and summary_intent:
                     messages_to_use = 16
-                elif needs_context:
+                elif needs_rewrite:
                     messages_to_use = 8
                 elif summary_intent:
                     messages_to_use = 16
