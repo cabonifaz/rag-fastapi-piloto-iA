@@ -122,6 +122,7 @@ class QueryRewriter(QueryRewriterPort):
         try:
             # Build the query rewriting prompt with state
             prompt = self.model_config.build_user_prompt(user_query, state)
+            logger.info(f"[Query Rewriter] User prompt:\n{prompt}")
 
             # Build messages array using proper Converse API format
             converse_messages = [{
