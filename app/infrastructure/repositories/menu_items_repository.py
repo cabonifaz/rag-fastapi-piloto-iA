@@ -51,26 +51,54 @@ class MenuItemsRepository:
                     id_usuario
                 )
 
-                menu_items = []
+                results = []
 
-                # Get the menu items data
-                if cursor.description:
-                    columns = [desc[0] for desc in cursor.description]
-                    rows = cursor.fetchall()
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
 
-                    # Convert rows to list of dictionaries
-                    for row in rows:
-                        item_dict = dict(zip(columns, row))
-                        menu_items.append(item_dict)
+                            if rows:
+                                # Convert rows to dictionaries
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int/float for numeric fields
+                                    numeric_fields = ['NUM1', 'NUM2', 'NUM3']
+                                    for field in numeric_fields:
+                                        if field in result_dict and result_dict[field] is not None:
+                                            # Keep as float for decimals like 1.000000
+                                            result_dict[field] = float(result_dict[field])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error in get_menu_items: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error in get_menu_items: {nextset_error}")
+                        break
 
                 cursor.close()
-                return menu_items
+                self.db.commit()
+                return results
 
             except Exception as cursor_error:
                 logger.error(f"Cursor error in get_menu_items: {cursor_error}")
                 cursor.close()
+                self.db.rollback()
                 raise
 
         except Exception as e:
             logger.error(f"Error fetching menu items with SP: {e}")
+            self.db.rollback()
             return []
