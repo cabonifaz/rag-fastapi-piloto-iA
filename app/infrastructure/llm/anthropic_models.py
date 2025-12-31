@@ -9,9 +9,10 @@ from typing import Dict, Any
 class AnthropicModelConfig:
     """Configuration for Anthropic Claude models on AWS Bedrock."""
 
-    def __init__(self, model_id: str):
+    def __init__(self, model_id: str, supports_both_temp_and_top_p: bool = True):
         self.model_id = model_id.lower()
         self.is_claude_3 = "claude-3" in self.model_id or "us.anthropic.claude-3" in self.model_id
+        self.supports_both_temp_and_top_p = supports_both_temp_and_top_p
 
     def format_request(self, prompt: str, max_tokens: int, temperature: float, top_p: float) -> str:
         """Format request body for Claude models."""
@@ -134,11 +135,25 @@ class Claude4SonnetConfig(AnthropicModelConfig):
         super().__init__("anthropic.claude-sonnet-4-20250514-v1:0")
 
 
+class Claude45HaikuConfig(AnthropicModelConfig):
+    """Specific configuration for Claude 4.5 Haiku."""
+
+    def __init__(self):
+        super().__init__("us.anthropic.claude-haiku-4-5-20251001-v1:0", supports_both_temp_and_top_p=False)
+
+
 class Claude45SonnetConfig(AnthropicModelConfig):
     """Specific configuration for Claude 4.5 Sonnet."""
 
     def __init__(self):
-        super().__init__("anthropic.claude-sonnet-4-5-20250929-v1:0")
+        super().__init__("us.anthropic.claude-sonnet-4-5-20250929-v1:0", supports_both_temp_and_top_p=False)
+
+
+class Claude45OpusConfig(AnthropicModelConfig):
+    """Specific configuration for Claude 4.5 Opus."""
+
+    def __init__(self):
+        super().__init__("us.anthropic.claude-opus-4-5-20251101-v1:0", supports_both_temp_and_top_p=False)
 
 
 class Claude3OpusConfig(AnthropicModelConfig):
@@ -167,8 +182,12 @@ def get_anthropic_config(model_id: str) -> AnthropicModelConfig:
     model_id_lower = model_id.lower()
 
     # Claude 4.5 models
-    if "claude-sonnet-4-5" in model_id_lower or "sonnet-4-5" in model_id_lower:
+    if "claude-opus-4-5" in model_id_lower or "opus-4-5" in model_id_lower:
+        return Claude45OpusConfig()
+    elif "claude-sonnet-4-5" in model_id_lower or "sonnet-4-5" in model_id_lower:
         return Claude45SonnetConfig()
+    elif "claude-haiku-4-5" in model_id_lower or "haiku-4-5" in model_id_lower:
+        return Claude45HaikuConfig()
 
     # Claude 4.1 models
     elif "claude-opus-4-1" in model_id_lower or "opus-4-1" in model_id_lower:

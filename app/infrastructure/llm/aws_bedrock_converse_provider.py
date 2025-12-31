@@ -358,15 +358,22 @@ or contains spelling errors, default to Spanish. Format responses in Markdown wh
             # Get model-specific config for this attempt
             model_config = ModelConfigFactory.get_model_config(model_id)
 
+            # Build inference config - always include temperature and topP by default
+            inference_config = {
+                "maxTokens": max_tokens,
+                "temperature": temperature,
+                "topP": top_p
+            }
+
+            # Remove topP if the model doesn't support both parameters
+            if hasattr(model_config, 'supports_both_temp_and_top_p') and not model_config.supports_both_temp_and_top_p:
+                del inference_config["topP"]
+
             # Build request parameters - use model_id from config (normalized for AWS)
             request_params = {
                 "modelId": model_config.model_id,
                 "messages": converse_messages,
-                "inferenceConfig": {
-                    "maxTokens": max_tokens,
-                    "temperature": temperature,
-                    "topP": top_p
-                }
+                "inferenceConfig": inference_config
             }
 
             # Configure model-specific additional parameters (e.g., OpenAI reasoning)

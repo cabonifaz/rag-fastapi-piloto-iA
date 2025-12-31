@@ -66,7 +66,7 @@ class NovaPremierConfig(AmazonNovaModelConfig):
     """Specific configuration for Amazon Nova Premier."""
 
     def __init__(self):
-        super().__init__("amazon.nova-premier-v1:0")
+        super().__init__("us.amazon.nova-premier-v1:0")
 
 
 class NovaProConfig(AmazonNovaModelConfig):
