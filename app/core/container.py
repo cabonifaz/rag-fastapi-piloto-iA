@@ -10,12 +10,16 @@ from app.services.ia_models_service import IAModelsService
 from app.services.company_service import CompanyService
 from app.services.area_service import AreaService
 from app.services.users_service import UsersService
+from app.services.agents_service import AgentsService
+from app.services.phone_code_service import PhoneCodeService
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.llm_nonstreaming_port import LLMNonStreamingPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
+from app.domain.ports.state_builder import StateBuilderPort
+from app.domain.ports.query_rewriter import QueryRewriterPort
 from app.domain.ports.transcribe_port import TranscribePort
 from app.domain.ports.file_transcribe_port import FileTranscribePort
 from app.domain.ports.blob_storage_port import BlobStoragePort
@@ -27,6 +31,8 @@ from app.infrastructure.llm.aws_bedrock_converse_provider import AWSBedrockConve
 from app.infrastructure.llm.aws_bedrock_converse_provider_nonstreaming import AWSBedrockConverseNonStreamingProvider
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
+from app.infrastructure.state_builder.aws_bedrock_provider import StateBuilder
+from app.infrastructure.query_rewriter.aws_bedrock_provider import QueryRewriter
 from app.infrastructure.transcriber.aws_transcribe_streaming import AWSTranscribeStreaming
 from app.infrastructure.transcriber.openai_transcribe import OpenAITranscribe
 from app.infrastructure.blob_storages.s3_storage import S3BlobStorage
@@ -50,11 +56,15 @@ class DIContainer:
         self._chat_service = None
         self._message_service = None
         self._recontextualizer = None
+        self._state_builder = None
+        self._query_rewriter = None
         self._ia_config_service = None
         self._ia_models_service = None
         self._company_service = None
         self._area_service = None
         self._users_service = None
+        self._agents_service = None
+        self._phone_code_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -174,7 +184,8 @@ class DIContainer:
             llm_nonstreaming_provider = self.get_llm_nonstreaming_provider()
             message_service = self.get_message_service()
             ia_config_service = self.get_ia_config_service()
-            recontextualizer = self.get_recontextualizer()
+            state_builder = self.get_state_builder()
+            query_rewriter = self.get_query_rewriter()
             orchestrator = self.get_orchestrator_analyzer()
 
             # Create ONCE - singleton with all dependencies injected
@@ -184,7 +195,8 @@ class DIContainer:
                 llm_provider=llm_provider,
                 message_service=message_service,
                 ia_config_service=ia_config_service,
-                recontextualizer=recontextualizer,
+                state_builder=state_builder,
+                query_rewriter=query_rewriter,
                 orchestrator=orchestrator,
                 llm_nonstreaming_provider=llm_nonstreaming_provider
             )
@@ -234,6 +246,24 @@ class DIContainer:
 
         return self._recontextualizer
 
+    def get_state_builder(self) -> StateBuilderPort:
+        """Get state builder as singleton."""
+        if self._state_builder is None:
+            # Create ONCE - singleton
+            # Uses settings for AWS configuration
+            self._state_builder = StateBuilder()
+
+        return self._state_builder
+
+    def get_query_rewriter(self) -> QueryRewriterPort:
+        """Get query rewriter as singleton."""
+        if self._query_rewriter is None:
+            # Create ONCE - singleton
+            # Uses settings for AWS configuration
+            self._query_rewriter = QueryRewriter()
+
+        return self._query_rewriter
+
     def get_ia_config_service(self) -> IaConfigService:
         """Get IA config service as singleton (stateless, no db parameter)."""
         if self._ia_config_service is None:
@@ -273,6 +303,22 @@ class DIContainer:
             self._users_service = UsersService()
 
         return self._users_service
+
+    def get_agents_service(self) -> AgentsService:
+        """Get agents service as singleton (stateless, no db parameter)."""
+        if self._agents_service is None:
+            # Create ONCE - singleton
+            self._agents_service = AgentsService()
+
+        return self._agents_service
+
+    def get_phone_code_service(self) -> PhoneCodeService:
+        """Get phone code service as singleton (stateless, no db parameter)."""
+        if self._phone_code_service is None:
+            # Create ONCE - singleton
+            self._phone_code_service = PhoneCodeService()
+
+        return self._phone_code_service
 
     def create_transcribe_session(self) -> TranscribePort:
         """

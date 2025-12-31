@@ -38,7 +38,7 @@ from app.core.config import settings
 from app.core.database import init_database, close_database
 
 # Then import the heavy modules
-from app.api import rag, auth, external_login, chats, messages, transcribe, file_transcribe, company, area, users, knowledge, ia_models, ia_config
+from app.api import rag, auth, external_login, chats, messages, transcribe, file_transcribe, company, area, users, agents, knowledge, ia_models, ia_config, phone_code
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +93,11 @@ app.include_router(file_transcribe.router, prefix="/api/v1", tags=["file-transcr
 app.include_router(company.router, prefix="/api/v1/company", tags=["company-management"])
 app.include_router(area.router, prefix="/api/v1/area", tags=["area-management"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users-management"])
+app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents-management"])
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge-management"])
 app.include_router(ia_models.router, prefix="/api/v1/ia_models", tags=["ia-models-management"])
 app.include_router(ia_config.router, prefix="/api/v1/ia_config", tags=["ia-config-management"])
+app.include_router(phone_code.router, prefix="/api/v1/phone_code", tags=["phone-code-management"])
 
 
 @app.exception_handler(HTTPException)
