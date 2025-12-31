@@ -164,6 +164,29 @@ class KnowledgeService:
             'results': db_results
         }
 
+    # knowledge_service.py
+
+    async def get_document_url(
+        self,
+        ruta_documento: str,
+        download: bool = False
+    ) -> str:
+        """
+        Generate a presigned GET URL to view or download a PDF document.
+
+        Args:
+            ruta_documento: S3 key stored in DB
+            download: If True, forces file download
+
+        Returns:
+            Presigned URL
+        """
+        return await self.blob_storage.generate_presigned_download_url(
+            bucket_name=self.bucket_name,
+            object_key=ruta_documento,
+            as_attachment=download,
+            filename=ruta_documento.split("/")[-1]
+        )
     async def batch_update_knowledge_state(
         self,
         id_usuario: int,
