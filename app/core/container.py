@@ -12,6 +12,8 @@ from app.services.area_service import AreaService
 from app.services.users_service import UsersService
 from app.services.agents_service import AgentsService
 from app.services.phone_code_service import PhoneCodeService
+from app.services.menu_items_service import MenuItemsService
+
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -65,6 +67,7 @@ class DIContainer:
         self._users_service = None
         self._agents_service = None
         self._phone_code_service = None
+        self._menu_items_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -319,6 +322,15 @@ class DIContainer:
             self._phone_code_service = PhoneCodeService()
 
         return self._phone_code_service
+
+    def get_menu_items_service(self) -> MenuItemsService:
+        """Get menu items service as singleton (stateless, no db parameter)."""
+        if self._menu_items_service is None:
+            # Create ONCE - singleton
+            self._menu_items_service = MenuItemsService()
+
+        return self._menu_items_service
+
 
     def create_transcribe_session(self) -> TranscribePort:
         """
