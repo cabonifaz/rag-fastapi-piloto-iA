@@ -12,6 +12,8 @@ from app.services.area_service import AreaService
 from app.services.users_service import UsersService
 from app.services.agents_service import AgentsService
 from app.services.phone_code_service import PhoneCodeService
+from app.services.menu_items_service import MenuItemsService
+
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -29,6 +31,7 @@ from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsPro
 from app.infrastructure.vectorstores.weaviate_repository import WeaviateRepository
 from app.infrastructure.llm.aws_bedrock_converse_provider import AWSBedrockConverseProvider
 from app.infrastructure.llm.aws_bedrock_converse_provider_nonstreaming import AWSBedrockConverseNonStreamingProvider
+from app.infrastructure.llm.aws_bedrock_converse_provider_llm_only_nonstreaming import AWSBedrockConverseProviderLLMOnly
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
 from app.infrastructure.state_builder.aws_bedrock_provider import StateBuilder
@@ -49,6 +52,7 @@ class DIContainer:
         self._vectorstore = None
         self._llm_provider = None
         self._llm_nonstreaming_provider = None
+        self._llm_only_provider = None
         self._orchestrator_analyzer = None
         self._blob_storage = None
         self._rag_service = None
@@ -65,6 +69,7 @@ class DIContainer:
         self._users_service = None
         self._agents_service = None
         self._phone_code_service = None
+        self._menu_items_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -151,14 +156,14 @@ class DIContainer:
         return self._llm_provider
 
     def get_llm_nonstreaming_provider(self) -> LLMNonStreamingPort:
-        """Get non-streaming LLM provider instance (singleton)."""
+        """Get non-streaming LLM provider instance for RAG mode (singleton)."""
         if self._llm_nonstreaming_provider is None:
             try:
                 if settings.llm_provider == "aws":
                     if not settings.llm_region:
                         raise ValueError("LLM region is required for AWS provider")
 
-                    # Using non-streaming Converse API for n8n
+                    # Using non-streaming Converse API for n8n RAG mode
                     # Initialize with default model, actual model_id comes per-request from database
                     self._llm_nonstreaming_provider = AWSBedrockConverseNonStreamingProvider(
                         region=settings.llm_region,
@@ -175,6 +180,31 @@ class DIContainer:
 
         return self._llm_nonstreaming_provider
 
+    def get_llm_only_provider(self) -> LLMNonStreamingPort:
+        """Get LLM-only provider instance for conversational mode without RAG (singleton)."""
+        if self._llm_only_provider is None:
+            try:
+                if settings.llm_provider == "aws":
+                    if not settings.llm_region:
+                        raise ValueError("LLM region is required for AWS provider")
+
+                    # Using non-streaming Converse API for LLM-only mode (no RAG)
+                    # Initialize with default model, actual model_id comes per-request from database
+                    self._llm_only_provider = AWSBedrockConverseProviderLLMOnly(
+                        region=settings.llm_region,
+                        model_id="us.meta.llama4-maverick-17b-instruct-v1:0",  # Default/fallback model
+                        role_behavior=None,  # Will be provided per-request from database
+                        profile_name=settings.aws_profile,
+                        aws_access_key_id=settings.aws_access_key_id,
+                        aws_secret_access_key=settings.aws_secret_access_key
+                    )
+                else:
+                    raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+            except Exception as e:
+                raise ConnectionError(f"Failed to initialize LLM-only provider: {str(e)}")
+
+        return self._llm_only_provider
+
     def get_rag_service(self) -> RagService:
         """Get rag service as singleton (stateless, no db parameter)."""
         if self._rag_service is None:
@@ -182,6 +212,7 @@ class DIContainer:
             vectorstore = self.get_vectorstore()
             llm_provider = self.get_llm_provider()
             llm_nonstreaming_provider = self.get_llm_nonstreaming_provider()
+            llm_only_provider = self.get_llm_only_provider()
             message_service = self.get_message_service()
             ia_config_service = self.get_ia_config_service()
             state_builder = self.get_state_builder()
@@ -198,7 +229,8 @@ class DIContainer:
                 state_builder=state_builder,
                 query_rewriter=query_rewriter,
                 orchestrator=orchestrator,
-                llm_nonstreaming_provider=llm_nonstreaming_provider
+                llm_nonstreaming_provider=llm_nonstreaming_provider,
+                llm_only_provider=llm_only_provider
             )
 
         return self._rag_service
@@ -319,6 +351,15 @@ class DIContainer:
             self._phone_code_service = PhoneCodeService()
 
         return self._phone_code_service
+
+    def get_menu_items_service(self) -> MenuItemsService:
+        """Get menu items service as singleton (stateless, no db parameter)."""
+        if self._menu_items_service is None:
+            # Create ONCE - singleton
+            self._menu_items_service = MenuItemsService()
+
+        return self._menu_items_service
+
 
     def create_transcribe_session(self) -> TranscribePort:
         """

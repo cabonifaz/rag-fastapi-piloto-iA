@@ -110,6 +110,48 @@ class S3BlobStorage(BlobStoragePort):
             logger.error(f"Unexpected error generating presigned URL: {e}")
             raise ConnectionError(f"S3 presigned URL generation error: {str(e)}")
 
+    async def generate_presigned_download_url(
+        self,
+        bucket_name: str,
+        object_key: str,
+        expiration_seconds: int = 300,
+        as_attachment: bool = False,
+        filename: Optional[str] = None
+    ) -> str:
+        try:
+            if not bucket_name or not object_key:
+                raise ValueError("Bucket name and object key are required")
+
+            params = {
+                "Bucket": bucket_name,
+                "Key": object_key,
+            }
+
+            # Forzar descarga si se solicita
+            if as_attachment:
+                content_disposition = "attachment"
+                if filename:
+                    content_disposition += f'; filename="{filename}"'
+                params["ResponseContentDisposition"] = content_disposition
+
+            async with self.session.client("s3", config=self.s3_config) as s3_client:
+                url = await s3_client.generate_presigned_url(
+                    ClientMethod="get_object",
+                    Params=params,
+                    ExpiresIn=expiration_seconds,
+                    HttpMethod="GET"
+                )
+
+            return url
+
+        except ClientError as e:
+            logger.error(f"AWS ClientError generating download URL: {e}")
+            raise ConnectionError("S3 error generating download URL")
+
+        except Exception as e:
+            logger.error(f"Unexpected error generating download URL: {e}")
+            raise ConnectionError(str(e))
+
     async def move_to_deleted_prefix(
         self,
         bucket_name: str,

@@ -91,7 +91,7 @@ class Llama31_8BConfig(MetaModelConfig):
     """Specific configuration for Llama 3.1 8B - focused on request/response formatting."""
 
     def __init__(self):
-        super().__init__("meta.llama3-1-8b-instruct-v1:0")
+        super().__init__("us.meta.llama3-1-8b-instruct-v1:0")
 
 
 class Llama31_70BConfig(MetaModelConfig):

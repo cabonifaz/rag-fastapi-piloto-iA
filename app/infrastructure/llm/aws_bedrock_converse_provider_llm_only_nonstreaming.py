@@ -36,14 +36,14 @@ def get_saturation_tracker() -> ModelSaturationTracker:
     return _saturation_tracker
 
 
-class AWSBedrockConverseNonStreamingProvider(LLMNonStreamingPort):
+class AWSBedrockConverseProviderLLMOnly(LLMNonStreamingPort):
     """
-    AWS Bedrock LLM provider using the Converse API with aioboto3.
+    AWS Bedrock LLM provider using the Converse API for LLM-ONLY mode (no RAG).
 
     NON-STREAMING VERSION: Returns complete message at the end instead of chunks.
 
-    Provides unified interface for all supported models (Claude, Llama, OpenAI, etc.)
-    with built-in system prompt support and automatic fallback on model saturation.
+    Specifically optimized for conversational mode without retrieval-augmented generation.
+    Uses a system prompt tailored for general knowledge responses based on conversation history.
 
     Features:
     - Automatic fallback to alternative models when primary is saturated (429 errors)
@@ -53,9 +53,10 @@ class AWSBedrockConverseNonStreamingProvider(LLMNonStreamingPort):
     - Transparent error handling with saturation detection
     - Fully async with aioboto3 (no thread pool blocking)
     - Returns complete message at once (no streaming)
+    - System prompt optimized for LLM-only conversational mode
 
     Usage:
-        provider = AWSBedrockConverseNonStreamingProvider(
+        provider = AWSBedrockConverseProviderLLMOnly(
             region="us-east-1",
             model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
             role_behavior="You are a helpful assistant"
@@ -130,14 +131,14 @@ class AWSBedrockConverseNonStreamingProvider(LLMNonStreamingPort):
         # Log session parameters (credentials are masked for security)
         session_info = {k: '***' if 'key' in k.lower() or 'secret' in k.lower() else v
                        for k, v in self.session_params.items()}
-        logger.info(f"✨ Created NEW aioboto3.Session (id: {id(self.session)}) [Non-streaming] | Config: {session_info}")
+        logger.info(f"✨ Created NEW aioboto3.Session (id: {id(self.session)}) [LLM-Only Non-streaming] | Config: {session_info}")
 
     def set_system_prompt(self, system_prompt: str):
         """Update the system prompt for this provider instance."""
         self.system_prompt = system_prompt
 
     def _build_system_config(self, custom_system: Optional[str] = None, timestamp_utc: Optional[str] = None, request_timezone: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
-        """Build system configuration for Converse API."""
+        """Build system configuration for Converse API - LLM-Only Mode."""
         # Use custom role behavior or default
         role_behavior = custom_system or self.default_role_behavior
 
@@ -150,15 +151,21 @@ class AWSBedrockConverseNonStreamingProvider(LLMNonStreamingPort):
         elif request_timezone is not None:
             time_context = f"\nCurrent Time Context: The user's timezone is {request_timezone}. Use this information to provide accurate temporal references."
 
-        # Concatenate role behavior with formatting instructions
+        # LLM-Only mode system prompt - optimized for conversational AI without RAG
         system_text = f"""{role_behavior}{time_context}
-Use a natural, human-like tone in responses. Maintain conversational and engaging style throughout.
-When providing data or structured information, prioritize technical accuracy and clarity.
-Present information in a clean, easy-to-read plain text format suitable for messaging platforms.
-Answer directly and briefly. You may include short natural phrases to make the response more conversational.
-Do not overthink, speculate, or explain your internal reasoning.
-Always mirror the user's language exactly in your response. If the input language is unclear, mixed,
-or contains spelling errors, default to Spanish."""
+
+Conversational Guidelines:
+- Use a natural, warm, and engaging conversational tone in all responses
+- Draw from your general knowledge and the conversation history to provide helpful answers
+- Be honest about the limits of your knowledge - if you're uncertain about specific details, acknowledge it
+- When asked about current events or very recent information, clarify that your knowledge has a cutoff date
+- For questions requiring real-time data or company-specific information you don't have, explain that you don't have access to that information
+- Prioritize being helpful and conversational over being perfectly comprehensive
+- Answer directly and concisely, but feel free to add context when it genuinely helps the user
+- Use the conversation history to maintain context and provide coherent, contextually aware responses
+- Always mirror the user's language exactly in your response. If the input language is unclear, mixed, or contains spelling errors, default to Spanish
+- Present information in a clean, easy-to-read plain text format suitable for messaging platforms
+- When providing explanations or structured information, organize it clearly but keep the tone conversational"""
 
         if system_text:
             return [{"text": system_text}]
@@ -232,7 +239,7 @@ or contains spelling errors, default to Spanish."""
         for attempt, current_model in enumerate(available_models):
             try:
                 logger.info(
-                    f"🔄 Generating with {current_model} "
+                    f"🔄 Generating with {current_model} [LLM-Only] "
                     f"(attempt {attempt + 1}/{len(available_models)})"
                 )
 
@@ -250,7 +257,7 @@ or contains spelling errors, default to Spanish."""
                 )
 
                 # Success - return complete response
-                logger.info(f"✅ Successfully generated with {current_model}")
+                logger.info(f"✅ Successfully generated with {current_model} [LLM-Only]")
                 return complete_response
 
             except ConnectionError as e:
@@ -332,31 +339,35 @@ or contains spelling errors, default to Spanish."""
             Complete generated text as a single string
         """
         try:
-            # Build messages array - use provided messages or create from prompt
+            # Build messages array - use provided messages or create from user message
+            # IMPORTANT: In LLM-only mode, we pass user messages DIRECTLY without any prompt wrapping
+            # The system prompt (in _build_system_config) handles all behavioral instructions
             if messages is not None:
                 # Use provided conversation history
-                # Convert messages to Converse API format
+                # Convert messages to Converse API format (pass content as-is, no wrapping)
                 converse_messages = []
                 for msg in messages:
                     converse_messages.append({
                         "role": msg["role"],
-                        "content": [{"text": msg["content"]}]
+                        "content": [{"text": msg["content"]}]  # Direct message, no template
                     })
 
-                # Append current prompt as the latest user message (if provided)
+                # Append current user message as the latest message (if provided)
+                # Again, passed directly without any prompt wrapping
                 if prompt and prompt.strip():
                     converse_messages.append({
                         "role": "user",
-                        "content": [{"text": prompt}]
+                        "content": [{"text": prompt}]  # Raw user message, no formatting
                     })
             else:
-                # Use single prompt (backward compatibility)
+                # Use single user message (backward compatibility)
+                # Passed directly without any prompt template or wrapping
                 if prompt is None:
                     raise ValueError("Either prompt or messages must be provided")
                 converse_messages = [
                     {
                         "role": "user",
-                        "content": [{"text": prompt}]
+                        "content": [{"text": prompt}]  # Raw user message, no RAG-style wrapping
                     }
                 ]
 
@@ -392,7 +403,7 @@ or contains spelling errors, default to Spanish."""
             # Use pre-initialized session (created once in __init__) for better performance
             # Only the modelId changes per request - session/client are reused
             logger.info(
-                f"♻️ Reusing session (id: {id(self.session)}) [Non-streaming] | "
+                f"♻️ Reusing session (id: {id(self.session)}) [LLM-Only Non-streaming] | "
                 f"Request params: model={model_id}, max_tokens={max_tokens}, "
                 f"temp={temperature}, top_p={top_p}, messages={len(converse_messages)}"
             )
