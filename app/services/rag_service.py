@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
+from app.domain.ports.llm_nonstreaming_port import LLMNonStreamingPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.state_builder import StateBuilderPort
 from app.domain.ports.query_rewriter import QueryRewriterPort
@@ -48,8 +49,9 @@ class RagService:
         ia_config_service: IaConfigService,
         state_builder: StateBuilderPort,
         query_rewriter: QueryRewriterPort,
-        orchestrator: QueryAnalysisPort = None,
-        llm_nonstreaming_provider = None
+        orchestrator: Optional[QueryAnalysisPort] = None,
+        llm_nonstreaming_provider: LLMNonStreamingPort = None,
+        llm_only_provider: LLMNonStreamingPort = None
     ):
         """
         Initialize RagService with all dependencies injected.
@@ -63,7 +65,8 @@ class RagService:
             state_builder: Service for building query state from conversation history
             query_rewriter: Service for rewriting queries based on state
             orchestrator: Optional port for query analysis and task decomposition
-            llm_nonstreaming_provider: Optional port for non-streaming LLM operations (for n8n)
+            llm_nonstreaming_provider: Optional port for non-streaming LLM operations (for n8n RAG mode)
+            llm_only_provider: Optional port for non-streaming LLM operations in LLM-only mode (no RAG)
         """
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
@@ -74,6 +77,7 @@ class RagService:
         self.query_rewriter = query_rewriter
         self.orchestrator = orchestrator
         self.llm_nonstreaming_provider = llm_nonstreaming_provider
+        self.llm_only_provider = llm_only_provider
 
     # async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
     #     """
@@ -296,36 +300,50 @@ class RagService:
             logger.error(f"Initialization error in process_rag_query_stream: {e}")
             raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
 
-        # Get last 16 messages from chat history if chat_id exists (fetch once for both recontextualization and LLM)
+        # Get last messages from chat history if chat_id exists (fetch once for both recontextualization and LLM)
         conversation_history = []
         if chat_id is not None:
             try:
-                messages_response = await self.message_service.get_last_n_messages(
+                messages = await self.message_service.get_last_n_messages(
                     chat_id=f"chat-{chat_id}",
                     n=20
                 )
-                # Format messages for context (already in oldest-to-newest order from repository)
-                conversation_history = [
-                    {
-                        "role": "user" if msg.sender == 0 else "assistant",
-                        "content": msg.message
-                    }
-                    for msg in messages_response
-                ]
-                filtered_history = []
-                for i, msg in enumerate(conversation_history):
-                    if i > 0 and msg["role"] == "user" and conversation_history[i-1]["role"] == "user":
-                        # Si hay dos usuarios seguidos, saltar el primero (ya fue añadido)
-                        # No añadimos el actual y mantenemos el que ya está en filtered_history
-                        continue
-                    else:
-                        filtered_history.append(msg)
-                if filtered_history:
-                    if filtered_history[0]["role"] != "user":
-                        removed_msg = filtered_history.pop(0)
-                    if filtered_history and filtered_history[-1]["role"] == "user":
-                        removed_msg = filtered_history.pop()
-                conversation_history = filtered_history[-16:]
+
+                if messages:
+                    # Build and collapse in one pass
+                    collapsed = []
+                    for msg in messages:
+                        role = "user" if msg.sender == 0 else "assistant"
+                        if not collapsed or collapsed[-1]["role"] != role:
+                            collapsed.append({"role": role, "content": msg.message})
+                        else:
+                            collapsed[-1]["content"] = msg.message
+
+                    # Find boundaries
+                    start = next((i for i, m in enumerate(collapsed) if m["role"] == "user"), -1)
+                    end = next((i for i in range(len(collapsed)-1, -1, -1)
+                               if collapsed[i]["role"] == "assistant"), -1)
+
+                    # Validate and slice
+                    if start >= 0 and end > start:
+                        segment = collapsed[start:end+1]
+
+                        # Quick alternating check (should be true due to collapse)
+                        if all(segment[i]["role"] != segment[i+1]["role"]
+                               for i in range(len(segment)-1)):
+
+                            # Trim to context window (keep newest)
+                            MAX_CTX = 16
+                            if len(segment) > MAX_CTX:
+                                trim = len(segment) - MAX_CTX
+                                if segment[trim]["role"] == "assistant":
+                                    trim -= 1
+                                segment = segment[max(0, trim):]
+
+                            # Final check
+                            if segment and segment[0]["role"] == "user":
+                                conversation_history = segment
+
             except Exception as e:
                 logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
                 conversation_history = []
@@ -640,32 +658,49 @@ class RagService:
                     }
                 }
 
-            # Get last 16 messages from chat history
+            # Get last messages from chat history
             conversation_history = []
             try:
-                messages_response = await self.message_service.get_last_n_messages(
+                messages = await self.message_service.get_last_n_messages(
                     chat_id=f"chat-{chat_id}",
                     n=20
                 )
-                conversation_history = [
-                    {
-                        "role": "user" if msg.sender == 0 else "assistant",
-                        "content": msg.message
-                    }
-                    for msg in messages_response
-                ]
-                filtered_history = []
-                for i, msg in enumerate(conversation_history):
-                    if i > 0 and msg["role"] == "user" and conversation_history[i-1]["role"] == "user":
-                        continue
-                    else:
-                        filtered_history.append(msg)
-                if filtered_history:
-                    if filtered_history[0]["role"] != "user":
-                        removed_msg = filtered_history.pop(0)
-                    if filtered_history and filtered_history[-1]["role"] == "user":
-                        removed_msg = filtered_history.pop()
-                conversation_history = filtered_history[-16:]
+
+                if messages:
+                    # Build and collapse in one pass
+                    collapsed = []
+                    for msg in messages:
+                        role = "user" if msg.sender == 0 else "assistant"
+                        if not collapsed or collapsed[-1]["role"] != role:
+                            collapsed.append({"role": role, "content": msg.message})
+                        else:
+                            collapsed[-1]["content"] = msg.message
+
+                    # Find boundaries
+                    start = next((i for i, m in enumerate(collapsed) if m["role"] == "user"), -1)
+                    end = next((i for i in range(len(collapsed)-1, -1, -1)
+                               if collapsed[i]["role"] == "assistant"), -1)
+
+                    # Validate and slice
+                    if start >= 0 and end > start:
+                        segment = collapsed[start:end+1]
+
+                        # Quick alternating check (should be true due to collapse)
+                        if all(segment[i]["role"] != segment[i+1]["role"]
+                               for i in range(len(segment)-1)):
+
+                            # Trim to context window (keep newest)
+                            MAX_CTX = 16
+                            if len(segment) > MAX_CTX:
+                                trim = len(segment) - MAX_CTX
+                                if segment[trim]["role"] == "assistant":
+                                    trim -= 1
+                                segment = segment[max(0, trim):]
+
+                            # Final check
+                            if segment and segment[0]["role"] == "user":
+                                conversation_history = segment
+
             except Exception as e:
                 logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
                 conversation_history = []
@@ -777,6 +812,191 @@ class RagService:
                 llm_provider=self.llm_nonstreaming_provider,
                 model_id=rag_config['config']['LLM_MODEL'],
                 prompt=rag_prompt,
+                max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
+                temperature=rag_config['config']['LLM_TEMPERATURE'],
+                top_p=rag_config['config']['LLM_TOP_P'],
+                role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
+                messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
+                timestamp_utc=created_at,
+                request_timezone=request_timezone
+            )
+
+            # Update chat last message date
+            chat_repo = ChatRepository(db)
+            await asyncio.to_thread(
+                chat_repo.update_ultimo_mensaje_fecha,
+                chat_id
+            )
+
+            # Generate timestamp for assistant message
+            assistant_timestamp_ms = int(time.time() * 1000)
+            user_timestamp_ms = int(created_at)
+            if assistant_timestamp_ms < user_timestamp_ms:
+                assistant_timestamp = str(user_timestamp_ms + 1000)
+            else:
+                assistant_timestamp = str(assistant_timestamp_ms)
+
+            # Save assistant message to DynamoDB
+            if assistant_response and assistant_timestamp:
+                try:
+                    await self.message_service.create_message(
+                        chat_id=chat_id,
+                        created_at=assistant_timestamp,
+                        sender=1,  # 1 = assistant
+                        message=assistant_response
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to save assistant message: {e}")
+                    return {
+                        "result": {
+                            "idTipoMensaje": 1,
+                            "mensaje": "El mensaje de la IA no pudo guardarse correctamente"
+                        }
+                    }
+
+            # Return successful response
+            return {
+                "response": assistant_response,
+                "result": {
+                    "idTipoMensaje": 2,
+                    "mensaje": "Respuesta generada correctamente"
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error in process_rag_query_n8n: {e}")
+            return {
+                "result": {
+                    "idTipoMensaje": 1,
+                    "mensaje": f"Error al procesar la consulta: {str(e)}"
+                }
+            }
+
+    async def process_llm_only_n8n(self, user_id: int, user: str, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
+        """
+        Proceso LLM-only sin streaming (para n8n): LLM → response completa (sin embeddings, sin vector stores, sin state builder, sin query rewriter)
+        Retorna directamente la respuesta completa del LLM con resultado estructurado.
+        """
+        try:
+            # Validate LLM-only provider is available
+            if not self.llm_only_provider:
+                logger.error("LLM-only provider not configured")
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "Servicio de generación LLM-only no configurado correctamente"
+                    }
+                }
+
+            # Validate inputs
+            if not message or not message.strip():
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "El mensaje no puede estar vacío"
+                    }
+                }
+            if not user_id:
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "ID de usuario requerido"
+                    }
+                }
+            if not company_id:
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "ID de empresa requerido"
+                    }
+                }
+            if not area_id:
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "ID de área requerido"
+                    }
+                }
+
+            # Get last messages from chat history
+            conversation_history = []
+            try:
+                messages = await self.message_service.get_last_n_messages(
+                    chat_id=f"chat-{chat_id}",
+                    n=20
+                )
+
+                if messages:
+                    # Build and collapse in one pass
+                    collapsed = []
+                    for msg in messages:
+                        role = "user" if msg.sender == 0 else "assistant"
+                        if not collapsed or collapsed[-1]["role"] != role:
+                            collapsed.append({"role": role, "content": msg.message})
+                        else:
+                            collapsed[-1]["content"] = msg.message
+
+                    # Find boundaries
+                    start = next((i for i, m in enumerate(collapsed) if m["role"] == "user"), -1)
+                    end = next((i for i in range(len(collapsed)-1, -1, -1)
+                               if collapsed[i]["role"] == "assistant"), -1)
+
+                    # Validate and slice
+                    if start >= 0 and end > start:
+                        segment = collapsed[start:end+1]
+
+                        # Quick alternating check (should be true due to collapse)
+                        if all(segment[i]["role"] != segment[i+1]["role"]
+                               for i in range(len(segment)-1)):
+
+                            # Trim to context window (keep newest)
+                            MAX_CTX = 8
+                            if len(segment) > MAX_CTX:
+                                trim = len(segment) - MAX_CTX
+                                if segment[trim]["role"] == "assistant":
+                                    trim -= 1
+                                segment = segment[max(0, trim):]
+
+                            # Final check
+                            if segment and segment[0]["role"] == "user":
+                                conversation_history = segment
+
+            except Exception as e:
+                logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
+                conversation_history = []
+
+            cleaned_message = clean_user_query(message)
+
+            # Load IA area RAG configuration
+            rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
+            logger.info(f"Retrieved RAG config: {rag_config}")
+
+            # Save user message to DynamoDB
+            try:
+                await self.message_service.create_message(
+                    chat_id=chat_id,
+                    created_at=created_at,
+                    sender=0,
+                    message=cleaned_message
+                )
+            except Exception as e:
+                logger.error(f"Failed to save user message: {e}")
+                return {
+                    "result": {
+                        "idTipoMensaje": 1,
+                        "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
+                    }
+                }
+
+            # Use all available conversation history for LLM prompt (up to 8 messages)
+            conversation_history_for_prompt = conversation_history if conversation_history else []
+
+            # Generate complete response using LLM-only provider with validation
+            # This provider uses a system prompt optimized for conversational AI without RAG
+            assistant_response = await generate_text_with_validation(
+                llm_provider=self.llm_only_provider,
+                model_id=rag_config['config']['LLM_MODEL'],
+                prompt=cleaned_message,
                 max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
                 temperature=rag_config['config']['LLM_TEMPERATURE'],
                 top_p=rag_config['config']['LLM_TOP_P'],
