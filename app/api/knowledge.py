@@ -233,6 +233,70 @@ async def batch_upload_knowledge_endpoint(
             detail={"result": error_response.model_dump()}
         )
 
+@router.get("/document/url")
+async def get_knowledge_document_url(
+    http_request: Request,
+    ruta_documento: str,
+    download: bool = False,
+    db: Session = Depends(get_db)
+):
+    """
+    Get presigned URL for a knowledge/document.
+
+    Args:
+        ruta_documento: Path/key of the document in storage
+        download: If true, forces download disposition
+
+    Returns:
+        Dict with:
+        - url: Presigned document URL
+        - result: Success/error response
+    """
+    try:
+        # Validación básica de parámetros
+        if not ruta_documento or not isinstance(ruta_documento, str):
+            error_response = create_error_response("Ruta de documento inválida")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        blob_storage = container.get_blob_storage()
+        service = KnowledgeService(db, blob_storage)
+
+        url = await service.get_document_url(
+            ruta_documento=ruta_documento,
+            download=download
+        )
+
+        if not url:
+            error_response = create_error_response(
+                "No se pudo generar la URL del documento"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={"result": error_response.model_dump()}
+            )
+
+        success_response = create_success_response(
+            "URL del documento generada exitosamente"
+        )
+
+        return {
+            "url": url,
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_knowledge_document_url: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
 
 @router.patch("/batch_update_knowledge_state")
 async def batch_update_knowledge_state_endpoint(

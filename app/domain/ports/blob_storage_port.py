@@ -1,7 +1,8 @@
 """Port (interface) for blob storage operations."""
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
 
 
 class BlobStoragePort(ABC):
@@ -33,7 +34,29 @@ class BlobStoragePort(ABC):
             ValueError: If parameters are invalid
         """
         pass
+    @abstractmethod
+    async def generate_presigned_download_url(
+        self,
+        bucket_name: str,
+        object_key: str,
+        expiration_seconds: int = 300,
+        as_attachment: bool = False,
+        filename: Optional[str] = None
+    ) -> str:
+        """
+        Generate a presigned URL for downloading or viewing an object.
 
+        Args:
+            bucket_name: Name of the storage bucket
+            object_key: Object key/path in storage
+            expiration_seconds: URL expiration time
+            as_attachment: Force download if True
+            filename: Optional filename for download
+
+        Returns:
+            Presigned GET URL
+        """
+        pass
     @abstractmethod
     async def move_to_deleted_prefix(
         self,
