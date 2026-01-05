@@ -137,7 +137,7 @@ class AWSBedrockConverseProviderLLMOnly(LLMNonStreamingPort):
         """Update the system prompt for this provider instance."""
         self.system_prompt = system_prompt
 
-    def _build_system_config(self, custom_system: Optional[str] = None, timestamp_utc: Optional[str] = None, request_timezone: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
+    def _build_system_config(self, custom_system: Optional[str] = None, timestamp_utc: Optional[str] = None, request_timezone: Optional[str] = None, use_guidelines: bool = True) -> Optional[List[Dict[str, str]]]:
         """Build system configuration for Converse API - LLM-Only Mode."""
         # Use custom role behavior or default
         role_behavior = custom_system or self.default_role_behavior
@@ -152,7 +152,8 @@ class AWSBedrockConverseProviderLLMOnly(LLMNonStreamingPort):
             time_context = f"\nCurrent Time Context: The user's timezone is {request_timezone}. Use this information to provide accurate temporal references."
 
         # LLM-Only mode system prompt - optimized for conversational AI without RAG
-        system_text = f"""{role_behavior}{time_context}
+        if use_guidelines:
+            system_text = f"""{role_behavior}{time_context}
 
 Conversational Guidelines:
 - Use a natural, warm, and engaging conversational tone in all responses
@@ -166,6 +167,8 @@ Conversational Guidelines:
 - Always mirror the user's language exactly in your response. If the input language is unclear, mixed, or contains spelling errors, default to Spanish
 - Present information in a clean, easy-to-read plain text format suitable for messaging platforms
 - When providing explanations or structured information, organize it clearly but keep the tone conversational"""
+        else:
+            system_text = f"""{role_behavior}{time_context}"""
 
         if system_text:
             return [{"text": system_text}]
@@ -182,7 +185,8 @@ Conversational Guidelines:
         messages: Optional[List[Dict[str, Any]]] = None,
         fallback_models: Optional[List[str]] = None,
         timestamp_utc: Optional[str] = None,
-        request_timezone: Optional[str] = None
+        request_timezone: Optional[str] = None,
+        use_guidelines: bool = True
     ) -> str:
         """
         Generate text using AWS Bedrock Converse API with automatic fallback.
@@ -253,7 +257,8 @@ Conversational Guidelines:
                     role_behavior=role_behavior,
                     messages=messages,
                     timestamp_utc=timestamp_utc,
-                    request_timezone=request_timezone
+                    request_timezone=request_timezone,
+                    use_guidelines=use_guidelines
                 )
 
                 # Success - return complete response
@@ -314,7 +319,8 @@ Conversational Guidelines:
         role_behavior: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
         timestamp_utc: Optional[str] = None,
-        request_timezone: Optional[str] = None
+        request_timezone: Optional[str] = None,
+        use_guidelines: bool = True
     ) -> str:
         """
         Generate from a specific model (internal helper).
@@ -398,7 +404,7 @@ Conversational Guidelines:
                 request_params["additionalModelRequestFields"] = additional_fields
 
             # Add system prompt with timestamp and timezone context
-            request_params["system"] = self._build_system_config(role_behavior, timestamp_utc, request_timezone)
+            request_params["system"] = self._build_system_config(role_behavior, timestamp_utc, request_timezone, use_guidelines)
 
             # Use pre-initialized session (created once in __init__) for better performance
             # Only the modelId changes per request - session/client are reused

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from typing import Dict, Any
@@ -256,6 +256,8 @@ async def chat_n8n_endpoint(
 @router.post("/chat-n8n-llm-only")
 async def chat_n8n_llm_only_endpoint(
     request: N8NLLMOnlyRequest,
+    useGuidelines: bool = Query(True, description="Whether to use guidelines in the LLM response"),
+    storeMessages: bool = Query(True, description="Whether to store messages in the database"),
     rag_service: RagService = Depends(get_rag_service),
     db: Session = Depends(get_db),
     current_agent: Dict[str, Any] = Depends(get_current_agent_with_company_validation)
@@ -265,6 +267,10 @@ async def chat_n8n_llm_only_endpoint(
 
     Requires agent JWT authentication token in Authorization header.
     Validates agent access to requested company_id (no area validation required).
+
+    Query Parameters:
+    - useGuidelines: bool (default: True) - Whether to use guidelines in the LLM response
+    - storeMessages: bool (default: True) - Whether to store messages in the database
 
     Returns complete response in a single JSON object (no streaming).
     Uses LLM with conversation history only - no embeddings, no vector search, no RAG context.
@@ -307,7 +313,9 @@ async def chat_n8n_llm_only_endpoint(
             created_at=request.created_at,
             chat_id=request.chat_id,
             request_timezone=request.request_timezone,
-            system_behavior=request.system_behavior
+            system_behavior=request.system_behavior,
+            use_guidelines=useGuidelines,
+            store_messages=storeMessages
         )
 
         logger.info(f"[N8N LLM-ONLY RESPONSE] Result type: {result.get('result', {}).get('idTipoMensaje')}")
