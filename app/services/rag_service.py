@@ -278,7 +278,7 @@ class RagService:
     #         }
 
 
-    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: str = None, request_timezone: str = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: str = None, request_timezone: str = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -612,7 +612,7 @@ class RagService:
             "status": "success"
         }
 
-    async def process_rag_query_n8n(self, user_id: int, user: str, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
+    async def process_rag_query_n8n(self, user_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
         """
         Proceso RAG completo sin streaming (para n8n): embeddings → search → LLM → response completa
         Retorna directamente la respuesta completa del LLM con resultado estructurado.
@@ -872,7 +872,7 @@ class RagService:
                 }
             }
 
-    async def process_llm_only_n8n(self, user_id: int, user: str, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
+    async def process_llm_only_n8n(self, user_id: int, message: str, company_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
         """
         Proceso LLM-only sin streaming (para n8n): LLM → response completa (sin embeddings, sin vector stores, sin state builder, sin query rewriter)
         Retorna directamente la respuesta completa del LLM con resultado estructurado.
@@ -908,13 +908,6 @@ class RagService:
                     "result": {
                         "idTipoMensaje": 1,
                         "mensaje": "ID de empresa requerido"
-                    }
-                }
-            if not area_id:
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "ID de área requerido"
                     }
                 }
 
@@ -967,9 +960,9 @@ class RagService:
 
             cleaned_message = clean_user_query(message)
 
-            # Load IA area RAG configuration
-            rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
-            logger.info(f"Retrieved RAG config: {rag_config}")
+            # Load IA area RAG configuration (company-level only, no area required)
+            rag_config = await self.ia_config_service.get_ia_area_config_rag_no_area(db, company_id)
+            logger.info(f"Retrieved RAG config (no area): {rag_config}")
 
             # Save user message to DynamoDB
             try:

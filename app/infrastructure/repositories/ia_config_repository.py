@@ -163,6 +163,78 @@ class IaConfigRepository:
             raise
 
     @retry_on_db_error(max_retries=3, delay=1)
+    def get_ia_area_config_rag_no_area(self, id_empresa: int) -> Optional[Dict[str, Any]]:
+        """
+        Load IA area RAG configuration from database using stored procedure (company level only).
+
+        Calls SP_GET_IA_AREA_CONFIG_RAG_NO_AREA to retrieve RAG-specific configuration parameters
+        for the specified company without requiring an area.
+
+        Args:
+            id_empresa: ID of the company
+
+        Returns:
+            Dictionary containing 'config' with EMBEDDINGS_MODEL, EMBEDDINGS_PROVIDER, LLM_MODEL,
+            LLM_PROVIDER, EMBEDDINGS_DIMENSIONS, LLM_MAX_TOKENS, LLM_TEMPERATURE, LLM_TOP_P,
+            RAG_TOP_K_RESULTS, RAG_SIMILARITY_THRESHOLD, RAG_ALPHA, ROLE_BEHAVIOR, or None if not found
+
+        Raises:
+            Exception: If database operation fails
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_GET_IA_AREA_CONFIG_RAG_NO_AREA @ID_EMPRESA = ?",
+                    id_empresa
+                )
+
+                result = {}
+
+                # First result set - config parameters
+                if cursor.description:
+                    columns = [desc[0] for desc in cursor.description]
+                    row = cursor.fetchone()
+
+                    if row:
+                        config_dict = dict(zip(columns, row))
+
+                        # Convert Decimal types to proper Python types
+                        for key, value in config_dict.items():
+                            if isinstance(value, Decimal):
+                                # Convert to int if it's a whole number, otherwise float
+                                if value % 1 == 0:
+                                    config_dict[key] = int(value)
+                                else:
+                                    config_dict[key] = float(value)
+
+                        result['config'] = config_dict
+                    else:
+                        logger.info(f"No RAG config found for id_empresa={id_empresa}")
+                        cursor.close()
+                        return None
+
+                cursor.close()
+
+                if result:
+                    logger.info(f"Retrieved IA area RAG config (no area) for id_empresa={id_empresa}")
+                    return result
+
+                return None
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_ia_area_config_rag_no_area: {cursor_error}")
+                cursor.close()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error loading IA area RAG config (no area) for id_empresa={id_empresa}: {e}")
+            raise
+
+    @retry_on_db_error(max_retries=3, delay=1)
     async def update_ia_area_config(
         self,
         id_usuario: int,

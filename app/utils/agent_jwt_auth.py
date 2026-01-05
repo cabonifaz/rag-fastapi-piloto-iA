@@ -144,6 +144,42 @@ class AgentJWTAuth:
             )
 
     @staticmethod
+    def validate_agent_company_access(token: str, company_id: int) -> bool:
+        """
+        Validate agent access to company based on token data (no area validation)
+
+        Args:
+            token: JWT token
+            company_id: Requested company ID
+
+        Returns:
+            True if access is allowed, False otherwise
+        """
+        try:
+            # Validate input parameter
+            if not isinstance(company_id, int) or company_id <= 0:
+                return False
+
+            # Extract full payload
+            payload = jwt.decode(
+                token,
+                settings.jwt_secret_key,
+                algorithms=['HS256']
+            )
+
+            company_areas = payload.get('company_areas', [])
+
+            # Validate company_id exists in any row
+            return any(
+                ca.get('ID_EMPRESA') == company_id
+                for ca in company_areas
+            )
+
+        except Exception as e:
+            logger.error(f"Error validating agent company access: {e}")
+            return False
+
+    @staticmethod
     def validate_agent_company_area_access(token: str, company_id: int, area_id: int) -> bool:
         """
         Validate agent access to company/area based on token data
@@ -228,6 +264,53 @@ async def get_current_agent_with_company_area_validation(
 
         if not has_access:
             logger.warning(f"Access denied for agent {agent_data.get('ID_AGENTE')} to company_id: {company_id}, area_id: {area_id}")
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Acceso denegado"}}
+            )
+
+    return agent_data
+
+
+# Dependency function for company-only validation (no area required)
+async def get_current_agent_with_company_validation(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Dict[str, Any]:
+    """Get current agent and validate company access from request by company_id (no area validation)"""
+
+    if not credentials:
+        logger.warning("No agent JWT token found in Authorization header")
+        raise HTTPException(
+            status_code=401,
+            detail={"result": {"idTipoMensaje": 1, "mensaje": "Token de autenticación requerido"}}
+        )
+
+    token = credentials.credentials
+
+    # Verify JWT expiration and get agent info
+    agent_data = AgentJWTAuth.verify_agent_jwt_token(token)
+
+    # Extract company_id from request body
+    if request.method == "POST":
+        content_type = request.headers.get("content-type", "")
+
+        if "application/json" in content_type:
+            # For JSON requests
+            body = await request.json()
+            company_id = body.get("company_id")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported content type")
+
+        # Validate input parameter
+        if company_id is None:
+            raise HTTPException(status_code=422, detail={"result": {"idTipoMensaje": 1, "mensaje": "company_id is required"}})
+
+        # Validate agent has access to the requested company_id
+        has_access = AgentJWTAuth.validate_agent_company_access(token, company_id)
+
+        if not has_access:
+            logger.warning(f"Access denied for agent {agent_data.get('ID_AGENTE')} to company_id: {company_id}")
             raise HTTPException(
                 status_code=403,
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Acceso denegado"}}
