@@ -872,7 +872,7 @@ class RagService:
                 }
             }
 
-    async def process_llm_only_n8n(self, user_id: int, message: str, company_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
+    async def process_llm_only_n8n(self, user_id: int, message: str, company_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None, system_behavior: str = None) -> Dict[str, Any]:
         """
         Proceso LLM-only sin streaming (para n8n): LLM → response completa (sin embeddings, sin vector stores, sin state builder, sin query rewriter)
         Retorna directamente la respuesta completa del LLM con resultado estructurado.
@@ -984,6 +984,10 @@ class RagService:
             # Use all available conversation history for LLM prompt (up to 8 messages)
             conversation_history_for_prompt = conversation_history if conversation_history else []
 
+            # Determine which role_behavior to use: custom system_behavior or config default
+            role_behavior_to_use = system_behavior if system_behavior else rag_config['config']['ROLE_BEHAVIOR']
+            logger.info(f"Using {'custom system_behavior' if system_behavior else 'config ROLE_BEHAVIOR'} for LLM")
+
             # Generate complete response using LLM-only provider with validation
             # This provider uses a system prompt optimized for conversational AI without RAG
             assistant_response = await generate_text_with_validation(
@@ -993,7 +997,7 @@ class RagService:
                 max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
                 temperature=rag_config['config']['LLM_TEMPERATURE'],
                 top_p=rag_config['config']['LLM_TOP_P'],
-                role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
+                role_behavior=role_behavior_to_use,
                 messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
                 timestamp_utc=created_at,
                 request_timezone=request_timezone
