@@ -14,8 +14,9 @@ async def generate_text_stream_with_validation(
     top_p: float = None,
     role_behavior: str = None,
     messages: Optional[List[Dict[str, str]]] = None,
-    timestamp_utc: Optional[str] = None,
-    request_timezone: Optional[str] = None
+    request_timezone: Optional[str] = None,
+    utc_formatted: str = None,
+    local_formatted: str = None
 ) -> AsyncGenerator[str, None]:
     """
     Generate streaming text response using LLM provider with validation and user-friendly error handling.
@@ -35,8 +36,9 @@ async def generate_text_stream_with_validation(
         role_behavior: Optional role behavior (system prompt)
         messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                  If provided, prompt will be ignored and messages will be used instead
-        timestamp_utc: Optional Unix timestamp in UTC format (as string)
         request_timezone: Optional timezone string for the request
+        utc_formatted: Formatted UTC timestamp string
+        local_formatted: Formatted local timestamp string
 
     Yields:
         Text chunks as they are generated
@@ -69,8 +71,9 @@ async def generate_text_stream_with_validation(
             top_p=top_p,
             role_behavior=role_behavior,
             messages=messages,
-            timestamp_utc=timestamp_utc,
-            request_timezone=request_timezone
+            request_timezone=request_timezone,
+            utc_formatted=utc_formatted,
+            local_formatted=local_formatted
         ):
             # Detect stop reason signal from LLM provider
             if chunk.startswith("__STOP_REASON__:"):
@@ -110,8 +113,9 @@ async def generate_text_with_validation(
     top_p: float = None,
     role_behavior: str = None,
     messages: Optional[List[Dict[str, str]]] = None,
-    timestamp_utc: Optional[str] = None,
-    request_timezone: Optional[str] = None
+    request_timezone: Optional[str] = None,
+    utc_formatted: str = None,
+    local_formatted: str = None
 ) -> str:
     """
     Generate complete text response using non-streaming LLM provider with validation and error handling.
@@ -131,8 +135,9 @@ async def generate_text_with_validation(
         role_behavior: Optional role behavior (system prompt)
         messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                  If provided, prompt will be ignored and messages will be used instead
-        timestamp_utc: Optional Unix timestamp in UTC format (as string)
         request_timezone: Optional timezone string for the request
+        utc_formatted: Formatted UTC timestamp string
+        local_formatted: Formatted local timestamp string
 
     Returns:
         Complete generated text as a single string
@@ -164,8 +169,9 @@ async def generate_text_with_validation(
             top_p=top_p,
             role_behavior=role_behavior,
             messages=messages,
-            timestamp_utc=timestamp_utc,
-            request_timezone=request_timezone
+            request_timezone=request_timezone,
+            utc_formatted=utc_formatted,
+            local_formatted=local_formatted
         )
 
         # Validate response
@@ -197,8 +203,9 @@ async def generate_text_llm_only_with_validation(
     top_p: float = None,
     role_behavior: str = None,
     messages: Optional[List[Dict[str, str]]] = None,
-    timestamp_utc: Optional[str] = None,
     request_timezone: Optional[str] = None,
+    utc_formatted: str = None,
+    local_formatted: str = None,
     use_guidelines: bool = True
 ) -> str:
     """
@@ -216,8 +223,9 @@ async def generate_text_llm_only_with_validation(
         role_behavior: Optional role behavior (system prompt)
         messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                  If provided, prompt will be ignored and messages will be used instead
-        timestamp_utc: Optional Unix timestamp in UTC format (as string)
         request_timezone: Optional timezone string for the request
+        utc_formatted: Formatted UTC timestamp string
+        local_formatted: Formatted local timestamp string
         use_guidelines: Whether to include conversational guidelines in system prompt (default: True)
 
     Returns:
@@ -250,8 +258,9 @@ async def generate_text_llm_only_with_validation(
             top_p=top_p,
             role_behavior=role_behavior,
             messages=messages,
-            timestamp_utc=timestamp_utc,
             request_timezone=request_timezone,
+            utc_formatted=utc_formatted,
+            local_formatted=local_formatted,
             use_guidelines=use_guidelines
         )
 
