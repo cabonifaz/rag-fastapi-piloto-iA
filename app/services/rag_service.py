@@ -23,6 +23,7 @@ from app.infrastructure.llm.model_factory import ModelConfigFactory
 from app.utils.query_utils import clean_user_query
 from app.utils.search_utils import build_context_from_search_results
 from app.utils.llm_utils import generate_text_stream_with_validation, generate_text_with_validation, generate_text_llm_only_with_validation
+from app.utils.time_utils import format_timestamp_with_timezone
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -556,6 +557,12 @@ class RagService:
         assistant_response = ""
         first_chunk_sent = False
 
+        # Format timestamp with timezone
+        utc_formatted, local_formatted = format_timestamp_with_timezone(
+            assistant_timestamp_ms,
+            request_timezone or "America/Lima"
+        )
+
         # Stream the LLM response with role behavior and conversation history using utility function
         async for chunk in generate_text_stream_with_validation(
             llm_provider=self.llm_provider,
@@ -566,8 +573,9 @@ class RagService:
             top_p=rag_config['config']['LLM_TOP_P'],
             role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
             messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
-            timestamp_utc=created_at,
-            request_timezone=request_timezone
+            request_timezone=request_timezone,
+            utc_formatted=utc_formatted,
+            local_formatted=local_formatted
         ):
             assistant_response += chunk
 

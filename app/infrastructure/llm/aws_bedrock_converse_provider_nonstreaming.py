@@ -136,29 +136,41 @@ class AWSBedrockConverseNonStreamingProvider(LLMNonStreamingPort):
         """Update the system prompt for this provider instance."""
         self.system_prompt = system_prompt
 
-    def _build_system_config(self, custom_system: Optional[str] = None, timestamp_utc: Optional[str] = None, request_timezone: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
+    def _build_system_config(self, custom_system: Optional[str] = None, request_timezone: Optional[str] = None, utc_formatted: str = None, local_formatted: str = None) -> Optional[List[Dict[str, str]]]:
         """Build system configuration for Converse API."""
         # Use custom role behavior or default
         role_behavior = custom_system or self.default_role_behavior
 
-        # Build time context text if timestamp and timezone are provided
-        time_context = ""
-        if timestamp_utc is not None and request_timezone is not None:
-            time_context = f"\nCurrent Time Context: The current timestamp is {timestamp_utc} (Unix UTC format) and the user's timezone is {request_timezone}. Use this information to provide accurate temporal references."
-        elif timestamp_utc is not None:
-            time_context = f"\nCurrent Time Context: The current timestamp is {timestamp_utc} (Unix UTC format). Use this information to provide accurate temporal references."
-        elif request_timezone is not None:
-            time_context = f"\nCurrent Time Context: The user's timezone is {request_timezone}. Use this information to provide accurate temporal references."
-
         # Concatenate role behavior with formatting instructions
-        system_text = f"""{role_behavior}{time_context}
-Use a natural, human-like tone in responses. Maintain conversational and engaging style throughout.
-When providing data or structured information, prioritize technical accuracy and clarity.
-Present information in a clean, easy-to-read plain text format suitable for messaging platforms.
-Answer directly and briefly. You may include short natural phrases to make the response more conversational.
-Do not overthink, speculate, or explain your internal reasoning.
-Always mirror the user's language exactly in your response. If the input language is unclear, mixed,
-or contains spelling errors, default to Spanish."""
+        system_text = f"""{role_behavior}
+
+Time context:
+- UTC: {utc_formatted}
+- Local: {local_formatted}
+- Timezone: {request_timezone}
+
+Temporal rules:
+- Use this time context as the single source of truth.
+- Use local time for all time-sensitive reasoning.
+- Do not infer or use external date or time information.
+- Exclude items scheduled before the current local time.
+- Ask for clarification if time context is insufficient.
+
+Response rules:
+- Answer directly and concisely.
+- Do not explain internal reasoning or speculate.
+- Match the user's language; if unclear or mixed, default to Spanish.
+- Keep responses concise unless the user explicitly asks for detail.
+
+Formatting rules:
+- Render structured or API-derived data as Markdown tables only.
+- JSON-like data must be rendered as a Markdown table with columns: table, headers, rows."""
+
+        print("=" * 80)
+        print("FULL SYSTEM PROMPT [Non-Streaming]:")
+        print("=" * 80)
+        print(system_text)
+        print("=" * 80)
 
         if system_text:
             return [{"text": system_text}]
@@ -174,8 +186,9 @@ or contains spelling errors, default to Spanish."""
         role_behavior: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
         fallback_models: Optional[List[str]] = None,
-        timestamp_utc: Optional[str] = None,
-        request_timezone: Optional[str] = None
+        request_timezone: Optional[str] = None,
+        utc_formatted: str = None,
+        local_formatted: str = None
     ) -> str:
         """
         Generate text using AWS Bedrock Converse API with automatic fallback.
@@ -198,8 +211,9 @@ or contains spelling errors, default to Spanish."""
                      If provided, prompt will be ignored and messages will be used instead
             fallback_models: Optional list of fallback model IDs to try if primary is saturated.
                            If not provided, uses hardcoded MODELS list.
-            timestamp_utc: Optional Unix timestamp in UTC format (as string)
             request_timezone: Optional timezone string for the request
+            utc_formatted: Formatted UTC timestamp string
+            local_formatted: Formatted local timestamp string
 
         Returns:
             Complete generated text as a single string
@@ -245,8 +259,9 @@ or contains spelling errors, default to Spanish."""
                     top_p=top_p,
                     role_behavior=role_behavior,
                     messages=messages,
-                    timestamp_utc=timestamp_utc,
-                    request_timezone=request_timezone
+                    request_timezone=request_timezone,
+                    utc_formatted=utc_formatted,
+                    local_formatted=local_formatted
                 )
 
                 # Success - return complete response
@@ -306,8 +321,9 @@ or contains spelling errors, default to Spanish."""
         top_p: float = 0.9,
         role_behavior: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
-        timestamp_utc: Optional[str] = None,
-        request_timezone: Optional[str] = None
+        request_timezone: Optional[str] = None,
+        utc_formatted: str = None,
+        local_formatted: str = None
     ) -> str:
         """
         Generate from a specific model (internal helper).
@@ -325,8 +341,9 @@ or contains spelling errors, default to Spanish."""
             top_p: Top-p (nucleus) sampling parameter
             role_behavior: Optional role behavior override
             messages: Optional conversation history
-            timestamp_utc: Optional Unix timestamp in UTC format (as string)
             request_timezone: Optional timezone string for the request
+            utc_formatted: Formatted UTC timestamp string
+            local_formatted: Formatted local timestamp string
 
         Returns:
             Complete generated text as a single string
@@ -387,7 +404,7 @@ or contains spelling errors, default to Spanish."""
                 request_params["additionalModelRequestFields"] = additional_fields
 
             # Add system prompt with timestamp and timezone context
-            request_params["system"] = self._build_system_config(role_behavior, timestamp_utc, request_timezone)
+            request_params["system"] = self._build_system_config(role_behavior, request_timezone, utc_formatted, local_formatted)
 
             # Use pre-initialized session (created once in __init__) for better performance
             # Only the modelId changes per request - session/client are reused
