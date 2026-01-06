@@ -22,7 +22,7 @@ from app.infrastructure.repositories.chat_repository import ChatRepository
 from app.infrastructure.llm.model_factory import ModelConfigFactory
 from app.utils.query_utils import clean_user_query
 from app.utils.search_utils import build_context_from_search_results
-from app.utils.llm_utils import generate_text_stream_with_validation, generate_text_with_validation
+from app.utils.llm_utils import generate_text_stream_with_validation, generate_text_with_validation, generate_text_llm_only_with_validation
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -278,7 +278,7 @@ class RagService:
     #         }
 
 
-    async def process_rag_query_stream(self, user_id: int, user: str, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: str = None, request_timezone: str = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(self, user_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: str = None, request_timezone: str = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
         """
@@ -612,7 +612,7 @@ class RagService:
             "status": "success"
         }
 
-    async def process_rag_query_n8n(self, user_id: int, user: str, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
+    async def process_rag_query_n8n(self, user_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
         """
         Proceso RAG completo sin streaming (para n8n): embeddings → search → LLM → response completa
         Retorna directamente la respuesta completa del LLM con resultado estructurado.
@@ -872,7 +872,7 @@ class RagService:
                 }
             }
 
-    async def process_llm_only_n8n(self, user_id: int, user: str, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
+    async def process_llm_only_n8n(self, user_id: int, message: str, company_id: int, db: Session, created_at: str, chat_id: int, system_behavior: str, request_timezone: str = None, use_guidelines: bool = True, store_messages: bool = True) -> Dict[str, Any]:
         """
         Proceso LLM-only sin streaming (para n8n): LLM → response completa (sin embeddings, sin vector stores, sin state builder, sin query rewriter)
         Retorna directamente la respuesta completa del LLM con resultado estructurado.
@@ -908,13 +908,6 @@ class RagService:
                     "result": {
                         "idTipoMensaje": 1,
                         "mensaje": "ID de empresa requerido"
-                    }
-                }
-            if not area_id:
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "ID de área requerido"
                     }
                 }
 
@@ -967,43 +960,47 @@ class RagService:
 
             cleaned_message = clean_user_query(message)
 
-            # Load IA area RAG configuration
-            rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
-            logger.info(f"Retrieved RAG config: {rag_config}")
+            # Load IA area RAG configuration (company-level only, no area required)
+            rag_config = await self.ia_config_service.get_ia_area_config_rag_no_area(db, company_id)
+            logger.info(f"Retrieved RAG config (no area): {rag_config}")
 
-            # Save user message to DynamoDB
-            try:
-                await self.message_service.create_message(
-                    chat_id=chat_id,
-                    created_at=created_at,
-                    sender=0,
-                    message=cleaned_message
-                )
-            except Exception as e:
-                logger.error(f"Failed to save user message: {e}")
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
+            # Save user message to DynamoDB (if store_messages is enabled)
+            if store_messages:
+                try:
+                    await self.message_service.create_message(
+                        chat_id=chat_id,
+                        created_at=created_at,
+                        sender=0,
+                        message=cleaned_message
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to save user message: {e}")
+                    return {
+                        "result": {
+                            "idTipoMensaje": 1,
+                            "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
+                        }
                     }
-                }
+            else:
+                logger.info("Skipping user message storage (store_messages=False)")
 
             # Use all available conversation history for LLM prompt (up to 8 messages)
             conversation_history_for_prompt = conversation_history if conversation_history else []
 
             # Generate complete response using LLM-only provider with validation
             # This provider uses a system prompt optimized for conversational AI without RAG
-            assistant_response = await generate_text_with_validation(
+            assistant_response = await generate_text_llm_only_with_validation(
                 llm_provider=self.llm_only_provider,
                 model_id=rag_config['config']['LLM_MODEL'],
                 prompt=cleaned_message,
                 max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
                 temperature=rag_config['config']['LLM_TEMPERATURE'],
                 top_p=rag_config['config']['LLM_TOP_P'],
-                role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
+                role_behavior=system_behavior,
                 messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
                 timestamp_utc=created_at,
-                request_timezone=request_timezone
+                request_timezone=request_timezone,
+                use_guidelines=use_guidelines
             )
 
             # Update chat last message date
@@ -1021,23 +1018,26 @@ class RagService:
             else:
                 assistant_timestamp = str(assistant_timestamp_ms)
 
-            # Save assistant message to DynamoDB
-            if assistant_response and assistant_timestamp:
-                try:
-                    await self.message_service.create_message(
-                        chat_id=chat_id,
-                        created_at=assistant_timestamp,
-                        sender=1,  # 1 = assistant
-                        message=assistant_response
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to save assistant message: {e}")
-                    return {
-                        "result": {
-                            "idTipoMensaje": 1,
-                            "mensaje": "El mensaje de la IA no pudo guardarse correctamente"
+            # Save assistant message to DynamoDB (if store_messages is enabled)
+            if store_messages:
+                if assistant_response and assistant_timestamp:
+                    try:
+                        await self.message_service.create_message(
+                            chat_id=chat_id,
+                            created_at=assistant_timestamp,
+                            sender=1,  # 1 = assistant
+                            message=assistant_response
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to save assistant message: {e}")
+                        return {
+                            "result": {
+                                "idTipoMensaje": 1,
+                                "mensaje": "El mensaje de la IA no pudo guardarse correctamente"
+                            }
                         }
-                    }
+            else:
+                logger.info("Skipping assistant message storage (store_messages=False)")
 
             # Return successful response
             return {

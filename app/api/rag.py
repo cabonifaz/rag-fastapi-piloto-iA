@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from typing import Dict, Any
@@ -7,7 +7,7 @@ import json
 import logging
 from sqlalchemy.orm import Session
 from app.utils.jwt_auth import get_current_user, get_current_user_with_company_area_validation
-from app.utils.agent_jwt_auth import get_current_agent_with_company_area_validation
+from app.utils.agent_jwt_auth import get_current_agent_with_company_area_validation, get_current_agent_with_company_validation
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from app.services.rag_service import RagService
 from app.domain.ports.llm_port import LLMPort
@@ -20,7 +20,7 @@ from app.models.response_models import (
     create_error_response,
     create_warning_response
 )
-from app.models.rag_models import UnifiedRequest, N8NRequest, AgentStreamingRequest
+from app.models.rag_models import UnifiedRequest, N8NRequest, N8NLLMOnlyRequest, AgentStreamingRequest
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -64,7 +64,6 @@ async def chat_streaming_endpoint(
                 answer = ""
                 async for chunk_data in rag_service.process_rag_query_stream(
                     user_id=request.user_id,
-                    user=request.user,
                     message=request.message,
                     company_id=request.company_id,
                     area_id=request.area_id,
@@ -187,12 +186,11 @@ async def chat_n8n_endpoint(
             )
 
         agent_id = current_agent.get('ID_AGENTE')
-        logger.info(f"[N8N REQUEST] Agent ID: {agent_id}, User: {request.user}, Message: {request.message}")
+        logger.info(f"[N8N REQUEST] Agent ID: {agent_id}, User ID: {request.user_id}, Message: {request.message}")
 
         # Call non-streaming RAG service
         result = await rag_service.process_rag_query_n8n(
             user_id=request.user_id,
-            user=request.user,
             message=request.message,
             company_id=request.company_id,
             area_id=request.area_id,
@@ -257,16 +255,22 @@ async def chat_n8n_endpoint(
 
 @router.post("/chat-n8n-llm-only")
 async def chat_n8n_llm_only_endpoint(
-    request: N8NRequest,
+    request: N8NLLMOnlyRequest,
+    useGuidelines: bool = Query(True, description="Whether to use guidelines in the LLM response"),
+    storeMessages: bool = Query(True, description="Whether to store messages in the database"),
     rag_service: RagService = Depends(get_rag_service),
     db: Session = Depends(get_db),
-    current_agent: Dict[str, Any] = Depends(get_current_agent_with_company_area_validation)
+    current_agent: Dict[str, Any] = Depends(get_current_agent_with_company_validation)
 ):
     """
     Non-streaming chat endpoint for n8n integration with LLM-ONLY mode (no RAG).
 
     Requires agent JWT authentication token in Authorization header.
-    Validates agent access to requested company_id and area_id.
+    Validates agent access to requested company_id (no area validation required).
+
+    Query Parameters:
+    - useGuidelines: bool (default: True) - Whether to use guidelines in the LLM response
+    - storeMessages: bool (default: True) - Whether to store messages in the database
 
     Returns complete response in a single JSON object (no streaming).
     Uses LLM with conversation history only - no embeddings, no vector search, no RAG context.
@@ -298,19 +302,20 @@ async def chat_n8n_llm_only_endpoint(
             )
 
         agent_id = current_agent.get('ID_AGENTE')
-        logger.info(f"[N8N LLM-ONLY REQUEST] Agent ID: {agent_id}, User: {request.user}, Message: {request.message}")
+        logger.info(f"[N8N LLM-ONLY REQUEST] Agent ID: {agent_id}, User ID: {request.user_id}, Message: {request.message}")
 
         # Call non-streaming LLM-only service (no RAG)
         result = await rag_service.process_llm_only_n8n(
             user_id=request.user_id,
-            user=request.user,
             message=request.message,
             company_id=request.company_id,
-            area_id=request.area_id,
             db=db,
             created_at=request.created_at,
             chat_id=request.chat_id,
-            request_timezone=request.request_timezone
+            request_timezone=request.request_timezone,
+            system_behavior=request.system_behavior,
+            use_guidelines=useGuidelines,
+            store_messages=storeMessages
         )
 
         logger.info(f"[N8N LLM-ONLY RESPONSE] Result type: {result.get('result', {}).get('idTipoMensaje')}")
