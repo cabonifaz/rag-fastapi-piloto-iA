@@ -163,12 +163,6 @@ Formatting rules:
 - Render structured or API-derived data as Markdown tables only.
 - JSON-like data must be rendered as a Markdown table with columns: table, headers, rows."""
 
-        print("=" * 80)
-        print("FULL SYSTEM PROMPT:")
-        print("=" * 80)
-        print(system_text)
-        print("=" * 80)
-
         if system_text:
             return [{"text": system_text}]
         return None

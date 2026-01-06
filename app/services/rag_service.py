@@ -815,6 +815,18 @@ class RagService:
             model_config = ModelConfigFactory.get_model_config(rag_config['config']['LLM_MODEL'])
             rag_prompt = model_config.build_rag_prompt(cleaned_message, context_text)
 
+            # Generate timestamp for assistant message and format timestamps
+            assistant_timestamp_ms = int(time.time() * 1000)
+            user_timestamp_ms = int(created_at)
+            if assistant_timestamp_ms < user_timestamp_ms:
+                assistant_timestamp_ms = user_timestamp_ms + 1000
+
+            # Format timestamp with timezone
+            utc_formatted, local_formatted = format_timestamp_with_timezone(
+                assistant_timestamp_ms,
+                request_timezone or "America/Lima"
+            )
+
             # Generate complete response using non-streaming provider with validation
             assistant_response = await generate_text_with_validation(
                 llm_provider=self.llm_nonstreaming_provider,
@@ -825,8 +837,9 @@ class RagService:
                 top_p=rag_config['config']['LLM_TOP_P'],
                 role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
                 messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
-                timestamp_utc=created_at,
-                request_timezone=request_timezone
+                request_timezone=request_timezone,
+                utc_formatted=utc_formatted,
+                local_formatted=local_formatted
             )
 
             # Update chat last message date
@@ -836,13 +849,8 @@ class RagService:
                 chat_id
             )
 
-            # Generate timestamp for assistant message
-            assistant_timestamp_ms = int(time.time() * 1000)
-            user_timestamp_ms = int(created_at)
-            if assistant_timestamp_ms < user_timestamp_ms:
-                assistant_timestamp = str(user_timestamp_ms + 1000)
-            else:
-                assistant_timestamp = str(assistant_timestamp_ms)
+            # Use the timestamp generated earlier
+            assistant_timestamp = str(assistant_timestamp_ms)
 
             # Save assistant message to DynamoDB
             if assistant_response and assistant_timestamp:
@@ -995,6 +1003,18 @@ class RagService:
             # Use all available conversation history for LLM prompt (up to 8 messages)
             conversation_history_for_prompt = conversation_history if conversation_history else []
 
+            # Generate timestamp for assistant message and format timestamps
+            assistant_timestamp_ms = int(time.time() * 1000)
+            user_timestamp_ms = int(created_at)
+            if assistant_timestamp_ms < user_timestamp_ms:
+                assistant_timestamp_ms = user_timestamp_ms + 1000
+
+            # Format timestamp with timezone
+            utc_formatted, local_formatted = format_timestamp_with_timezone(
+                assistant_timestamp_ms,
+                request_timezone or "America/Lima"
+            )
+
             # Generate complete response using LLM-only provider with validation
             # This provider uses a system prompt optimized for conversational AI without RAG
             assistant_response = await generate_text_llm_only_with_validation(
@@ -1006,8 +1026,9 @@ class RagService:
                 top_p=rag_config['config']['LLM_TOP_P'],
                 role_behavior=system_behavior,
                 messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
-                timestamp_utc=created_at,
                 request_timezone=request_timezone,
+                utc_formatted=utc_formatted,
+                local_formatted=local_formatted,
                 use_guidelines=use_guidelines
             )
 
@@ -1018,13 +1039,8 @@ class RagService:
                 chat_id
             )
 
-            # Generate timestamp for assistant message
-            assistant_timestamp_ms = int(time.time() * 1000)
-            user_timestamp_ms = int(created_at)
-            if assistant_timestamp_ms < user_timestamp_ms:
-                assistant_timestamp = str(user_timestamp_ms + 1000)
-            else:
-                assistant_timestamp = str(assistant_timestamp_ms)
+            # Use the timestamp generated earlier
+            assistant_timestamp = str(assistant_timestamp_ms)
 
             # Save assistant message to DynamoDB (if store_messages is enabled)
             if store_messages:
