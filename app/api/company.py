@@ -11,11 +11,14 @@ from app.services.company_service import CompanyService
 from app.models.response_models import create_success_response, create_error_response
 from app.models.company_models import CompanyCreateRequest, CompanyStatusUpdateRequest, CompanyLogoUploadRequest
 from app.utils.jwt_auth import get_current_user
+from app.utils.cache import SimpleCache
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Global cache instance for companies
+companies_cache = SimpleCache()
 
 def get_company_service() -> CompanyService:
     """Get singleton CompanyService from container."""
@@ -99,6 +102,9 @@ async def create_company_endpoint(
                     status_code=422,
                     detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
                 )
+
+        # Invalidate companies cache after successful creation
+        companies_cache.clear("companies_login")
 
         success_response = create_success_response("Empresa creada exitosamente")
         return {
@@ -249,6 +255,9 @@ async def update_company_status_endpoint(
                     detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
                 )
 
+        # Invalidate companies cache after successful status update
+        companies_cache.clear("companies_login")
+
         success_response = create_success_response("Estado de empresa actualizado exitosamente")
         return {
             "results": results,
@@ -277,11 +286,27 @@ async def get_companies_login_endpoint(
     Get companies with login credentials endpoint.
 
     Fetches all companies with their secret keys using SP_EMPRESAS_LST_LOGIN.
+    Uses in-memory cache with 1 day TTL, invalidated when companies are created/updated.
 
     Returns:
         List of dictionaries with RAZON_SOCIAL and SECRET_KEY
     """
-    return await company_service.get_companies_login(db=db)
+    # Define cache key and TTL
+    cache_key = "companies_login"
+    cache_ttl = 86400  # 1 day (invalidated on company create/update)
+
+    # Try to get from cache first
+    cached_result = companies_cache.get(cache_key, ttl_seconds=cache_ttl)
+    if cached_result is not None:
+        return cached_result
+
+    # Cache miss - fetch from database
+    result = await company_service.get_companies_login(db=db)
+
+    # Store in cache
+    companies_cache.set(cache_key, result, ttl_seconds=cache_ttl)
+
+    return result
 
 
 @router.post("/upload_logo")
@@ -357,6 +382,9 @@ async def upload_company_logo_endpoint(
                     status_code=422,
                     detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
                 )
+
+        # Invalidate companies cache after successful logo upload
+        companies_cache.clear("companies_login")
 
         success_response = create_success_response("Presigned URL generada exitosamente")
         return {
