@@ -38,51 +38,6 @@ class ChatService:
         """Initialize stateless ChatService - no db parameter."""
         pass
 
-    async def create_chat(
-        self,
-        db: Session,
-        request: ChatCreateRequest,
-        user_id: int
-    ) -> Optional[ChatResponse]:
-        """
-        Create a new chat session using stored procedure
-
-        Args:
-            db: Database session
-            request: Chat creation request with id_empresa, id_area, and optional titulo
-            user_id: User ID creating the chat
-
-        Returns:
-            ChatResponse with created chat data, or None if creation failed
-        """
-        try:
-            # Create repository for this request
-            repository = ChatRepository(db)
-
-            # Auto-generate title if not provided
-            titulo = request.titulo or await self._generate_auto_title()
-
-            # Use repository to create chat with SP_CREATE_CHAT
-            chat_id = repository.create_chat(
-                id_usuario=user_id,
-                id_area=request.id_area,
-                id_empresa=request.id_empresa,
-                titulo=titulo
-            )
-
-            if not chat_id:
-                return None
-
-            # Fetch the created chat to return full response
-            chat_data = repository.get_chat_by_id(chat_id)
-            if chat_data:
-                return self._map_to_chat_response(chat_data)
-            return None
-
-        except Exception as e:
-            logger.error(f"Error in create_chat service: {e}")
-            raise
-
     async def get_chats_by_user(self, db: Session, user_id: int) -> List[Dict[str, Any]]:
         """
         List chats for a specific user using SP_GET_USER_CHATS

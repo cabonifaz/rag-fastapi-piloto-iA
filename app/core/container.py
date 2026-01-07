@@ -1,6 +1,7 @@
 # app/core/container.py
 
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.services.rag_service import RagService
 from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
@@ -412,6 +413,25 @@ class DIContainer:
             )
         except Exception as e:
             raise ConnectionError(f"Failed to create file transcribe session: {str(e)}")
+
+    def initialize_rag_workflow(self) -> None:
+        """
+        Initialize and compile the RAG workflow graph.
+        Should be called once at application startup.
+        Workflow will be compiled with session_factory and all dependencies.
+        """
+        from app.workflows.rag_workflow import initialize_rag_workflow
+
+        initialize_rag_workflow(
+            session_factory=SessionLocal,
+            embeddings_provider=self.get_embeddings_provider(),
+            vectorstore=self.get_vectorstore(),
+            llm_provider=self.get_llm_provider(),
+            message_service=self.get_message_service(),
+            ia_config_service=self.get_ia_config_service(),
+            state_builder=self.get_state_builder(),
+            query_rewriter=self.get_query_rewriter()
+        )
 
 
 # Global container instance

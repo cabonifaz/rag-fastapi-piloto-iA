@@ -36,6 +36,9 @@ pyodbc==5.0.1
 python-multipart==0.0.6
 PyJWT==2.8.0
 
+# Langgraph
+langgraph==1.0.5
+
 # Development tools (optional)
 pytest==7.4.3
 pytest-asyncio==0.21.1
