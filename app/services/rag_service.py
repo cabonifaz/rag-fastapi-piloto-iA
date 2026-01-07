@@ -22,9 +22,17 @@ from app.infrastructure.repositories.chat_repository import ChatRepository
 from app.infrastructure.llm.model_factory import ModelConfigFactory
 from app.utils.query_utils import clean_user_query
 from app.utils.search_utils import build_context_from_search_results
-from app.utils.llm_utils import generate_text_stream_with_validation, generate_text_with_validation, generate_text_llm_only_with_validation
+from app.utils.llm_utils import generate_text_with_validation, generate_text_llm_only_with_validation
 from app.utils.time_utils import format_timestamp_with_timezone
-from app.workflows.rag_workflow import get_compiled_rag_workflow, RAGState
+from app.workflows.rag_workflow import (
+    get_compiled_rag_workflow,
+    build_initial_state,
+    stream_workflow_progress,
+    validate_workflow_state,
+    generate_metadata_events,
+    stream_llm_response,
+    RAGState
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -280,175 +288,88 @@ class RagService:
     #         }
 
 
-    async def process_rag_query_stream(self, user_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: str = None, request_timezone: str = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(
+        self,
+        user_id: int,
+        message: str,
+        company_id: int,
+        area_id: int,
+        db: Session,
+        created_at: str,
+        chat_id: str = None,
+        request_timezone: str = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
-        Uses pre-compiled LangGraph workflow for modular processing.
+        Uses pre-compiled LangGraph workflow for modular processing with progress updates.
         """
-        # Get pre-compiled workflow (compiled once at startup)
-        app = get_compiled_rag_workflow()
-
-        # Initialize state with only request data (no dependencies)
-        initial_state: RAGState = {
-            # Input parameters
-            "user_id": user_id,
-            "message": message,
-            "company_id": company_id,
-            "area_id": area_id,
-            "created_at": created_at,
-            "chat_id": chat_id,
-            "request_timezone": request_timezone,
-            # Processing state (will be populated by workflow)
-            "cleaned_message": None,
-            "conversation_history": [],
-            "state_builder_result": None,
-            "query_rewriter_result": None,
-            "rag_config": None,
-            "new_chat_created": False,
-            "new_chat_titulo": None,
-            "new_chat_timestamp": None,
-            "query_for_search": None,
-            "query_embedding": None,
-            "search_results": None,
-            "context_text": None,
-            "conversation_history_for_prompt": [],
-            "rag_prompt": None,
-            "assistant_timestamp": None,
-            "assistant_timestamp_ms": None,
-            "utc_formatted": None,
-            "local_formatted": None,
-            # Error handling
-            "error": None,
-            "should_stop": False
-        }
-
-        # Execute workflow
         try:
-            result_state = await app.ainvoke(initial_state)
+            # Get pre-compiled workflow
+            app = get_compiled_rag_workflow()
+
+            # Build initial state
+            initial_state = build_initial_state(
+                user_id=user_id,
+                message=message,
+                company_id=company_id,
+                area_id=area_id,
+                created_at=created_at,
+                chat_id=chat_id,
+                request_timezone=request_timezone
+            )
+
+            # Stream workflow progress
+            result_state = None
+            async for event_type, event_data in stream_workflow_progress(app, initial_state):
+                if event_type == "progress":
+                    yield event_data
+                elif event_type == "state":
+                    result_state = event_data
+
+            # Validate workflow completed successfully
+            result_state = validate_workflow_state(result_state)
+
+            # Generate and yield metadata events
+            for event in generate_metadata_events(result_state, area_id, company_id):
+                yield event
+
+            # Stream LLM response and save message
+            async for chunk_event in stream_llm_response(
+                state=result_state,
+                llm_provider=self.llm_provider,
+                message_service=self.message_service,
+                db=db
+            ):
+                yield chunk_event
+
+            # Send completion signal
+            yield {
+                "type": "complete",
+                "status": "success"
+            }
+
+        except ValueError as e:
+            # Workflow validation errors
+            logger.error(f"Workflow error: {e}")
+            yield {
+                "type": "error",
+                "message": str(e),
+                "result": {
+                    "idTipoMensaje": 1,
+                    "mensaje": str(e)
+                }
+            }
         except Exception as e:
-            logger.error(f"Workflow execution failed: {e}")
+            # Unexpected errors
+            logger.error(f"Unexpected error in streaming: {e}", exc_info=True)
             yield {
                 "type": "error",
-                "message": "Workflow execution failed",
+                "message": "Unexpected error",
                 "result": {
                     "idTipoMensaje": 1,
-                    "mensaje": f"Error en el procesamiento: {str(e)}"
+                    "mensaje": f"Error inesperado: {str(e)}"
                 }
             }
-            return
-
-        # Check if workflow encountered an error
-        if result_state.get("should_stop", False):
-            error_msg = result_state.get("error", "Unknown error")
-            logger.error(f"Workflow stopped with error: {error_msg}")
-            yield {
-                "type": "error",
-                "message": error_msg,
-                "result": {
-                    "idTipoMensaje": 1,
-                    "mensaje": error_msg
-                }
-            }
-            return
-
-        # Extract processed state
-        chat_id = result_state["chat_id"]
-        rag_config = result_state["rag_config"]
-        cleaned_message = result_state["cleaned_message"]
-        rag_prompt = result_state["rag_prompt"]
-        conversation_history_for_prompt = result_state["conversation_history_for_prompt"]
-        assistant_timestamp = result_state["assistant_timestamp"]
-        assistant_timestamp_ms = result_state["assistant_timestamp_ms"]
-        utc_formatted = result_state["utc_formatted"]
-        local_formatted = result_state["local_formatted"]
-
-        # Yield metadata early (before processing) so frontend can show "Pensando..." placeholder
-        yield {
-            "type": "metadata",
-            "chat_id": chat_id
-        }
-
-        # If a new chat was created, send the chat object to the frontend
-        if result_state.get("new_chat_created", False):
-            yield {
-                "type": "chat_created",
-                "chat": {
-                    "ID_CHAT": chat_id,
-                    "ID_AREA": area_id,
-                    "ID_EMPRESA": company_id,
-                    "TITULO": result_state["new_chat_titulo"],
-                    "ULTIMO_MENSAJE_FECHA": result_state["new_chat_timestamp"],
-                    "ID_ESTADO_REGISTRO": 1
-                }
-            }
-
-        # Send assistant_metadata BEFORE starting LLM streaming
-        yield {
-            "type": "assistant_metadata",
-            "sender": 1,
-            "created_at": assistant_timestamp
-        }
-
-        # Accumulate assistant response chunks
-        assistant_response = ""
-        first_chunk_sent = False
-
-        # Stream the LLM response with role behavior and conversation history
-        async for chunk in generate_text_stream_with_validation(
-            llm_provider=self.llm_provider,
-            model_id=rag_config['config']['LLM_MODEL'],
-            prompt=rag_prompt,
-            max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
-            temperature=rag_config['config']['LLM_TEMPERATURE'],
-            top_p=rag_config['config']['LLM_TOP_P'],
-            role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
-            messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
-            request_timezone=request_timezone,
-            utc_formatted=utc_formatted,
-            local_formatted=local_formatted
-        ):
-            assistant_response += chunk
-
-            # Update chat last message date when first chunk with content is sent
-            if not first_chunk_sent and chunk.strip():
-                chat_repo = ChatRepository(db)
-                await asyncio.to_thread(
-                    chat_repo.update_ultimo_mensaje_fecha,
-                    chat_id
-                )
-                first_chunk_sent = True
-
-            yield {
-                "type": "chunk",
-                "content": chunk
-            }
-
-        # Save assistant message to DynamoDB before completion signal
-        if chat_id and assistant_response and assistant_timestamp:
-            try:
-                await self.message_service.create_message(
-                    chat_id=chat_id,
-                    created_at=assistant_timestamp,
-                    sender=1,  # 1 = assistant
-                    message=assistant_response
-                )
-            except Exception as e:
-                logger.error(f"Failed to save assistant message: {e}")
-                yield {
-                    "type": "error",
-                    "message": "Failed to save assistant message",
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "El mensaje de la IA no pudo guardarse correctamente"
-                    }
-                }
-                return
-
-        # Final completion signal
-        yield {
-            "type": "complete",
-            "status": "success"
-        }
 
     async def process_rag_query_n8n(self, user_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
         """

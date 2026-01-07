@@ -11,7 +11,6 @@ from datetime import datetime
 
 from app.utils.query_utils import clean_user_query
 from app.utils.search_utils import build_context_from_search_results
-from app.utils.llm_utils import generate_text_stream_with_validation
 from app.utils.time_utils import format_timestamp_with_timezone
 from app.infrastructure.llm.model_factory import ModelConfigFactory
 from app.infrastructure.repositories.chat_repository import ChatRepository
@@ -518,3 +517,266 @@ def get_compiled_rag_workflow() -> Any:
     if _compiled_rag_workflow is None:
         raise ValueError("RAG workflow not initialized. Call initialize_rag_workflow() at startup.")
     return _compiled_rag_workflow
+
+
+# ============================================================================
+# Helper Functions for Service Layer
+# ============================================================================
+
+def build_initial_state(
+    user_id: int,
+    message: str,
+    company_id: int,
+    area_id: int,
+    created_at: str,
+    chat_id: Optional[str] = None,
+    request_timezone: Optional[str] = None
+) -> RAGState:
+    """Build initial state for workflow execution"""
+    return {
+        # Input parameters
+        "user_id": user_id,
+        "message": message,
+        "company_id": company_id,
+        "area_id": area_id,
+        "created_at": created_at,
+        "chat_id": chat_id,
+        "request_timezone": request_timezone,
+        # Processing state (will be populated by workflow)
+        "cleaned_message": None,
+        "conversation_history": [],
+        "state_builder_result": None,
+        "query_rewriter_result": None,
+        "rag_config": None,
+        "new_chat_created": False,
+        "new_chat_titulo": None,
+        "new_chat_timestamp": None,
+        "query_for_search": None,
+        "query_embedding": None,
+        "search_results": None,
+        "context_text": None,
+        "conversation_history_for_prompt": [],
+        "rag_prompt": None,
+        "assistant_timestamp": None,
+        "assistant_timestamp_ms": None,
+        "utc_formatted": None,
+        "local_formatted": None,
+        # Error handling
+        "error": None,
+        "should_stop": False
+    }
+
+
+async def stream_workflow_progress(app: Any, initial_state: RAGState):
+    """
+    Execute workflow and yield progress updates.
+    Generator that yields progress events during execution, then yields final state.
+    """
+    result_state = None
+    progress_sent = {
+        "initial": False,
+        "analyzing": False,
+        "searching": False,
+        "preparing": False
+    }
+
+    async for state in app.astream(initial_state, stream_mode="values"):
+        result_state = state
+
+        # Send initial progress on very first state update
+        if not progress_sent["initial"]:
+            yield ("progress", {
+                "type": "progress",
+                "message": "Procesando consulta..."
+            })
+            progress_sent["initial"] = True
+
+        # Stage 1: Query processing
+        if state.get("cleaned_message") and not progress_sent["analyzing"]:
+            yield ("progress", {
+                "type": "progress",
+                "message": "Analizando tu pregunta..."
+            })
+            progress_sent["analyzing"] = True
+
+        # Stage 2: Searching documents
+        elif state.get("query_embedding") and not progress_sent["searching"]:
+            yield ("progress", {
+                "type": "progress",
+                "message": "Buscando información relevante..."
+            })
+            progress_sent["searching"] = True
+
+        # Stage 3: Preparing response
+        elif state.get("rag_prompt") and not progress_sent["preparing"]:
+            yield ("progress", {
+                "type": "progress",
+                "message": "Preparando respuesta..."
+            })
+            progress_sent["preparing"] = True
+
+    # Yield final state
+    yield ("state", result_state)
+
+
+def validate_workflow_state(state: Optional[RAGState]) -> RAGState:
+    """
+    Validate that workflow completed successfully.
+    Raises ValueError if state is invalid.
+    """
+    if state is None or state.get("should_stop", False):
+        error_msg = state.get("error", "Unknown error") if state else "Workflow did not complete"
+        raise ValueError(error_msg)
+
+    # Validate required fields
+    if not state.get("chat_id") or not state.get("rag_config") or not state.get("rag_prompt"):
+        missing_fields = []
+        if not state.get("chat_id"):
+            missing_fields.append("chat_id")
+        if not state.get("rag_config"):
+            missing_fields.append("rag_config")
+        if not state.get("rag_prompt"):
+            missing_fields.append("rag_prompt")
+        raise ValueError(f"Workflow incomplete: missing {', '.join(missing_fields)}")
+
+    return state
+
+
+def generate_metadata_events(state: RAGState, area_id: int, company_id: int):
+    """Generate metadata events from workflow state"""
+    events = []
+
+    # Metadata
+    events.append({
+        "type": "metadata",
+        "chat_id": state["chat_id"]
+    })
+
+    # Chat created event
+    if state.get("new_chat_created", False):
+        events.append({
+            "type": "chat_created",
+            "chat": {
+                "ID_CHAT": state["chat_id"],
+                "ID_AREA": area_id,
+                "ID_EMPRESA": company_id,
+                "TITULO": state["new_chat_titulo"],
+                "ULTIMO_MENSAJE_FECHA": state["new_chat_timestamp"],
+                "ID_ESTADO_REGISTRO": 1
+            }
+        })
+
+    # Assistant metadata
+    events.append({
+        "type": "assistant_metadata",
+        "sender": 1,
+        "created_at": state["assistant_timestamp"]
+    })
+
+    return events
+
+
+async def stream_llm_response(state: RAGState, llm_provider: Any, message_service: Any, db: Any):
+    """
+    Stream LLM response and handle message saving.
+    Consolidates all streaming logic including validation, error handling, and persistence.
+    """
+    from app.infrastructure.repositories.chat_repository import ChatRepository
+
+    rag_config = state["rag_config"]
+    chat_id = state["chat_id"]
+    assistant_response = ""
+    first_chunk_sent = False
+
+    # Extract LLM parameters from state
+    model_id = rag_config['config']['LLM_MODEL']
+    prompt = state["rag_prompt"]
+    max_tokens = rag_config['config']['LLM_MAX_TOKENS']
+    temperature = rag_config['config']['LLM_TEMPERATURE']
+    top_p = rag_config['config']['LLM_TOP_P']
+    role_behavior = rag_config['config']['ROLE_BEHAVIOR']
+    messages = state.get("conversation_history_for_prompt") or None
+    request_timezone = state.get("request_timezone")
+    utc_formatted = state.get("utc_formatted")
+    local_formatted = state.get("local_formatted")
+
+    # Validate parameters
+    if messages is None and (not prompt or not prompt.strip()):
+        raise ValueError("Either prompt or messages must be provided")
+    if max_tokens is not None and max_tokens <= 0:
+        raise ValueError("max_tokens must be greater than 0")
+    if temperature is not None and not (0.0 <= temperature <= 2.0):
+        raise ValueError("temperature must be between 0.0 and 2.0")
+
+    try:
+        has_content = False
+
+        # Stream LLM response with validation
+        async for chunk in llm_provider.generate_stream(
+            model_id=model_id,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            role_behavior=role_behavior,
+            messages=messages,
+            request_timezone=request_timezone,
+            utc_formatted=utc_formatted,
+            local_formatted=local_formatted
+        ):
+            # Detect stop reason signal from LLM provider
+            if chunk.startswith("__STOP_REASON__:"):
+                stop_reason = chunk.split(":")[1]
+                if stop_reason == "max_tokens":
+                    # Yield user-friendly error message in Spanish
+                    error_msg = "⚠️ El modelo agotó los tokens disponibles durante el análisis de la consulta. Por favor, intenta con una pregunta más específica o reduce la complejidad de tu solicitud."
+                    assistant_response += error_msg
+                    has_content = True
+                    yield {
+                        "type": "chunk",
+                        "content": error_msg
+                    }
+                continue
+
+            has_content = True
+            assistant_response += chunk
+
+            # Update chat last message date on first chunk
+            if not first_chunk_sent and chunk.strip():
+                chat_repo = ChatRepository(db)
+                await asyncio.to_thread(
+                    chat_repo.update_ultimo_mensaje_fecha,
+                    chat_id
+                )
+                first_chunk_sent = True
+
+            yield {
+                "type": "chunk",
+                "content": chunk
+            }
+
+        # Validate that content was generated
+        if not has_content:
+            raise ValueError("El modelo no generó una respuesta. Por favor, intenta reformular tu pregunta.")
+
+        # Save assistant message to DynamoDB
+        if chat_id and assistant_response and state["assistant_timestamp"]:
+            await message_service.create_message(
+                chat_id=chat_id,
+                created_at=state["assistant_timestamp"],
+                sender=1,
+                message=assistant_response
+            )
+
+    except ConnectionError as e:
+        logger.error(f"Connection error during LLM generation: {e}")
+        raise ConnectionError(f"LLM service unavailable: {str(e)}")
+    except ValueError as e:
+        logger.error(f"Invalid input for LLM: {e}")
+        raise ValueError(f"Invalid prompt or parameters: {str(e)}")
+    except TimeoutError as e:
+        logger.error(f"Timeout error during LLM generation: {e}")
+        raise TimeoutError(f"LLM generation timeout: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error during LLM generation: {e}")
+        raise ConnectionError(f"LLM generation failed: {str(e)}")
