@@ -1,6 +1,7 @@
 # app/core/container.py
 
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.services.rag_service import RagService
 from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
@@ -139,11 +140,10 @@ class DIContainer:
                         raise ValueError("LLM region is required for AWS provider")
 
                     # Using Converse API - stateless (no message history)
-                    # Initialize with default model, actual model_id comes per-request from database
+                    # Initialize with default model, actual model_id and role_behavior come per-request from database
                     self._llm_provider = AWSBedrockConverseProvider(
                         region=settings.llm_region,
                         model_id="us.meta.llama4-maverick-17b-instruct-v1:0",  # Default/fallback model
-                        role_behavior=None,  # Will be provided per-request from database
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
                         aws_secret_access_key=settings.aws_secret_access_key
@@ -164,11 +164,10 @@ class DIContainer:
                         raise ValueError("LLM region is required for AWS provider")
 
                     # Using non-streaming Converse API for n8n RAG mode
-                    # Initialize with default model, actual model_id comes per-request from database
+                    # Initialize with default model, actual model_id and role_behavior come per-request from database
                     self._llm_nonstreaming_provider = AWSBedrockConverseNonStreamingProvider(
                         region=settings.llm_region,
                         model_id="us.meta.llama4-maverick-17b-instruct-v1:0",  # Default/fallback model
-                        role_behavior=None,  # Will be provided per-request from database
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
                         aws_secret_access_key=settings.aws_secret_access_key
@@ -189,11 +188,10 @@ class DIContainer:
                         raise ValueError("LLM region is required for AWS provider")
 
                     # Using non-streaming Converse API for LLM-only mode (no RAG)
-                    # Initialize with default model, actual model_id comes per-request from database
+                    # Initialize with default model, actual model_id and role_behavior come per-request from database
                     self._llm_only_provider = AWSBedrockConverseProviderLLMOnly(
                         region=settings.llm_region,
                         model_id="us.meta.llama4-maverick-17b-instruct-v1:0",  # Default/fallback model
-                        role_behavior=None,  # Will be provided per-request from database
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
                         aws_secret_access_key=settings.aws_secret_access_key
@@ -412,6 +410,39 @@ class DIContainer:
             )
         except Exception as e:
             raise ConnectionError(f"Failed to create file transcribe session: {str(e)}")
+
+    def initialize_rag_workflow(self) -> None:
+        """
+        Initialize and compile the RAG workflow graph.
+        Should be called once at application startup.
+        Workflow will be compiled with session_factory and all dependencies.
+        """
+        from app.workflows.rag_workflow import initialize_rag_workflow
+
+        initialize_rag_workflow(
+            session_factory=SessionLocal,
+            embeddings_provider=self.get_embeddings_provider(),
+            vectorstore=self.get_vectorstore(),
+            llm_provider=self.get_llm_provider(),
+            message_service=self.get_message_service(),
+            ia_config_service=self.get_ia_config_service(),
+            state_builder=self.get_state_builder(),
+            query_rewriter=self.get_query_rewriter()
+        )
+
+    def initialize_llm_only_workflow(self) -> None:
+        """
+        Initialize and compile the LLM-only workflow graph.
+        Should be called once at application startup.
+        Workflow will be compiled with session_factory and minimal dependencies.
+        """
+        from app.workflows.llm_only_workflow import initialize_llm_only_workflow
+
+        initialize_llm_only_workflow(
+            session_factory=SessionLocal,
+            message_service=self.get_message_service(),
+            ia_config_service=self.get_ia_config_service()
+        )
 
 
 # Global container instance

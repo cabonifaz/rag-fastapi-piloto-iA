@@ -1,11 +1,8 @@
-from typing import Tuple, List, Dict, Any, AsyncGenerator, Optional
+from typing import Dict, Any, AsyncGenerator, Optional
 import logging
-import json
-import re
-import time
-import asyncio
-from datetime import datetime
 from sqlalchemy.orm import Session
+
+# Domain ports (for dependency injection in __init__)
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
@@ -13,17 +10,27 @@ from app.domain.ports.llm_nonstreaming_port import LLMNonStreamingPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.state_builder import StateBuilderPort
 from app.domain.ports.query_rewriter import QueryRewriterPort
-from app.core.config import settings
-from app.infrastructure.task_decomposition.task_generator import TaskGenerator
-from app.infrastructure.api_clients.api_client import httpx_get, httpx_post
+
+# Services (for dependency injection in __init__)
 from app.services.message_service import MessageService
 from app.services.ia_config_service import IaConfigService
-from app.infrastructure.repositories.chat_repository import ChatRepository
-from app.infrastructure.llm.model_factory import ModelConfigFactory
-from app.utils.query_utils import clean_user_query
-from app.utils.search_utils import build_context_from_search_results
-from app.utils.llm_utils import generate_text_stream_with_validation, generate_text_with_validation, generate_text_llm_only_with_validation
-from app.utils.time_utils import format_timestamp_with_timezone
+
+# Workflows (everything else is in here now!)
+from app.workflows.rag_workflow import (
+    get_compiled_rag_workflow,
+    build_initial_state,
+    stream_workflow_progress,
+    validate_workflow_state,
+    generate_metadata_events,
+    stream_llm_response
+)
+from app.workflows.llm_only_workflow import (
+    get_compiled_llm_only_workflow,
+    build_llm_only_initial_state,
+    validate_llm_only_workflow_state,
+    generate_complete_llm_only_response
+)
+from app.workflows.helpers import execute_workflow_n8n, generate_complete_llm_response
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -279,596 +286,122 @@ class RagService:
     #         }
 
 
-    async def process_rag_query_stream(self, user_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: str = None, request_timezone: str = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_rag_query_stream(
+        self,
+        user_id: int,
+        message: str,
+        company_id: int,
+        area_id: int,
+        db: Session,
+        created_at: str,
+        chat_id: str = None,
+        request_timezone: str = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
+        Uses pre-compiled LangGraph workflow for modular processing with progress updates.
         """
         try:
-            # Validate inputs
-            if not message or not message.strip():
-                raise ValueError("Message cannot be empty")
-            if not user_id:
-                raise ValueError("User ID is required")
-            if not company_id:
-                raise ValueError("Company ID is required and cannot be empty")
-            if not area_id:
-                raise ValueError("Area is required and cannot be empty")
+            # Get pre-compiled workflow
+            app = get_compiled_rag_workflow()
 
-        except ValueError as e:
-            logger.error(f"Validation error in process_rag_query_stream: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Initialization error in process_rag_query_stream: {e}")
-            raise ConnectionError(f"RAG streaming service initialization failed: {str(e)}")
-
-        # Get last messages from chat history if chat_id exists (fetch once for both recontextualization and LLM)
-        conversation_history = []
-        if chat_id is not None:
-            try:
-                messages = await self.message_service.get_last_n_messages(
-                    chat_id=f"chat-{chat_id}",
-                    n=20
-                )
-
-                if messages:
-                    # Build and collapse in one pass
-                    collapsed = []
-                    for msg in messages:
-                        role = "user" if msg.sender == 0 else "assistant"
-                        if not collapsed or collapsed[-1]["role"] != role:
-                            collapsed.append({"role": role, "content": msg.message})
-                        else:
-                            collapsed[-1]["content"] = msg.message
-
-                    # Find boundaries
-                    start = next((i for i, m in enumerate(collapsed) if m["role"] == "user"), -1)
-                    end = next((i for i in range(len(collapsed)-1, -1, -1)
-                               if collapsed[i]["role"] == "assistant"), -1)
-
-                    # Validate and slice
-                    if start >= 0 and end > start:
-                        segment = collapsed[start:end+1]
-
-                        # Quick alternating check (should be true due to collapse)
-                        if all(segment[i]["role"] != segment[i+1]["role"]
-                               for i in range(len(segment)-1)):
-
-                            # Trim to context window (keep newest)
-                            MAX_CTX = 16
-                            if len(segment) > MAX_CTX:
-                                trim = len(segment) - MAX_CTX
-                                if segment[trim]["role"] == "assistant":
-                                    trim -= 1
-                                segment = segment[max(0, trim):]
-
-                            # Final check
-                            if segment and segment[0]["role"] == "user":
-                                conversation_history = segment
-
-            except Exception as e:
-                logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
-                conversation_history = []
-
-        cleaned_message = clean_user_query(message)
-
-        # Build query state and rewrite query if chat_id exists and conversation history available
-        state_builder_result = None
-        query_rewriter_result = None
-        if chat_id is not None and conversation_history:
-            # Build query state for RAG (using last 6 messages, replace assistant content)
-            try:
-                conversation_for_state_building = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
-                # Replace assistant messages content with placeholder (Bedrock doesn't allow empty content)
-                conversation_for_state_building = [
-                    {**msg, "content": "assistant message"} if msg["role"] == "assistant" else msg
-                    for msg in conversation_for_state_building
-                ]
-
-                state_builder_result = await self.state_builder.build_query_state(
-                    user_query=cleaned_message,
-                    conversation_history=conversation_for_state_building
-                )
-                logger.info(f"State builder result: {state_builder_result}")
-            except Exception as e:
-                logger.warning(f"Failed to build query state: {e}, continuing without state building")
-                state_builder_result = None
-
-            # Rewrite query based on state builder result
-            query_rewriter_result = None
-            if state_builder_result:
-                try:
-                    query_rewriter_result = await self.query_rewriter.rewrite_query(
-                        user_query=cleaned_message,
-                        state=state_builder_result
-                    )
-                    logger.info(f"Query rewriter result: {query_rewriter_result}")
-                except Exception as e:
-                    logger.warning(f"Failed to rewrite query: {e}, continuing without query rewriting")
-                    query_rewriter_result = None
-
-        # Load IA area RAG configuration
-        rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
-        logger.info(f"Retrieved RAG config: {rag_config}")
-
-        # Track if a new chat was created and store the title
-        new_chat_created = False
-        new_chat_titulo = None
-        new_chat_timestamp = None
-
-        # Create chat if chat_id is not provided
-        if chat_id is None:
-            now = datetime.now()
-            formatted_date = now.strftime("%d/%m/%Y %H:%M")
-            titulo = f"Nueva conversación {formatted_date}"
-
-            # Create ChatRepository instance for this request
-            chat_repository = ChatRepository(db)
-
-            # Call stored procedure to create chat via repository (run in thread pool to avoid blocking)
-            new_chat_id = await asyncio.to_thread(
-                chat_repository.create_chat,
-                id_usuario=user_id,
-                id_area=area_id,
-                id_empresa=company_id,
-                titulo=titulo
+            # Build initial state
+            initial_state = build_initial_state(
+                user_id=user_id,
+                message=message,
+                company_id=company_id,
+                area_id=area_id,
+                created_at=created_at,
+                chat_id=chat_id,
+                request_timezone=request_timezone
             )
 
-            if new_chat_id:
-                chat_id = new_chat_id
-                new_chat_created = True
-                new_chat_titulo = titulo
-                new_chat_timestamp = now.isoformat()
-            else:
-                # Chat creation failed - stop execution
-                logger.error("Chat creation failed - no ID returned, stopping execution")
-                yield {
-                    "type": "error",
-                    "message": "Failed to create chat",
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "El chat no pudo crearse correctamente"
-                    }
-                }
-                return
+            # Stream workflow progress
+            result_state = None
+            async for event_type, event_data in stream_workflow_progress(app, initial_state):
+                if event_type == "progress":
+                    yield event_data
+                elif event_type == "state":
+                    result_state = event_data
 
-        # Save user message to DynamoDB
-        if chat_id:
-            try:
-                await self.message_service.create_message(
-                    chat_id=chat_id,
-                    created_at=created_at,
-                    sender=0,
-                    message=cleaned_message
-                )
-            except Exception as e:
-                logger.error(f"Failed to save user message: {e}")
-                yield {
-                    "type": "error",
-                    "message": "Failed to save user message",
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
-                    }
-                }
-                return
+            # Validate workflow completed successfully
+            result_state = validate_workflow_state(result_state)
 
-        # Yield metadata early (before processing) so frontend can show "Pensando..." placeholder
-        yield {
-            "type": "metadata",
-            "chat_id": chat_id
-        }
+            # Generate and yield metadata events
+            for event in generate_metadata_events(result_state, area_id, company_id):
+                yield event
 
-        # If a new chat was created, send the chat object to the frontend
-        if new_chat_created:
+            # Stream LLM response and save message
+            async for chunk_event in stream_llm_response(
+                state=result_state,
+                llm_provider=self.llm_provider,
+                message_service=self.message_service,
+                db=db
+            ):
+                yield chunk_event
+
+            # Send completion signal
             yield {
-                "type": "chat_created",
-                "chat": {
-                    "ID_CHAT": chat_id,
-                    "ID_AREA": area_id,
-                    "ID_EMPRESA": company_id,
-                    "TITULO": new_chat_titulo,
-                    "ULTIMO_MENSAJE_FECHA": new_chat_timestamp,
-                    "ID_ESTADO_REGISTRO": 1
-                }
+                "type": "complete",
+                "status": "success"
             }
 
-        # Step 1: Determine query to use for embedding and search
-        query_for_search = cleaned_message
-        if query_rewriter_result and query_rewriter_result.get("needs_rewrite", False):
-            rewritten_query = query_rewriter_result.get("rewritten_query", "").strip()
-            if rewritten_query:
-                query_for_search = rewritten_query
-                logger.info(f"Using rewritten query for search: {query_for_search}")
-            else:
-                logger.warning("Rewritten query is empty, using original cleaned message")
-        else:
-            logger.info(f"Using original query for search (needs_rewrite={query_rewriter_result.get('needs_rewrite', 'N/A') if query_rewriter_result else 'N/A'})")
-
-        # Generate embedding for the query (either original or recontextualized)
-        query_embedding = await self.embeddings_provider.embed(query_for_search)
-
-        # Step 2: Search vector database using the embedding (hybrid search)
-        search_results = await self.vectorstore.search_in_collection_hybrid(
-            company_id=company_id,
-            area_id=area_id,
-            query_text=query_for_search,
-            query_vector=query_embedding,
-            top_k=rag_config['config']['RAG_TOP_K_RESULTS'],
-            similarity_threshold=rag_config['config']['RAG_SIMILARITY_THRESHOLD'],
-            alpha=rag_config['config']['RAG_ALPHA'],
-            general_area=rag_config.get('general_area')
-        )
-
-        # Step 3: Prepare context text for LLM with source metadata using utility function
-        context_text = build_context_from_search_results(search_results)
-
-        # Step 4: Select conversation history for LLM prompt based on recontextualization flags
-        # Use the already-fetched conversation_history to avoid duplicate DB calls
-        conversation_history_for_prompt = []
-        if chat_id and conversation_history and query_rewriter_result:
-            needs_rewrite = query_rewriter_result.get("needs_rewrite", False)
-            summary_intent = query_rewriter_result.get("is_summary_request", False)
-
-            # Determine how many messages to use based on flags
-            messages_to_use = 0
-            if needs_rewrite and summary_intent:
-                # Both flags true: use all 16 messages
-                messages_to_use = 16
-                logger.info("Using 16 messages for LLM prompt (needs_rewrite=true, summary_intent=true)")
-            elif needs_rewrite:
-                # Only needs_rewrite true: use 8 messages
-                messages_to_use = 8
-                logger.info("Using 8 messages for LLM prompt (needs_rewrite=true)")
-            elif summary_intent:
-                # Only summary_intent true: use 16 messages
-                messages_to_use = 16
-                logger.info("Using 16 messages for LLM prompt (summary_intent=true)")
-            # If both false: don't use any messages (messages_to_use = 0)
-
-            # Select the appropriate number of messages from already-fetched history
-            if messages_to_use > 0:
-                # Take the last N messages (most recent)
-                conversation_history_for_prompt = conversation_history[-messages_to_use:] if len(conversation_history) >= messages_to_use else conversation_history
-                logger.info(f"Selected {len(conversation_history_for_prompt)} messages for LLM prompt from cached history")
-
-        # Step 5: Generate LLM answer
-        # Build RAG prompt with context (conversation history handled by Converse API messages)
-        model_config = ModelConfigFactory.get_model_config(rag_config['config']['LLM_MODEL'])
-        rag_prompt = model_config.build_rag_prompt(cleaned_message, context_text)
-
-        # Step 6: Generate streaming response using LLM
-
-        # Send assistant_metadata BEFORE starting LLM streaming
-        # This gives frontend time to render the empty "Pensando..." placeholder
-        assistant_timestamp_ms = int(time.time() * 1000)
-        user_timestamp_ms = int(created_at)
-
-        if assistant_timestamp_ms < user_timestamp_ms:
-            assistant_timestamp = str(user_timestamp_ms + 1000)
-        else:
-            assistant_timestamp = str(assistant_timestamp_ms)
-        yield {
-            "type": "assistant_metadata",
-            "sender": 1,
-            "created_at": assistant_timestamp
-        }
-
-        # Accumulate assistant response chunks
-        assistant_response = ""
-        first_chunk_sent = False
-
-        # Format timestamp with timezone
-        utc_formatted, local_formatted = format_timestamp_with_timezone(
-            assistant_timestamp_ms,
-            request_timezone or "America/Lima"
-        )
-
-        # Stream the LLM response with role behavior and conversation history using utility function
-        async for chunk in generate_text_stream_with_validation(
-            llm_provider=self.llm_provider,
-            model_id=rag_config['config']['LLM_MODEL'],
-            prompt=rag_prompt,
-            max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
-            temperature=rag_config['config']['LLM_TEMPERATURE'],
-            top_p=rag_config['config']['LLM_TOP_P'],
-            role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
-            messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
-            request_timezone=request_timezone,
-            utc_formatted=utc_formatted,
-            local_formatted=local_formatted
-        ):
-            assistant_response += chunk
-
-            # Update chat last message date when first chunk with content is sent
-            if not first_chunk_sent and chunk.strip():
-                chat_repo = ChatRepository(db)
-                await asyncio.to_thread(
-                    chat_repo.update_ultimo_mensaje_fecha,
-                    chat_id
-                )
-                first_chunk_sent = True
-
+        except ValueError as e:
+            # Workflow validation errors
+            logger.error(f"Workflow error: {e}")
             yield {
-                "type": "chunk",
-                "content": chunk
-            }
-
-        # Save assistant message to DynamoDB before completion signal
-        if chat_id and assistant_response and assistant_timestamp:
-            try:
-                await self.message_service.create_message(
-                    chat_id=chat_id,
-                    created_at=assistant_timestamp,
-                    sender=1,  # 1 = assistant
-                    message=assistant_response
-                )
-            except Exception as e:
-                logger.error(f"Failed to save assistant message: {e}")
-                yield {
-                    "type": "error",
-                    "message": "Failed to save assistant message",
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "El mensaje de la IA no pudo guardarse correctamente"
-                    }
+                "type": "error",
+                "message": str(e),
+                "result": {
+                    "idTipoMensaje": 1,
+                    "mensaje": str(e)
                 }
-                return
-
-        # Final completion signal
-        yield {
-            "type": "complete",
-            "status": "success"
-        }
+            }
+        except Exception as e:
+            # Unexpected errors
+            logger.error(f"Unexpected error in streaming: {e}", exc_info=True)
+            yield {
+                "type": "error",
+                "message": "Unexpected error",
+                "result": {
+                    "idTipoMensaje": 1,
+                    "mensaje": f"Error inesperado: {str(e)}"
+                }
+            }
 
     async def process_rag_query_n8n(self, user_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_id: int, request_timezone: str = None) -> Dict[str, Any]:
         """
         Proceso RAG completo sin streaming (para n8n): embeddings → search → LLM → response completa
-        Retorna directamente la respuesta completa del LLM con resultado estructurado.
+        Uses pre-compiled LangGraph workflow for modular processing with complete response.
         """
         try:
-            # Validate non-streaming provider is available
-            if not self.llm_nonstreaming_provider:
-                logger.error("Non-streaming LLM provider not configured")
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "Servicio de generación no configurado correctamente"
-                    }
-                }
+            # Get pre-compiled workflow
+            app = get_compiled_rag_workflow()
 
-            # Validate inputs
-            if not message or not message.strip():
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "El mensaje no puede estar vacío"
-                    }
-                }
-            if not user_id:
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "ID de usuario requerido"
-                    }
-                }
-            if not company_id:
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "ID de empresa requerido"
-                    }
-                }
-            if not area_id:
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "ID de área requerido"
-                    }
-                }
-
-            # Get last messages from chat history
-            conversation_history = []
-            try:
-                messages = await self.message_service.get_last_n_messages(
-                    chat_id=f"chat-{chat_id}",
-                    n=20
-                )
-
-                if messages:
-                    # Build and collapse in one pass
-                    collapsed = []
-                    for msg in messages:
-                        role = "user" if msg.sender == 0 else "assistant"
-                        if not collapsed or collapsed[-1]["role"] != role:
-                            collapsed.append({"role": role, "content": msg.message})
-                        else:
-                            collapsed[-1]["content"] = msg.message
-
-                    # Find boundaries
-                    start = next((i for i, m in enumerate(collapsed) if m["role"] == "user"), -1)
-                    end = next((i for i in range(len(collapsed)-1, -1, -1)
-                               if collapsed[i]["role"] == "assistant"), -1)
-
-                    # Validate and slice
-                    if start >= 0 and end > start:
-                        segment = collapsed[start:end+1]
-
-                        # Quick alternating check (should be true due to collapse)
-                        if all(segment[i]["role"] != segment[i+1]["role"]
-                               for i in range(len(segment)-1)):
-
-                            # Trim to context window (keep newest)
-                            MAX_CTX = 16
-                            if len(segment) > MAX_CTX:
-                                trim = len(segment) - MAX_CTX
-                                if segment[trim]["role"] == "assistant":
-                                    trim -= 1
-                                segment = segment[max(0, trim):]
-
-                            # Final check
-                            if segment and segment[0]["role"] == "user":
-                                conversation_history = segment
-
-            except Exception as e:
-                logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
-                conversation_history = []
-
-            cleaned_message = clean_user_query(message)
-
-            # Build query state and rewrite query if conversation history exists
-            state_builder_result = None
-            query_rewriter_result = None
-            if conversation_history:
-                # Build query state for RAG (using last 6 messages, replace assistant content)
-                try:
-                    conversation_for_state_building = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
-                    # Replace assistant messages content with placeholder (Bedrock doesn't allow empty content)
-                    conversation_for_state_building = [
-                        {**msg, "content": "assistant message"} if msg["role"] == "assistant" else msg
-                        for msg in conversation_for_state_building
-                    ]
-
-                    state_builder_result = await self.state_builder.build_query_state(
-                        user_query=cleaned_message,
-                        conversation_history=conversation_for_state_building
-                    )
-                    logger.info(f"State builder result: {state_builder_result}")
-                except Exception as e:
-                    logger.warning(f"Failed to build query state: {e}, continuing without state building")
-                    state_builder_result = None
-
-                # Rewrite query based on state builder result
-                if state_builder_result:
-                    try:
-                        query_rewriter_result = await self.query_rewriter.rewrite_query(
-                            user_query=cleaned_message,
-                            state=state_builder_result
-                        )
-                        logger.info(f"Query rewriter result: {query_rewriter_result}")
-                    except Exception as e:
-                        logger.warning(f"Failed to rewrite query: {e}, continuing without query rewriting")
-                        query_rewriter_result = None
-
-            # Load IA area RAG configuration
-            rag_config = await self.ia_config_service.get_ia_area_config_rag(db, company_id, area_id)
-            logger.info(f"Retrieved RAG config: {rag_config}")
-
-            # Save user message to DynamoDB
-            try:
-                await self.message_service.create_message(
-                    chat_id=chat_id,
-                    created_at=created_at,
-                    sender=0,
-                    message=cleaned_message
-                )
-            except Exception as e:
-                logger.error(f"Failed to save user message: {e}")
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
-                    }
-                }
-
-            # Determine query to use for embedding and search
-            query_for_search = cleaned_message
-            if query_rewriter_result and query_rewriter_result.get("needs_rewrite", False):
-                rewritten_query = query_rewriter_result.get("rewritten_query", "").strip()
-                if rewritten_query:
-                    query_for_search = rewritten_query
-                    logger.info(f"Using rewritten query for search: {query_for_search}")
-
-            # Generate embedding for the query
-            query_embedding = await self.embeddings_provider.embed(query_for_search)
-
-            # Search vector database
-            search_results = await self.vectorstore.search_in_collection_hybrid(
+            # Build initial state
+            initial_state = build_initial_state(
+                user_id=user_id,
+                message=message,
                 company_id=company_id,
                 area_id=area_id,
-                query_text=query_for_search,
-                query_vector=query_embedding,
-                top_k=rag_config['config']['RAG_TOP_K_RESULTS'],
-                similarity_threshold=rag_config['config']['RAG_SIMILARITY_THRESHOLD'],
-                alpha=rag_config['config']['RAG_ALPHA'],
-                general_area=rag_config.get('general_area')
+                created_at=created_at,
+                chat_id=str(chat_id),
+                request_timezone=request_timezone
             )
 
-            # Prepare context text for LLM
-            context_text = build_context_from_search_results(search_results)
+            # Execute workflow without streaming
+            result_state = await execute_workflow_n8n(app, initial_state)
 
-            # Select conversation history for LLM prompt
-            conversation_history_for_prompt = []
-            if conversation_history and query_rewriter_result:
-                needs_rewrite = query_rewriter_result.get("needs_rewrite", False)
-                summary_intent = query_rewriter_result.get("is_summary_request", False)
-                messages_to_use = 0
-                if needs_rewrite and summary_intent:
-                    messages_to_use = 16
-                elif needs_rewrite:
-                    messages_to_use = 8
-                elif summary_intent:
-                    messages_to_use = 16
-                if messages_to_use > 0:
-                    conversation_history_for_prompt = conversation_history[-messages_to_use:] if len(conversation_history) >= messages_to_use else conversation_history
+            # Validate workflow completed successfully
+            result_state = validate_workflow_state(result_state)
 
-            # Build RAG prompt
-            model_config = ModelConfigFactory.get_model_config(rag_config['config']['LLM_MODEL'])
-            rag_prompt = model_config.build_rag_prompt(cleaned_message, context_text)
-
-            # Generate timestamp for assistant message and format timestamps
-            assistant_timestamp_ms = int(time.time() * 1000)
-            user_timestamp_ms = int(created_at)
-            if assistant_timestamp_ms < user_timestamp_ms:
-                assistant_timestamp_ms = user_timestamp_ms + 1000
-
-            # Format timestamp with timezone
-            utc_formatted, local_formatted = format_timestamp_with_timezone(
-                assistant_timestamp_ms,
-                request_timezone or "America/Lima"
+            # Generate complete LLM response and save
+            assistant_response = await generate_complete_llm_response(
+                state=result_state,
+                llm_nonstreaming_provider=self.llm_nonstreaming_provider,
+                message_service=self.message_service,
+                db=db
             )
-
-            # Generate complete response using non-streaming provider with validation
-            assistant_response = await generate_text_with_validation(
-                llm_provider=self.llm_nonstreaming_provider,
-                model_id=rag_config['config']['LLM_MODEL'],
-                prompt=rag_prompt,
-                max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
-                temperature=rag_config['config']['LLM_TEMPERATURE'],
-                top_p=rag_config['config']['LLM_TOP_P'],
-                role_behavior=rag_config['config']['ROLE_BEHAVIOR'],
-                messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
-                request_timezone=request_timezone,
-                utc_formatted=utc_formatted,
-                local_formatted=local_formatted
-            )
-
-            # Update chat last message date
-            chat_repo = ChatRepository(db)
-            await asyncio.to_thread(
-                chat_repo.update_ultimo_mensaje_fecha,
-                chat_id
-            )
-
-            # Use the timestamp generated earlier
-            assistant_timestamp = str(assistant_timestamp_ms)
-
-            # Save assistant message to DynamoDB
-            if assistant_response and assistant_timestamp:
-                try:
-                    await self.message_service.create_message(
-                        chat_id=chat_id,
-                        created_at=assistant_timestamp,
-                        sender=1,  # 1 = assistant
-                        message=assistant_response
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to save assistant message: {e}")
-                    return {
-                        "result": {
-                            "idTipoMensaje": 1,
-                            "mensaje": "El mensaje de la IA no pudo guardarse correctamente"
-                        }
-                    }
 
             # Return successful response
             return {
@@ -879,8 +412,18 @@ class RagService:
                 }
             }
 
+        except ValueError as e:
+            # Workflow validation errors
+            logger.error(f"Workflow error: {e}")
+            return {
+                "result": {
+                    "idTipoMensaje": 1,
+                    "mensaje": str(e)
+                }
+            }
         except Exception as e:
-            logger.error(f"Error in process_rag_query_n8n: {e}")
+            # Unexpected errors
+            logger.error(f"Error in process_rag_query_n8n: {e}", exc_info=True)
             return {
                 "result": {
                     "idTipoMensaje": 1,
@@ -888,180 +431,42 @@ class RagService:
                 }
             }
 
-    async def process_llm_only_n8n(self, user_id: int, message: str, company_id: int, db: Session, created_at: str, chat_id: int, system_behavior: str, request_timezone: str = None, use_guidelines: bool = True, store_messages: bool = True) -> Dict[str, Any]:
+    async def process_llm_only_n8n(self, user_id: int, message: str, company_id: int, db: Session, created_at: str, chat_id: int, system_behavior: str = None, custom_llm: str = None, request_timezone: str = None, use_guidelines: bool = True, store_messages: bool = True) -> Dict[str, Any]:
         """
         Proceso LLM-only sin streaming (para n8n): LLM → response completa (sin embeddings, sin vector stores, sin state builder, sin query rewriter)
-        Retorna directamente la respuesta completa del LLM con resultado estructurado.
+        Uses pre-compiled LangGraph LLM-only workflow for modular processing.
         """
         try:
-            # Validate LLM-only provider is available
-            if not self.llm_only_provider:
-                logger.error("LLM-only provider not configured")
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "Servicio de generación LLM-only no configurado correctamente"
-                    }
-                }
+            # Get pre-compiled LLM-only workflow
+            app = get_compiled_llm_only_workflow()
 
-            # Validate inputs
-            if not message or not message.strip():
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "El mensaje no puede estar vacío"
-                    }
-                }
-            if not user_id:
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "ID de usuario requerido"
-                    }
-                }
-            if not company_id:
-                return {
-                    "result": {
-                        "idTipoMensaje": 1,
-                        "mensaje": "ID de empresa requerido"
-                    }
-                }
-
-            # Get last messages from chat history
-            conversation_history = []
-            try:
-                messages = await self.message_service.get_last_n_messages(
-                    chat_id=f"chat-{chat_id}",
-                    n=20
-                )
-
-                if messages:
-                    # Build and collapse in one pass
-                    collapsed = []
-                    for msg in messages:
-                        role = "user" if msg.sender == 0 else "assistant"
-                        if not collapsed or collapsed[-1]["role"] != role:
-                            collapsed.append({"role": role, "content": msg.message})
-                        else:
-                            collapsed[-1]["content"] = msg.message
-
-                    # Find boundaries
-                    start = next((i for i, m in enumerate(collapsed) if m["role"] == "user"), -1)
-                    end = next((i for i in range(len(collapsed)-1, -1, -1)
-                               if collapsed[i]["role"] == "assistant"), -1)
-
-                    # Validate and slice
-                    if start >= 0 and end > start:
-                        segment = collapsed[start:end+1]
-
-                        # Quick alternating check (should be true due to collapse)
-                        if all(segment[i]["role"] != segment[i+1]["role"]
-                               for i in range(len(segment)-1)):
-
-                            # Trim to context window (keep newest)
-                            MAX_CTX = 8
-                            if len(segment) > MAX_CTX:
-                                trim = len(segment) - MAX_CTX
-                                if segment[trim]["role"] == "assistant":
-                                    trim -= 1
-                                segment = segment[max(0, trim):]
-
-                            # Final check
-                            if segment and segment[0]["role"] == "user":
-                                conversation_history = segment
-
-            except Exception as e:
-                logger.warning(f"Failed to retrieve chat history: {e}, continuing without history")
-                conversation_history = []
-
-            cleaned_message = clean_user_query(message)
-
-            # Load IA area RAG configuration (company-level only, no area required)
-            rag_config = await self.ia_config_service.get_ia_area_config_rag_no_area(db, company_id)
-            logger.info(f"Retrieved RAG config (no area): {rag_config}")
-
-            # Save user message to DynamoDB (if store_messages is enabled)
-            if store_messages:
-                try:
-                    await self.message_service.create_message(
-                        chat_id=chat_id,
-                        created_at=created_at,
-                        sender=0,
-                        message=cleaned_message
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to save user message: {e}")
-                    return {
-                        "result": {
-                            "idTipoMensaje": 1,
-                            "mensaje": "El mensaje del usuario no pudo guardarse correctamente"
-                        }
-                    }
-            else:
-                logger.info("Skipping user message storage (store_messages=False)")
-
-            # Use all available conversation history for LLM prompt (up to 8 messages)
-            conversation_history_for_prompt = conversation_history if conversation_history else []
-
-            # Generate timestamp for assistant message and format timestamps
-            assistant_timestamp_ms = int(time.time() * 1000)
-            user_timestamp_ms = int(created_at)
-            if assistant_timestamp_ms < user_timestamp_ms:
-                assistant_timestamp_ms = user_timestamp_ms + 1000
-
-            # Format timestamp with timezone
-            utc_formatted, local_formatted = format_timestamp_with_timezone(
-                assistant_timestamp_ms,
-                request_timezone or "America/Lima"
-            )
-
-            # Generate complete response using LLM-only provider with validation
-            # This provider uses a system prompt optimized for conversational AI without RAG
-            assistant_response = await generate_text_llm_only_with_validation(
-                llm_provider=self.llm_only_provider,
-                model_id=rag_config['config']['LLM_MODEL'],
-                prompt=cleaned_message,
-                max_tokens=rag_config['config']['LLM_MAX_TOKENS'],
-                temperature=rag_config['config']['LLM_TEMPERATURE'],
-                top_p=rag_config['config']['LLM_TOP_P'],
-                role_behavior=system_behavior,
-                messages=conversation_history_for_prompt if conversation_history_for_prompt else None,
+            # Build initial state
+            initial_state = build_llm_only_initial_state(
+                user_id=user_id,
+                message=message,
+                company_id=company_id,
+                created_at=created_at,
+                chat_id=str(chat_id),
+                system_behavior=system_behavior,
                 request_timezone=request_timezone,
-                utc_formatted=utc_formatted,
-                local_formatted=local_formatted,
-                use_guidelines=use_guidelines
+                use_guidelines=use_guidelines,
+                store_messages=store_messages,
+                custom_llm=custom_llm
             )
 
-            # Update chat last message date
-            chat_repo = ChatRepository(db)
-            await asyncio.to_thread(
-                chat_repo.update_ultimo_mensaje_fecha,
-                chat_id
+            # Execute workflow without streaming
+            result_state = await execute_workflow_n8n(app, initial_state)
+
+            # Validate workflow completed successfully
+            result_state = validate_llm_only_workflow_state(result_state)
+
+            # Generate complete LLM response and save
+            assistant_response = await generate_complete_llm_only_response(
+                state=result_state,
+                llm_only_provider=self.llm_only_provider,
+                message_service=self.message_service,
+                db=db
             )
-
-            # Use the timestamp generated earlier
-            assistant_timestamp = str(assistant_timestamp_ms)
-
-            # Save assistant message to DynamoDB (if store_messages is enabled)
-            if store_messages:
-                if assistant_response and assistant_timestamp:
-                    try:
-                        await self.message_service.create_message(
-                            chat_id=chat_id,
-                            created_at=assistant_timestamp,
-                            sender=1,  # 1 = assistant
-                            message=assistant_response
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to save assistant message: {e}")
-                        return {
-                            "result": {
-                                "idTipoMensaje": 1,
-                                "mensaje": "El mensaje de la IA no pudo guardarse correctamente"
-                            }
-                        }
-            else:
-                logger.info("Skipping assistant message storage (store_messages=False)")
 
             # Return successful response
             return {
@@ -1072,8 +477,18 @@ class RagService:
                 }
             }
 
+        except ValueError as e:
+            # Workflow validation errors
+            logger.error(f"Workflow error: {e}")
+            return {
+                "result": {
+                    "idTipoMensaje": 1,
+                    "mensaje": str(e)
+                }
+            }
         except Exception as e:
-            logger.error(f"Error in process_rag_query_n8n: {e}")
+            # Unexpected errors
+            logger.error(f"Error in process_llm_only_n8n: {e}", exc_info=True)
             return {
                 "result": {
                     "idTipoMensaje": 1,

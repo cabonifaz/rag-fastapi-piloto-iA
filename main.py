@@ -35,10 +35,11 @@ logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
 
 from app.core.config import settings
 # Initialize database FIRST, before heavy imports
-from app.core.database import init_database, close_database
+from app.core.database import init_database, close_database, SessionLocal
 
 # Then import the heavy modules
 from app.api import rag, auth, external_login, chats, messages, transcribe, file_transcribe, company, area, users, agents, knowledge, ia_models, ia_config, phone_code, menu_items
+from app.core.container import container
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +50,19 @@ async def lifespan(app: FastAPI):
     # Startup
     try:
         await init_database()
+
+        # Initialize and compile workflows once at startup
+        # Workflows use SessionLocal factory to get sessions from pool per-request
+        container.initialize_rag_workflow()
+        container.initialize_llm_only_workflow()
+
         logger.info("Application startup completed successfully")
     except Exception as e:
         logger.error(f"Application startup failed: {e}")
         raise
-    
+
     yield
-    
+
     # Shutdown
     try:
         await close_database()
