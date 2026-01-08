@@ -54,17 +54,20 @@ class AWSBedrockConverseProvider(LLMPort):
     Usage:
         provider = AWSBedrockConverseProvider(
             region="us-east-1",
-            model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
-            role_behavior="You are a helpful assistant"
+            model_id="anthropic.claude-3-5-sonnet-20241022-v2:0"
         )
 
-        # Generate with automatic fallback
-        async for chunk in provider.generate_stream(prompt="What is AI?"):
+        # Generate with role behavior provided per request
+        async for chunk in provider.generate_stream(
+            prompt="What is AI?",
+            role_behavior="You are a helpful assistant"
+        ):
             print(chunk, end="", flush=True)
 
         # Or with custom fallback models
         async for chunk in provider.generate_stream(
             prompt="What is AI?",
+            role_behavior="You are a helpful assistant",
             fallback_models=["meta.llama3-1-70b-instruct-v1:0"]
         ):
             print(chunk, end="", flush=True)
@@ -74,7 +77,6 @@ class AWSBedrockConverseProvider(LLMPort):
         self,
         region: str,
         model_id: Optional[str] = None,
-        role_behavior: Optional[str] = None,
         profile_name: Optional[str] = None,
         aws_access_key_id: Optional[str] = None,
         aws_secret_access_key: Optional[str] = None,
@@ -85,7 +87,6 @@ class AWSBedrockConverseProvider(LLMPort):
         Args:
             region: AWS region
             model_id: Bedrock model ID (optional, will be provided per-request from database)
-            role_behavior: Role behavior instructions (optional, will be provided per-request from database)
             profile_name: AWS profile name (optional)
             aws_access_key_id: AWS access key ID (optional)
             aws_secret_access_key: AWS secret access key (optional)
@@ -110,7 +111,6 @@ class AWSBedrockConverseProvider(LLMPort):
 
         self.model_id = model_id
         self.region = region
-        self.default_role_behavior = role_behavior
         self.profile_name = profile_name
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
@@ -133,10 +133,10 @@ class AWSBedrockConverseProvider(LLMPort):
         """Update the system prompt for this provider instance."""
         self.system_prompt = system_prompt
 
-    def _build_system_config(self, custom_system: Optional[str] = None, request_timezone: Optional[str] = None, utc_formatted: str = None, local_formatted: str = None) -> Optional[List[Dict[str, str]]]:
+    def _build_system_config(self, custom_system: str = "", request_timezone: Optional[str] = None, utc_formatted: str = None, local_formatted: str = None) -> Optional[List[Dict[str, str]]]:
         """Build system configuration for Converse API."""
-        # Use custom role behavior or default
-        role_behavior = custom_system or self.default_role_behavior
+        # Use custom role behavior (always provided from workflow now)
+        role_behavior = custom_system
 
         # Concatenate role behavior with formatting instructions
         system_text = f"""{role_behavior}
@@ -147,21 +147,20 @@ Time context:
 - Timezone: {request_timezone}
 
 Temporal rules:
-- Use this time context as the single source of truth.
+- Treat this time context as the single source of truth.
 - Use local time for all time-sensitive reasoning.
-- Do not infer or use external date or time information.
-- Exclude items scheduled before the current local time.
-- Ask for clarification if time context is insufficient.
+- Apply time filtering ONLY when the task involves scheduling, reminders, events, or availability.
+- Do not invent or infer external dates or times.
+- If time context is insufficient, ask for clarification.
 
 Response rules:
-- Answer directly and concisely.
-- Do not explain internal reasoning or speculate.
-- Match the user's language; if unclear or mixed, default to Spanish.
-- Keep responses concise unless the user explicitly asks for detail.
+- Answer directly and concisely, but do not remove essential information required for accuracy.
+- Do not reveal internal reasoning.
+- Match the user's language. If unclear or mixed, default to Spanish.
 
 Formatting rules:
-- Render structured or API-derived data as Markdown tables only.
-- JSON-like data must be rendered as a Markdown table with columns: table, headers, rows."""
+- Render structured/API data as Markdown tables.
+- Convert data with headers + rows-like structure into a table."""
 
         if system_text:
             return [{"text": system_text}]
@@ -174,7 +173,7 @@ Formatting rules:
         max_tokens: int = 2048,
         temperature: float = 0.3,
         top_p: float = 0.9,
-        role_behavior: Optional[str] = None,
+        role_behavior: str = "",
         messages: Optional[List[Dict[str, Any]]] = None,
         fallback_models: Optional[List[str]] = None,
         request_timezone: Optional[str] = None,
@@ -195,7 +194,7 @@ Formatting rules:
             max_tokens: Maximum tokens to generate (default: 2048)
             temperature: Temperature for sampling (default: 0.3)
             top_p: Top-p (nucleus) sampling parameter (default: 0.9)
-            role_behavior: Optional role behavior (overrides instance system_prompt)
+            role_behavior: Role behavior/system prompt (required, defaults to empty string)
             messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                      If provided, prompt will be ignored and messages will be used instead
             fallback_models: Optional list of fallback model IDs to try if primary is saturated.
