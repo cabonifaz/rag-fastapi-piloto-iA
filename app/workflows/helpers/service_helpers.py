@@ -3,7 +3,7 @@ Service layer helper functions.
 Utilities for building state, validation, and event generation.
 """
 from typing import Optional
-from app.workflows.states import RAGState
+from app.workflows.states import RAGState, LLMOnlyState
 
 
 def build_initial_state(
@@ -105,3 +105,65 @@ def generate_metadata_events(state: RAGState, area_id: int, company_id: int):
     })
 
     return events
+
+
+# ============================================================================
+# LLM-Only Helpers
+# ============================================================================
+
+def build_llm_only_initial_state(
+    user_id: int,
+    message: str,
+    company_id: int,
+    created_at: str,
+    chat_id: str,
+    system_behavior: str,
+    request_timezone: Optional[str] = None,
+    use_guidelines: bool = True,
+    store_messages: bool = True
+) -> LLMOnlyState:
+    """Build initial state for LLM-only workflow execution"""
+    return {
+        # Input parameters
+        "user_id": user_id,
+        "message": message,
+        "company_id": company_id,
+        "created_at": created_at,
+        "chat_id": chat_id,
+        "system_behavior": system_behavior,
+        "request_timezone": request_timezone,
+        "use_guidelines": use_guidelines,
+        "store_messages": store_messages,
+        # Processing state (will be populated by workflow)
+        "cleaned_message": None,
+        "conversation_history": [],
+        "llm_config": None,
+        "assistant_timestamp": None,
+        "assistant_timestamp_ms": None,
+        "utc_formatted": None,
+        "local_formatted": None,
+        # Error handling
+        "error": None,
+        "should_stop": False
+    }
+
+
+def validate_llm_only_workflow_state(state: Optional[LLMOnlyState]) -> LLMOnlyState:
+    """
+    Validate that LLM-only workflow completed successfully.
+    Raises ValueError if state is invalid.
+    """
+    if state is None or state.get("should_stop", False):
+        error_msg = state.get("error", "Unknown error") if state else "Workflow did not complete"
+        raise ValueError(error_msg)
+
+    # Validate required fields
+    if not state.get("chat_id") or not state.get("llm_config"):
+        missing_fields = []
+        if not state.get("chat_id"):
+            missing_fields.append("chat_id")
+        if not state.get("llm_config"):
+            missing_fields.append("llm_config")
+        raise ValueError(f"Workflow incomplete: missing {', '.join(missing_fields)}")
+
+    return state

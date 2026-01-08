@@ -3,10 +3,14 @@ Streaming helper functions for RAG workflows.
 Handles progress streaming and LLM response streaming.
 """
 import logging
-import asyncio
 from typing import Any, AsyncGenerator, Tuple
 from app.workflows.states import RAGState
-from app.infrastructure.repositories.chat_repository import ChatRepository
+from app.workflows.helpers.llm_common import (
+    validate_llm_parameters,
+    handle_llm_error,
+    update_chat_last_message_date,
+    save_assistant_message
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +102,8 @@ async def stream_llm_response(
     utc_formatted = state.get("utc_formatted")
     local_formatted = state.get("local_formatted")
 
-    # Validate parameters
-    if messages is None and (not prompt or not prompt.strip()):
-        raise ValueError("Either prompt or messages must be provided")
-    if max_tokens is not None and max_tokens <= 0:
-        raise ValueError("max_tokens must be greater than 0")
-    if temperature is not None and not (0.0 <= temperature <= 2.0):
-        raise ValueError("temperature must be between 0.0 and 2.0")
+    # Validate parameters using shared utility
+    validate_llm_parameters(messages, prompt, max_tokens, temperature)
 
     try:
         has_content = False
@@ -141,11 +140,7 @@ async def stream_llm_response(
 
             # Update chat last message date on first chunk
             if not first_chunk_sent and chunk.strip():
-                chat_repo = ChatRepository(db)
-                await asyncio.to_thread(
-                    chat_repo.update_ultimo_mensaje_fecha,
-                    chat_id
-                )
+                await update_chat_last_message_date(db, chat_id)
                 first_chunk_sent = True
 
             yield {
@@ -158,23 +153,12 @@ async def stream_llm_response(
             raise ValueError("El modelo no generó una respuesta. Por favor, intenta reformular tu pregunta.")
 
         # Save assistant message to DynamoDB
-        if chat_id and assistant_response and state["assistant_timestamp"]:
-            await message_service.create_message(
-                chat_id=chat_id,
-                created_at=state["assistant_timestamp"],
-                sender=1,
-                message=assistant_response
-            )
+        await save_assistant_message(
+            message_service=message_service,
+            chat_id=chat_id,
+            assistant_timestamp=state["assistant_timestamp"],
+            assistant_response=assistant_response
+        )
 
-    except ConnectionError as e:
-        logger.error(f"Connection error during LLM generation: {e}")
-        raise ConnectionError(f"LLM service unavailable: {str(e)}")
-    except ValueError as e:
-        logger.error(f"Invalid input for LLM: {e}")
-        raise ValueError(f"Invalid prompt or parameters: {str(e)}")
-    except TimeoutError as e:
-        logger.error(f"Timeout error during LLM generation: {e}")
-        raise TimeoutError(f"LLM generation timeout: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error during LLM generation: {e}")
-        raise ConnectionError(f"LLM generation failed: {str(e)}")
+        await handle_llm_error(e, "LLM generation")

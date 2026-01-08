@@ -8,9 +8,14 @@ from app.workflows.states import RAGState
 logger = logging.getLogger(__name__)
 
 
-def create_get_conversation_history_node(message_service):
-    """Factory function to create get_conversation_history node"""
-    async def get_conversation_history(state: RAGState) -> RAGState:
+def create_get_conversation_history_node(message_service, max_ctx: int = 16):
+    """Factory function to create get_conversation_history node
+
+    Args:
+        message_service: Message service for DynamoDB
+        max_ctx: Maximum context window (default 16 for RAG, use 8 for LLM-only)
+    """
+    async def get_conversation_history(state) -> dict:
         """Fetch conversation history from DynamoDB"""
         conversation_history = []
         chat_id = state.get("chat_id")
@@ -46,9 +51,8 @@ def create_get_conversation_history_node(message_service):
                                for i in range(len(segment)-1)):
 
                             # Trim to context window (keep newest)
-                            MAX_CTX = 16
-                            if len(segment) > MAX_CTX:
-                                trim = len(segment) - MAX_CTX
+                            if len(segment) > max_ctx:
+                                trim = len(segment) - max_ctx
                                 if segment[trim]["role"] == "assistant":
                                     trim -= 1
                                 segment = segment[max(0, trim):]

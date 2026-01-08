@@ -3,10 +3,15 @@ Non-streaming helper functions for RAG workflows.
 Handles complete response generation for N8N integrations.
 """
 import logging
-import asyncio
 from typing import Any
-from app.workflows.states import RAGState
-from app.infrastructure.repositories.chat_repository import ChatRepository
+from app.workflows.states import RAGState, LLMOnlyState
+from app.workflows.helpers.llm_common import (
+    validate_llm_parameters,
+    validate_llm_response,
+    handle_llm_error,
+    update_chat_last_message_date,
+    save_assistant_message
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +71,8 @@ async def generate_complete_llm_response(
     utc_formatted = state.get("utc_formatted")
     local_formatted = state.get("local_formatted")
 
-    # Validate parameters
-    if messages is None and (not prompt or not prompt.strip()):
-        raise ValueError("Either prompt or messages must be provided")
-    if max_tokens is not None and max_tokens <= 0:
-        raise ValueError("max_tokens must be greater than 0")
-    if temperature is not None and not (0.0 <= temperature <= 2.0):
-        raise ValueError("temperature must be between 0.0 and 2.0")
+    # Validate parameters using shared utility
+    validate_llm_parameters(messages, prompt, max_tokens, temperature)
 
     try:
         # Generate complete response using non-streaming provider
@@ -89,37 +89,102 @@ async def generate_complete_llm_response(
             local_formatted=local_formatted
         )
 
-        # Validate response
-        if not assistant_response or not assistant_response.strip():
-            raise ValueError("El modelo no generó una respuesta. Por favor, intenta reformular tu pregunta.")
+        # Validate response using shared utility
+        validate_llm_response(assistant_response)
 
-        # Update chat last message date
-        chat_repo = ChatRepository(db)
-        await asyncio.to_thread(
-            chat_repo.update_ultimo_mensaje_fecha,
-            chat_id
+        # Update chat last message date using shared utility
+        await update_chat_last_message_date(db, chat_id)
+
+        # Save assistant message to DynamoDB using shared utility
+        await save_assistant_message(
+            message_service=message_service,
+            chat_id=chat_id,
+            assistant_timestamp=state["assistant_timestamp"],
+            assistant_response=assistant_response
         )
-
-        # Save assistant message to DynamoDB
-        if chat_id and assistant_response and state["assistant_timestamp"]:
-            await message_service.create_message(
-                chat_id=chat_id,
-                created_at=state["assistant_timestamp"],
-                sender=1,
-                message=assistant_response
-            )
 
         return assistant_response
 
-    except ConnectionError as e:
-        logger.error(f"Connection error during LLM generation: {e}")
-        raise ConnectionError(f"LLM service unavailable: {str(e)}")
-    except ValueError as e:
-        logger.error(f"Invalid input for LLM: {e}")
-        raise ValueError(f"Invalid prompt or parameters: {str(e)}")
-    except TimeoutError as e:
-        logger.error(f"Timeout error during LLM generation: {e}")
-        raise TimeoutError(f"LLM generation timeout: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error during LLM generation: {e}")
-        raise ConnectionError(f"LLM generation failed: {str(e)}")
+        await handle_llm_error(e, "LLM generation")
+
+
+async def generate_complete_llm_only_response(
+    state: LLMOnlyState,
+    llm_only_provider: Any,
+    message_service: Any,
+    db: Any
+) -> str:
+    """
+    Generate complete LLM-only response (non-streaming), update chat, and save message.
+    Consolidates all LLM-only logic including validation and persistence.
+
+    Args:
+        state: LLMOnlyState with all necessary context
+        llm_only_provider: LLM-only provider
+        message_service: Message service for DynamoDB
+        db: Database session
+
+    Returns:
+        Complete assistant response text
+
+    Raises:
+        ValueError: If parameters are invalid or no response generated
+        ConnectionError: If LLM service is unavailable
+        TimeoutError: If LLM generation times out
+    """
+    llm_config = state["llm_config"]
+    chat_id = state["chat_id"]
+    store_messages = state.get("store_messages", True)
+
+    # Extract LLM parameters from state
+    model_id = llm_config['config']['LLM_MODEL']
+    prompt = state["cleaned_message"]
+    max_tokens = llm_config['config']['LLM_MAX_TOKENS']
+    temperature = llm_config['config']['LLM_TEMPERATURE']
+    top_p = llm_config['config']['LLM_TOP_P']
+    role_behavior = state["system_behavior"]
+    messages = state.get("conversation_history") or None
+    request_timezone = state.get("request_timezone")
+    utc_formatted = state.get("utc_formatted")
+    local_formatted = state.get("local_formatted")
+    use_guidelines = state.get("use_guidelines", True)
+
+    # Validate parameters using shared utility
+    validate_llm_parameters(messages, prompt, max_tokens, temperature)
+
+    try:
+        # Generate complete response using LLM-only provider
+        assistant_response = await llm_only_provider.generate(
+            model_id=model_id,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            role_behavior=role_behavior,
+            messages=messages,
+            request_timezone=request_timezone,
+            utc_formatted=utc_formatted,
+            local_formatted=local_formatted,
+            use_guidelines=use_guidelines
+        )
+
+        # Validate response using shared utility
+        validate_llm_response(assistant_response)
+
+        # Update chat last message date using shared utility
+        await update_chat_last_message_date(db, chat_id)
+
+        # Save assistant message to DynamoDB using shared utility (respects store_messages flag)
+        await save_assistant_message(
+            message_service=message_service,
+            chat_id=chat_id,
+            assistant_timestamp=state["assistant_timestamp"],
+            assistant_response=assistant_response,
+            store_messages=store_messages
+        )
+
+        return assistant_response
+
+    except Exception as e:
+        await handle_llm_error(e, "LLM-only generation")

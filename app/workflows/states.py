@@ -39,3 +39,30 @@ class RAGState(TypedDict):
     # Error handling
     error: Optional[str]
     should_stop: bool
+
+
+class LLMOnlyState(TypedDict):
+    """State schema for LLM-only workflow (no RAG) - only request data, no dependencies"""
+    # Input parameters
+    user_id: int
+    message: str
+    company_id: int
+    created_at: str
+    chat_id: str
+    system_behavior: str
+    request_timezone: Optional[str]
+    use_guidelines: bool
+    store_messages: bool
+
+    # Processing state
+    cleaned_message: Optional[str]
+    conversation_history: List[Dict[str, str]]
+    llm_config: Optional[Dict[str, Any]]
+    assistant_timestamp: Optional[str]
+    assistant_timestamp_ms: Optional[int]
+    utc_formatted: Optional[str]
+    local_formatted: Optional[str]
+
+    # Error handling
+    error: Optional[str]
+    should_stop: bool

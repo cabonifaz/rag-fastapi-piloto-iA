@@ -62,11 +62,12 @@ def create_create_or_use_chat_node(session_factory):
 
 def create_save_user_message_node(message_service):
     """Factory function to create save_user_message node"""
-    async def save_user_message(state: RAGState) -> RAGState:
-        """Save user message to DynamoDB"""
+    async def save_user_message(state) -> dict:
+        """Save user message to DynamoDB (respects store_messages flag if present)"""
         chat_id = state.get("chat_id")
+        store_messages = state.get("store_messages", True)  # Default True for RAG workflows
 
-        if chat_id:
+        if chat_id and store_messages:
             try:
                 await message_service.create_message(
                     chat_id=chat_id,
@@ -78,6 +79,8 @@ def create_save_user_message_node(message_service):
                 logger.error(f"Failed to save user message: {e}")
                 state["error"] = "Failed to save user message"
                 state["should_stop"] = True
+        elif not store_messages:
+            logger.info("Skipping user message storage (store_messages=False)")
 
         return state
 

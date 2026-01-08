@@ -51,9 +51,10 @@ async def lifespan(app: FastAPI):
     try:
         await init_database()
 
-        # Initialize and compile RAG workflow once at startup
-        # Workflow uses SessionLocal factory to get sessions from pool per-request
+        # Initialize and compile workflows once at startup
+        # Workflows use SessionLocal factory to get sessions from pool per-request
         container.initialize_rag_workflow()
+        container.initialize_llm_only_workflow()
 
         logger.info("Application startup completed successfully")
     except Exception as e:

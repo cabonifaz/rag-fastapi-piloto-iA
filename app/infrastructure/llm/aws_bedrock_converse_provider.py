@@ -147,21 +147,20 @@ Time context:
 - Timezone: {request_timezone}
 
 Temporal rules:
-- Use this time context as the single source of truth.
+- Treat this time context as the single source of truth.
 - Use local time for all time-sensitive reasoning.
-- Do not infer or use external date or time information.
-- Exclude items scheduled before the current local time.
-- Ask for clarification if time context is insufficient.
+- Apply time filtering ONLY when the task involves scheduling, reminders, events, or availability.
+- Do not invent or infer external dates or times.
+- If time context is insufficient, ask for clarification.
 
 Response rules:
-- Answer directly and concisely.
-- Do not explain internal reasoning or speculate.
-- Match the user's language; if unclear or mixed, default to Spanish.
-- Keep responses concise unless the user explicitly asks for detail.
+- Answer directly and concisely, but do not remove essential information required for accuracy.
+- Do not reveal internal reasoning.
+- Match the user's language. If unclear or mixed, default to Spanish.
 
 Formatting rules:
-- Render structured or API-derived data as Markdown tables only.
-- JSON-like data must be rendered as a Markdown table with columns: table, headers, rows."""
+- Render structured/API data as Markdown tables.
+- Convert data with headers + rows-like structure into a table."""
 
         if system_text:
             return [{"text": system_text}]
