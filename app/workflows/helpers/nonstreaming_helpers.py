@@ -138,17 +138,27 @@ async def generate_complete_llm_only_response(
     store_messages = state.get("store_messages", True)
 
     # Extract LLM parameters from state
-    model_id = llm_config['config']['LLM_MODEL']
+    model_id = state.get("custom_llm") or llm_config['config']['LLM_MODEL']
     prompt = state["cleaned_message"]
     max_tokens = llm_config['config']['LLM_MAX_TOKENS']
     temperature = llm_config['config']['LLM_TEMPERATURE']
     top_p = llm_config['config']['LLM_TOP_P']
-    role_behavior = state["system_behavior"]
+
+    # Build role_behavior based on use_guidelines flag
+    system_behavior = state.get("system_behavior") or ""
+    use_guidelines = state.get("use_guidelines", True)
+
+    if use_guidelines:
+        # Concatenate config ROLE_BEHAVIOR with system_behavior
+        role_behavior = llm_config['config']['ROLE_BEHAVIOR'] + system_behavior
+    else:
+        # Only use system_behavior
+        role_behavior = system_behavior
+
     messages = state.get("conversation_history") or None
     request_timezone = state.get("request_timezone")
     utc_formatted = state.get("utc_formatted")
     local_formatted = state.get("local_formatted")
-    use_guidelines = state.get("use_guidelines", True)
 
     # Validate parameters using shared utility
     validate_llm_parameters(messages, prompt, max_tokens, temperature)

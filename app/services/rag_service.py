@@ -431,7 +431,7 @@ class RagService:
                 }
             }
 
-    async def process_llm_only_n8n(self, user_id: int, message: str, company_id: int, db: Session, created_at: str, chat_id: int, system_behavior: str, request_timezone: str = None, use_guidelines: bool = True, store_messages: bool = True) -> Dict[str, Any]:
+    async def process_llm_only_n8n(self, user_id: int, message: str, company_id: int, db: Session, created_at: str, chat_id: int, system_behavior: str = None, custom_llm: str = None, request_timezone: str = None, use_guidelines: bool = True, store_messages: bool = True) -> Dict[str, Any]:
         """
         Proceso LLM-only sin streaming (para n8n): LLM → response completa (sin embeddings, sin vector stores, sin state builder, sin query rewriter)
         Uses pre-compiled LangGraph LLM-only workflow for modular processing.
@@ -450,7 +450,8 @@ class RagService:
                 system_behavior=system_behavior,
                 request_timezone=request_timezone,
                 use_guidelines=use_guidelines,
-                store_messages=store_messages
+                store_messages=store_messages,
+                custom_llm=custom_llm
             )
 
             # Execute workflow without streaming

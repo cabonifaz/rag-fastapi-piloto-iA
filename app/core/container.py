@@ -140,11 +140,10 @@ class DIContainer:
                         raise ValueError("LLM region is required for AWS provider")
 
                     # Using Converse API - stateless (no message history)
-                    # Initialize with default model, actual model_id comes per-request from database
+                    # Initialize with default model, actual model_id and role_behavior come per-request from database
                     self._llm_provider = AWSBedrockConverseProvider(
                         region=settings.llm_region,
                         model_id="us.meta.llama4-maverick-17b-instruct-v1:0",  # Default/fallback model
-                        role_behavior=None,  # Will be provided per-request from database
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
                         aws_secret_access_key=settings.aws_secret_access_key
@@ -165,11 +164,10 @@ class DIContainer:
                         raise ValueError("LLM region is required for AWS provider")
 
                     # Using non-streaming Converse API for n8n RAG mode
-                    # Initialize with default model, actual model_id comes per-request from database
+                    # Initialize with default model, actual model_id and role_behavior come per-request from database
                     self._llm_nonstreaming_provider = AWSBedrockConverseNonStreamingProvider(
                         region=settings.llm_region,
                         model_id="us.meta.llama4-maverick-17b-instruct-v1:0",  # Default/fallback model
-                        role_behavior=None,  # Will be provided per-request from database
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
                         aws_secret_access_key=settings.aws_secret_access_key
@@ -190,11 +188,10 @@ class DIContainer:
                         raise ValueError("LLM region is required for AWS provider")
 
                     # Using non-streaming Converse API for LLM-only mode (no RAG)
-                    # Initialize with default model, actual model_id comes per-request from database
+                    # Initialize with default model, actual model_id and role_behavior come per-request from database
                     self._llm_only_provider = AWSBedrockConverseProviderLLMOnly(
                         region=settings.llm_region,
                         model_id="us.meta.llama4-maverick-17b-instruct-v1:0",  # Default/fallback model
-                        role_behavior=None,  # Will be provided per-request from database
                         profile_name=settings.aws_profile,
                         aws_access_key_id=settings.aws_access_key_id,
                         aws_secret_access_key=settings.aws_secret_access_key

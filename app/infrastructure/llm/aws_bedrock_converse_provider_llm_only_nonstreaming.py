@@ -58,17 +58,20 @@ class AWSBedrockConverseProviderLLMOnly(LLMNonStreamingPort):
     Usage:
         provider = AWSBedrockConverseProviderLLMOnly(
             region="us-east-1",
-            model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
-            role_behavior="You are a helpful assistant"
+            model_id="anthropic.claude-3-5-sonnet-20241022-v2:0"
         )
 
-        # Generate with automatic fallback
-        response = await provider.generate(prompt="What is AI?")
+        # Generate with role behavior provided per request
+        response = await provider.generate(
+            prompt="What is AI?",
+            role_behavior="You are a helpful assistant"
+        )
         print(response)
 
         # Or with custom fallback models
         response = await provider.generate(
             prompt="What is AI?",
+            role_behavior="You are a helpful assistant",
             fallback_models=["meta.llama3-1-70b-instruct-v1:0"]
         )
         print(response)
@@ -78,7 +81,6 @@ class AWSBedrockConverseProviderLLMOnly(LLMNonStreamingPort):
         self,
         region: str,
         model_id: Optional[str] = None,
-        role_behavior: Optional[str] = None,
         profile_name: Optional[str] = None,
         aws_access_key_id: Optional[str] = None,
         aws_secret_access_key: Optional[str] = None,
@@ -89,7 +91,6 @@ class AWSBedrockConverseProviderLLMOnly(LLMNonStreamingPort):
         Args:
             region: AWS region
             model_id: Bedrock model ID (optional, will be provided per-request from database)
-            role_behavior: Role behavior instructions (optional, will be provided per-request from database)
             profile_name: AWS profile name (optional)
             aws_access_key_id: AWS access key ID (optional)
             aws_secret_access_key: AWS secret access key (optional)
@@ -114,7 +115,6 @@ class AWSBedrockConverseProviderLLMOnly(LLMNonStreamingPort):
 
         self.model_id = model_id
         self.region = region
-        self.default_role_behavior = role_behavior
         self.profile_name = profile_name
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
@@ -137,10 +137,10 @@ class AWSBedrockConverseProviderLLMOnly(LLMNonStreamingPort):
         """Update the system prompt for this provider instance."""
         self.system_prompt = system_prompt
 
-    def _build_system_config(self, custom_system: Optional[str] = None, request_timezone: Optional[str] = None, utc_formatted: str = None, local_formatted: str = None, use_guidelines: bool = True) -> Optional[List[Dict[str, str]]]:
+    def _build_system_config(self, custom_system: str = "", request_timezone: Optional[str] = None, utc_formatted: str = None, local_formatted: str = None, use_guidelines: bool = True) -> Optional[List[Dict[str, str]]]:
         """Build system configuration for Converse API - LLM-Only Mode."""
-        # Use custom role behavior or default
-        role_behavior = custom_system or self.default_role_behavior
+        # Use custom role behavior (always provided from workflow now)
+        role_behavior = custom_system
 
         # LLM-Only mode system prompt - optimized for conversational AI without RAG
         if use_guidelines:
@@ -194,7 +194,7 @@ Temporal rules:
         max_tokens: int = 2048,
         temperature: float = 0.3,
         top_p: float = 0.9,
-        role_behavior: Optional[str] = None,
+        role_behavior: str = "",
         messages: Optional[List[Dict[str, Any]]] = None,
         fallback_models: Optional[List[str]] = None,
         request_timezone: Optional[str] = None,
@@ -218,7 +218,7 @@ Temporal rules:
             max_tokens: Maximum tokens to generate (default: 2048)
             temperature: Temperature for sampling (default: 0.3)
             top_p: Top-p (nucleus) sampling parameter (default: 0.9)
-            role_behavior: Optional role behavior (overrides instance system_prompt)
+            role_behavior: Role behavior/system prompt (required, defaults to empty string)
             messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                      If provided, prompt will be ignored and messages will be used instead
             fallback_models: Optional list of fallback model IDs to try if primary is saturated.
@@ -333,7 +333,7 @@ Temporal rules:
         max_tokens: int = 2048,
         temperature: float = 0.3,
         top_p: float = 0.9,
-        role_behavior: Optional[str] = None,
+        role_behavior: str = "",
         messages: Optional[List[Dict[str, Any]]] = None,
         request_timezone: Optional[str] = None,
         utc_formatted: str = None,
@@ -354,7 +354,7 @@ Temporal rules:
             max_tokens: Maximum tokens to generate
             temperature: Temperature for sampling
             top_p: Top-p (nucleus) sampling parameter
-            role_behavior: Optional role behavior override
+            role_behavior: Role behavior/system prompt (required, defaults to empty string)
             messages: Optional conversation history
             request_timezone: Optional timezone string for the request
             utc_formatted: Formatted UTC timestamp string

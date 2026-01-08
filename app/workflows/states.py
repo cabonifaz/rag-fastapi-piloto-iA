@@ -49,7 +49,8 @@ class LLMOnlyState(TypedDict):
     company_id: int
     created_at: str
     chat_id: str
-    system_behavior: str
+    system_behavior: Optional[str]
+    custom_llm: Optional[str]
     request_timezone: Optional[str]
     use_guidelines: bool
     store_messages: bool

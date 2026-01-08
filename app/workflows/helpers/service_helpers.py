@@ -117,10 +117,11 @@ def build_llm_only_initial_state(
     company_id: int,
     created_at: str,
     chat_id: str,
-    system_behavior: str,
+    system_behavior: Optional[str] = None,
     request_timezone: Optional[str] = None,
     use_guidelines: bool = True,
-    store_messages: bool = True
+    store_messages: bool = True,
+    custom_llm: Optional[str] = None
 ) -> LLMOnlyState:
     """Build initial state for LLM-only workflow execution"""
     return {
@@ -134,6 +135,7 @@ def build_llm_only_initial_state(
         "request_timezone": request_timezone,
         "use_guidelines": use_guidelines,
         "store_messages": store_messages,
+        "custom_llm": custom_llm,
         # Processing state (will be populated by workflow)
         "cleaned_message": None,
         "conversation_history": [],

@@ -33,7 +33,8 @@ class N8NLLMOnlyRequest(BaseModel):
     company_id: int                         # Required, company ID for database operations
     created_at: str                         # Required, message timestamp
     chat_id: int                            # Required, chat ID
-    system_behavior: str                     # Required, custom system behavior/role for the LLM
+    system_behavior: Optional[str] = None    # Optional, custom system behavior/role for the LLM
+    customLLM: Optional[str] = None          # Optional, custom LLM model ID to use
     request_timezone: Optional[str] = None   # Optional, user's timezone for time-aware responses
 
 

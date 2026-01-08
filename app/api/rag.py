@@ -312,8 +312,9 @@ async def chat_n8n_llm_only_endpoint(
             db=db,
             created_at=request.created_at,
             chat_id=request.chat_id,
-            request_timezone=request.request_timezone,
             system_behavior=request.system_behavior,
+            custom_llm=request.customLLM,
+            request_timezone=request.request_timezone,
             use_guidelines=useGuidelines,
             store_messages=storeMessages
         )

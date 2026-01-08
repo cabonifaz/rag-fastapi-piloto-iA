@@ -14,7 +14,7 @@ class LLMNonStreamingPort(ABC):
         prompt: str = None,
         max_tokens: int = 512,
         temperature: float = 0.7,
-        role_behavior: Optional[str] = None,
+        role_behavior: str = "",
         messages: Optional[List[Dict[str, Any]]] = None,
         fallback_models: Optional[List[str]] = None
     ) -> str:
@@ -25,7 +25,7 @@ class LLMNonStreamingPort(ABC):
             prompt: User prompt (used if messages is None)
             max_tokens: Maximum tokens to generate
             temperature: Temperature for sampling
-            role_behavior: Optional role behavior (system prompt)
+            role_behavior: Role behavior/system prompt (required, defaults to empty string)
             messages: Optional conversation history in format [{"role": "user/assistant", "content": "..."}]
                      If provided, prompt will be ignored and messages will be used instead
             fallback_models: Optional list of fallback model IDs to try if primary is saturated
