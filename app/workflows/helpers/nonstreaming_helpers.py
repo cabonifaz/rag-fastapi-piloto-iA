@@ -140,7 +140,14 @@ async def generate_complete_llm_only_response(
     # Extract LLM parameters from state
     model_id = state.get("custom_llm") or llm_config['config']['LLM_MODEL']
     prompt = state["cleaned_message"]
-    max_tokens = llm_config['config']['LLM_MAX_TOKENS']
+
+    # If custom_llm is provided, use fixed max_tokens of 2048
+    custom_llm = state.get("custom_llm")
+    if custom_llm and custom_llm.strip():
+        max_tokens = 2048
+    else:
+        max_tokens = llm_config['config']['LLM_MAX_TOKENS']
+
     temperature = llm_config['config']['LLM_TEMPERATURE']
     top_p = llm_config['config']['LLM_TOP_P']
 
