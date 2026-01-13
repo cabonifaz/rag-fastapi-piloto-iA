@@ -236,3 +236,63 @@ def validate_llm_only_workflow_state(state: Optional[LLMOnlyState]) -> LLMOnlySt
         raise ValueError(f"Workflow incomplete: missing {', '.join(missing_fields)}")
 
     return state
+
+
+def build_llm_only_initial_state_anonymous(
+    user_anonymous_id: int,
+    message: str,
+    company_id: int,
+    created_at: str,
+    chat_anonymous_id: str,
+    system_behavior: Optional[str] = None,
+    request_timezone: Optional[str] = None,
+    use_guidelines: bool = True,
+    store_messages: bool = True,
+    custom_llm: Optional[str] = None
+) -> LLMOnlyState:
+    """Build initial state for anonymous LLM-only workflow execution"""
+    return {
+        # Input parameters
+        "user_anonymous_id": user_anonymous_id,
+        "message": message,
+        "company_id": company_id,
+        "created_at": created_at,
+        "chat_anonymous_id": chat_anonymous_id,
+        "system_behavior": system_behavior,
+        "request_timezone": request_timezone,
+        "use_guidelines": use_guidelines,
+        "store_messages": store_messages,
+        "custom_llm": custom_llm,
+        # Processing state (will be populated by workflow)
+        "cleaned_message": None,
+        "conversation_history": [],
+        "llm_config": None,
+        "assistant_timestamp": None,
+        "assistant_timestamp_ms": None,
+        "utc_formatted": None,
+        "local_formatted": None,
+        # Error handling
+        "error": None,
+        "should_stop": False
+    }
+
+
+def validate_llm_only_workflow_state_anonymous(state: Optional[LLMOnlyState]) -> LLMOnlyState:
+    """
+    Validate that anonymous LLM-only workflow completed successfully.
+    Raises ValueError if state is invalid.
+    """
+    if state is None or state.get("should_stop", False):
+        error_msg = state.get("error", "Unknown error") if state else "Workflow did not complete"
+        raise ValueError(error_msg)
+
+    # Validate required fields
+    if not state.get("chat_anonymous_id") or not state.get("llm_config"):
+        missing_fields = []
+        if not state.get("chat_anonymous_id"):
+            missing_fields.append("chat_anonymous_id")
+        if not state.get("llm_config"):
+            missing_fields.append("llm_config")
+        raise ValueError(f"Workflow incomplete: missing {', '.join(missing_fields)}")
+
+    return state

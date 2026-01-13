@@ -287,3 +287,106 @@ async def generate_complete_llm_only_response(
 
     except Exception as e:
         await handle_llm_error(e, "LLM-only generation")
+
+
+async def generate_complete_llm_only_response_anonymous(
+    state: LLMOnlyState,
+    llm_only_provider: Any,
+    message_service: Any,
+    db: Any
+) -> str:
+    """
+    Generate complete LLM-only response for anonymous chat (non-streaming), update chat, and save message.
+    Consolidates all LLM-only logic including validation and persistence for anonymous chats.
+
+    Args:
+        state: LLMOnlyState with all necessary context
+        llm_only_provider: LLM-only provider
+        message_service: Message service for DynamoDB
+        db: Database session
+
+    Returns:
+        Complete assistant response text
+
+    Raises:
+        ValueError: If parameters are invalid or no response generated
+        ConnectionError: If LLM service is unavailable
+        TimeoutError: If LLM generation times out
+    """
+    from app.workflows.helpers.llm_anonymous_common import (
+        update_chat_last_message_date_anonymous,
+        save_assistant_message_anonymous
+    )
+
+    llm_config = state["llm_config"]
+    chat_anonymous_id = state["chat_anonymous_id"]
+    store_messages = state.get("store_messages", True)
+
+    # Extract LLM parameters from state
+    model_id = state.get("custom_llm") or llm_config['config']['LLM_MODEL']
+    prompt = state["cleaned_message"]
+
+    # If custom_llm is provided, use fixed max_tokens of 2048
+    custom_llm = state.get("custom_llm")
+    if custom_llm and custom_llm.strip():
+        max_tokens = 2048
+    else:
+        max_tokens = llm_config['config']['LLM_MAX_TOKENS']
+
+    temperature = llm_config['config']['LLM_TEMPERATURE']
+    top_p = llm_config['config']['LLM_TOP_P']
+
+    # Build role_behavior based on use_guidelines flag
+    system_behavior = state.get("system_behavior") or ""
+    use_guidelines = state.get("use_guidelines", True)
+
+    if use_guidelines:
+        # Concatenate config ROLE_BEHAVIOR with system_behavior
+        role_behavior = llm_config['config']['ROLE_BEHAVIOR'] + system_behavior
+    else:
+        # Only use system_behavior
+        role_behavior = system_behavior
+
+    messages = state.get("conversation_history") or None
+    request_timezone = state.get("request_timezone")
+    utc_formatted = state.get("utc_formatted")
+    local_formatted = state.get("local_formatted")
+
+    # Validate parameters using shared utility
+    validate_llm_parameters(messages, prompt, max_tokens, temperature)
+
+    try:
+        # Generate complete response using LLM-only provider
+        assistant_response = await llm_only_provider.generate(
+            model_id=model_id,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            role_behavior=role_behavior,
+            messages=messages,
+            request_timezone=request_timezone,
+            utc_formatted=utc_formatted,
+            local_formatted=local_formatted,
+            use_guidelines=use_guidelines
+        )
+
+        # Validate response using shared utility
+        validate_llm_response(assistant_response)
+
+        # Update anonymous chat last message date using shared utility
+        await update_chat_last_message_date_anonymous(db, chat_anonymous_id)
+
+        # Save assistant message to DynamoDB using shared utility for anonymous chat (respects store_messages flag)
+        await save_assistant_message_anonymous(
+            message_service=message_service,
+            chat_anonymous_id=chat_anonymous_id,
+            assistant_timestamp=state["assistant_timestamp"],
+            assistant_response=assistant_response,
+            store_messages=store_messages
+        )
+
+        return assistant_response
+
+    except Exception as e:
+        await handle_llm_error(e, "LLM-only generation for anonymous chat")

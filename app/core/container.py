@@ -463,6 +463,20 @@ class DIContainer:
             query_rewriter=self.get_query_rewriter()
         )
 
+    def initialize_llm_only_anonymous_workflow(self) -> None:
+        """
+        Initialize and compile the LLM-only anonymous workflow graph.
+        Should be called once at application startup.
+        Workflow will be compiled with session_factory and minimal dependencies.
+        """
+        from app.workflows.llm_only_anonymous_workflow import initialize_llm_only_anonymous_workflow
+
+        initialize_llm_only_anonymous_workflow(
+            session_factory=SessionLocal,
+            message_service=self.get_message_service(),
+            ia_config_service=self.get_ia_config_service()
+        )
+
 
 # Global container instance
 container = DIContainer()
