@@ -55,6 +55,8 @@ async def lifespan(app: FastAPI):
         # Workflows use SessionLocal factory to get sessions from pool per-request
         container.initialize_rag_workflow()
         container.initialize_llm_only_workflow()
+        container.initialize_rag_anonymous_workflow()
+        container.initialize_llm_only_anonymous_workflow()
 
         logger.info("Application startup completed successfully")
     except Exception as e:

@@ -444,6 +444,39 @@ class DIContainer:
             ia_config_service=self.get_ia_config_service()
         )
 
+    def initialize_rag_anonymous_workflow(self) -> None:
+        """
+        Initialize and compile the RAG anonymous workflow graph.
+        Should be called once at application startup.
+        Workflow will be compiled with session_factory and all dependencies.
+        """
+        from app.workflows.rag_anonymous_workflow import initialize_rag_anonymous_workflow
+
+        initialize_rag_anonymous_workflow(
+            session_factory=SessionLocal,
+            embeddings_provider=self.get_embeddings_provider(),
+            vectorstore=self.get_vectorstore(),
+            llm_provider=self.get_llm_provider(),
+            message_service=self.get_message_service(),
+            ia_config_service=self.get_ia_config_service(),
+            state_builder=self.get_state_builder(),
+            query_rewriter=self.get_query_rewriter()
+        )
+
+    def initialize_llm_only_anonymous_workflow(self) -> None:
+        """
+        Initialize and compile the LLM-only anonymous workflow graph.
+        Should be called once at application startup.
+        Workflow will be compiled with session_factory and minimal dependencies.
+        """
+        from app.workflows.llm_only_anonymous_workflow import initialize_llm_only_anonymous_workflow
+
+        initialize_llm_only_anonymous_workflow(
+            session_factory=SessionLocal,
+            message_service=self.get_message_service(),
+            ia_config_service=self.get_ia_config_service()
+        )
+
 
 # Global container instance
 container = DIContainer()

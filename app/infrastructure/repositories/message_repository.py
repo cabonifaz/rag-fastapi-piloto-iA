@@ -71,6 +71,51 @@ class MessageRepository:
             logger.error(f"Error saving message for chat_id {chat_id}: {e}")
             raise
 
+    async def create_message_anonymous(
+        self,
+        chat_anonymous_id: int,
+        created_at: str,
+        sender: int,
+        message: str,
+        id_estado_registro: int = 1
+    ) -> None:
+        """
+        Save a message to DynamoDB for anonymous chat (async).
+
+        Args:
+            chat_anonymous_id: Anonymous chat identifier
+            created_at: Timestamp as string (milliseconds since epoch)
+            sender: 0 = user, 1 = assistant
+            message: Message content
+            id_estado_registro: Status (default: 1 = active)
+
+        Raises:
+            Exception: If message save fails
+        """
+        try:
+            # Convert chat_anonymous_id to DynamoDB format: "anon-{id}"
+            chat_id_str = f"anon-{chat_anonymous_id}"
+
+            # Create composite key for GSI
+            chat_id_estado = f"{chat_id_str}#{id_estado_registro}"
+
+            item = {
+                'chat_id': chat_id_str,
+                'created_at': created_at,
+                'id_estado_registro': id_estado_registro,
+                'chat_id#id_estado_registro': chat_id_estado,
+                'sender': sender,
+                'message': message
+            }
+
+            async with get_dynamodb_resource() as dynamodb:
+                table = await dynamodb.Table(self.table_name)
+                await table.put_item(Item=item)
+
+        except Exception as e:
+            logger.error(f"Error saving message for chat_anonymous_id {chat_anonymous_id}: {e}")
+            raise
+
     async def get_messages_by_chat(
         self,
         chat_id: str,
@@ -168,6 +213,53 @@ class MessageRepository:
 
         except Exception as e:
             logger.error(f"Error getting messages for chat_id {chat_id}: {e}")
+            return {'messages': [], 'count': 0, 'last_evaluated_key': None}
+
+    async def get_last_n_messages_by_chat_anonymous(
+        self,
+        chat_anonymous_id: str,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get messages for a specific anonymous chat without pagination (async).
+
+        Args:
+            chat_anonymous_id: Anonymous chat identifier (e.g., "anon-123")
+            limit: Maximum number of messages to return
+
+        Returns:
+            Dictionary with messages list and count
+        """
+        try:
+            # Ensure chat_anonymous_id has the "anon-" prefix
+            if not chat_anonymous_id.startswith('anon-'):
+                chat_anonymous_id = f"anon-{chat_anonymous_id}"
+
+            gsi_pk_value = f"{chat_anonymous_id}#1"
+
+            query_params = {
+                'IndexName': 'chat_id_id_estado_registro_created_at_index',
+                'KeyConditionExpression': Key('chat_id#id_estado_registro').eq(gsi_pk_value),
+                'Limit': limit,
+                'ScanIndexForward': False
+            }
+
+            async with get_dynamodb_resource() as dynamodb:
+                table = await dynamodb.Table(self.table_name)
+                response = await table.query(**query_params)
+
+            # Fetch newest first, then reverse to get oldest to newest for display
+            messages = response.get('Items', [])
+            messages.reverse()
+
+            return {
+                'messages': messages,
+                'count': response.get('Count', 0),
+                'last_evaluated_key': response.get('LastEvaluatedKey')
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting messages for chat_anonymous_id {chat_anonymous_id}: {e}")
             return {'messages': [], 'count': 0, 'last_evaluated_key': None}
 
     async def count_messages(
