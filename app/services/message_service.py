@@ -21,25 +21,40 @@ class MessageService:
 
     def __init__(self):
         self.repository = MessageRepository()
+        # ParametrosService is used to fetch dynamic limits from DB (e.g., SP_PARAMETROS_LST '11')
+        from app.services.parametros_service import ParametrosService
+        self.parametros_service = ParametrosService()
 
     async def get_messages_by_chat(
         self,
         chat_id: str,
-        limit: int = 20,
-        last_evaluated_key: Optional[Dict[str, Any]] = None
+        limit: int | None = None,
+        last_evaluated_key: Optional[Dict[str, Any]] = None,
+        db: object = None
     ) -> MessageListResponse:
         """
         Get messages for a specific chat with pagination.
 
         Args:
             chat_id: Chat identifier
-            limit: Maximum number of messages to return
+            limit: Maximum number of messages to return. If None, it will be loaded from DB param (NUM1=11).
             last_evaluated_key: For pagination.
+            db: Optional SQLAlchemy Session used to read parameters
 
         Returns:
             MessageListResponse with a list of messages and pagination info.
         """
         try:
+            # If limit not provided, load from DB parameter NUM1=11 (expected to be 15)
+            if limit is None:
+                try:
+                    # Pass db session if provided; default fallback 15
+                    limit_from_db = await self.parametros_service.get_numeric_param(db, 11, default=15)
+                    limit = int(limit_from_db or 15)
+                except Exception:
+                    # Fallback to a safe default
+                    limit = 15
+
             # Delegate the database call to the repository (now awaited)
             response_data = await self.repository.get_messages_by_chat(
                 chat_id=chat_id,
@@ -106,19 +121,28 @@ class MessageService:
     async def get_last_n_messages(
         self,
         chat_id: str,
-        n: int = 10
+        n: int | None = None,
+        db: object = None
     ) -> List[MessageResponse]:
         """
         Get the last N messages for a chat (most recent)
 
         Args:
             chat_id: Chat identifier
-            n: Number of recent messages to retrieve
+            n: Number of recent messages to retrieve. If None, it will be loaded from DB param (NUM1=11).
+            db: Optional SQLAlchemy Session used to read parameters
 
         Returns:
             List of MessageResponse (ordered from oldest to newest)
         """
         try:
+            if n is None:
+                try:
+                    n_from_db = await self.parametros_service.get_numeric_param(db, 11, default=15)
+                    n = int(n_from_db or 15)
+                except Exception:
+                    n = 15
+
             # Use get_last_n_messages_by_chat instead of get_last_n_messages (now awaited)
             response_data = await self.repository.get_last_n_messages_by_chat(
                 chat_id=chat_id,
