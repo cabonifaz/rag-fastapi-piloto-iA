@@ -26,6 +26,17 @@ class N8NRequest(BaseModel):
     request_timezone: Optional[str] = None   # Optional, user's timezone for time-aware responses
 
 
+class N8NAnonymousRequest(BaseModel):
+    """Request Schema for n8n non-streaming anonymous chat endpoint."""
+    message: str
+    user_anonymous_id: int                  # Required, anonymous user ID for database operations
+    company_id: int                         # Required, company ID for database operations
+    area_id: int                            # Required, area ID for database operations
+    created_at: str                         # Required, message timestamp
+    chat_anonymous_id: int                  # Required, anonymous chat ID
+    request_timezone: Optional[str] = None   # Optional, user's timezone for time-aware responses
+
+
 class N8NLLMOnlyRequest(BaseModel):
     """Request Schema for n8n non-streaming LLM-only endpoint (no area required)."""
     message: str

@@ -431,6 +431,76 @@ class RagService:
                 }
             }
 
+    async def process_rag_query_n8n_anonymous(self, user_anonymous_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_anonymous_id: int, request_timezone: str = None) -> Dict[str, Any]:
+        """
+        Proceso RAG completo sin streaming para chats anónimos (para n8n): embeddings → search → LLM → response completa
+        Uses pre-compiled LangGraph anonymous workflow for modular processing with complete response.
+        """
+        from app.workflows.rag_anonymous_workflow import (
+            get_compiled_rag_anonymous_workflow,
+            build_initial_state_anonymous,
+            validate_workflow_state_anonymous,
+            generate_complete_llm_response_anonymous
+        )
+        from app.workflows.helpers.nonstreaming_helpers import execute_workflow_n8n
+
+        try:
+            # Get pre-compiled anonymous workflow
+            app = get_compiled_rag_anonymous_workflow()
+
+            # Build initial state for anonymous chat
+            initial_state = build_initial_state_anonymous(
+                user_anonymous_id=user_anonymous_id,
+                message=message,
+                company_id=company_id,
+                area_id=area_id,
+                created_at=created_at,
+                chat_anonymous_id=str(chat_anonymous_id),
+                request_timezone=request_timezone
+            )
+
+            # Execute workflow without streaming
+            result_state = await execute_workflow_n8n(app, initial_state)
+
+            # Validate workflow completed successfully
+            result_state = validate_workflow_state_anonymous(result_state)
+
+            # Generate complete LLM response and save for anonymous chat
+            assistant_response = await generate_complete_llm_response_anonymous(
+                state=result_state,
+                llm_nonstreaming_provider=self.llm_nonstreaming_provider,
+                message_service=self.message_service,
+                db=db
+            )
+
+            # Return successful response
+            return {
+                "response": assistant_response,
+                "result": {
+                    "idTipoMensaje": 2,
+                    "mensaje": "Respuesta generada correctamente"
+                }
+            }
+
+        except ValueError as e:
+            # Workflow validation errors
+            logger.error(f"Anonymous workflow error: {e}")
+            return {
+                "result": {
+                    "idTipoMensaje": 1,
+                    "mensaje": str(e)
+                }
+            }
+        except Exception as e:
+            # Unexpected errors
+            logger.error(f"Error in process_rag_query_n8n_anonymous: {e}", exc_info=True)
+            return {
+                "result": {
+                    "idTipoMensaje": 1,
+                    "mensaje": f"Error al procesar la consulta anónima: {str(e)}"
+                }
+            }
+
     async def process_llm_only_n8n(self, user_id: int, message: str, company_id: int, db: Session, created_at: str, chat_id: int, system_behavior: str = None, custom_llm: str = None, request_timezone: str = None, use_guidelines: bool = True, store_messages: bool = True) -> Dict[str, Any]:
         """
         Proceso LLM-only sin streaming (para n8n): LLM → response completa (sin embeddings, sin vector stores, sin state builder, sin query rewriter)

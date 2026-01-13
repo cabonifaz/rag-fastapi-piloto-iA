@@ -109,6 +109,88 @@ async def generate_complete_llm_response(
         await handle_llm_error(e, "LLM generation")
 
 
+async def generate_complete_llm_response_anonymous(
+    state: RAGState,
+    llm_nonstreaming_provider: Any,
+    message_service: Any,
+    db: Any
+) -> str:
+    """
+    Generate complete LLM response for anonymous chat (non-streaming), update chat, and save message.
+    Consolidates all non-streaming LLM logic including validation and persistence for anonymous chats.
+
+    Args:
+        state: RAGState with all necessary context
+        llm_nonstreaming_provider: Non-streaming LLM provider
+        message_service: Message service for DynamoDB
+        db: Database session
+
+    Returns:
+        Complete assistant response text
+
+    Raises:
+        ValueError: If parameters are invalid or no response generated
+        ConnectionError: If LLM service is unavailable
+        TimeoutError: If LLM generation times out
+    """
+    from app.workflows.helpers.llm_anonymous_common import (
+        update_chat_last_message_date_anonymous,
+        save_assistant_message_anonymous
+    )
+
+    rag_config = state["rag_config"]
+    chat_anonymous_id = state["chat_anonymous_id"]
+
+    # Extract LLM parameters from state
+    model_id = rag_config['config']['LLM_MODEL']
+    prompt = state["rag_prompt"]
+    max_tokens = rag_config['config']['LLM_MAX_TOKENS']
+    temperature = rag_config['config']['LLM_TEMPERATURE']
+    top_p = rag_config['config']['LLM_TOP_P']
+    role_behavior = rag_config['config']['ROLE_BEHAVIOR']
+    messages = state.get("conversation_history_for_prompt") or None
+    request_timezone = state.get("request_timezone")
+    utc_formatted = state.get("utc_formatted")
+    local_formatted = state.get("local_formatted")
+
+    # Validate parameters using shared utility
+    validate_llm_parameters(messages, prompt, max_tokens, temperature)
+
+    try:
+        # Generate complete response using non-streaming provider
+        assistant_response = await llm_nonstreaming_provider.generate(
+            model_id=model_id,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            role_behavior=role_behavior,
+            messages=messages,
+            request_timezone=request_timezone,
+            utc_formatted=utc_formatted,
+            local_formatted=local_formatted
+        )
+
+        # Validate response using shared utility
+        validate_llm_response(assistant_response)
+
+        # Update anonymous chat last message date using shared utility
+        await update_chat_last_message_date_anonymous(db, chat_anonymous_id)
+
+        # Save assistant message to DynamoDB using shared utility for anonymous chat
+        await save_assistant_message_anonymous(
+            message_service=message_service,
+            chat_anonymous_id=chat_anonymous_id,
+            assistant_timestamp=state["assistant_timestamp"],
+            assistant_response=assistant_response
+        )
+
+        return assistant_response
+
+    except Exception as e:
+        await handle_llm_error(e, "LLM generation for anonymous chat")
+
+
 async def generate_complete_llm_only_response(
     state: LLMOnlyState,
     llm_only_provider: Any,

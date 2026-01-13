@@ -27,6 +27,12 @@ from app.workflows.nodes.preprocessing_nodes import (
     create_clean_message_node,
     create_load_rag_config_node
 )
+from app.workflows.nodes.conversation_anonymous_nodes import (
+    create_get_conversation_history_anonymous_node
+)
+from app.workflows.nodes.chat_anonymous_nodes import (
+    create_save_user_message_anonymous_node
+)
 
 __all__ = [
     # Validation
@@ -50,4 +56,7 @@ __all__ = [
     # Preprocessing
     'create_clean_message_node',
     'create_load_rag_config_node',
+    # Anonymous
+    'create_get_conversation_history_anonymous_node',
+    'create_save_user_message_anonymous_node',
 ]

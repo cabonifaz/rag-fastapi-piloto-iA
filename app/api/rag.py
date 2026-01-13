@@ -20,7 +20,7 @@ from app.models.response_models import (
     create_error_response,
     create_warning_response
 )
-from app.models.rag_models import UnifiedRequest, N8NRequest, N8NLLMOnlyRequest, AgentStreamingRequest
+from app.models.rag_models import UnifiedRequest, N8NRequest, N8NAnonymousRequest, N8NLLMOnlyRequest, AgentStreamingRequest
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -249,6 +249,115 @@ async def chat_n8n_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in n8n endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
+
+
+@router.post("/chat-n8n-anonymous")
+async def chat_n8n_anonymous_endpoint(
+    request: N8NAnonymousRequest,
+    rag_service: RagService = Depends(get_rag_service),
+    db: Session = Depends(get_db),
+    current_agent: Dict[str, Any] = Depends(get_current_agent_with_company_area_validation)
+):
+    """
+    Non-streaming chat endpoint for n8n integration with RAG-powered answer generation for anonymous chats.
+
+    Requires agent JWT authentication token in Authorization header.
+    Validates agent access to requested company_id and area_id.
+
+    Returns complete response in a single JSON object (no streaming).
+
+    Response format:
+    {
+        "response": "Complete LLM response text",
+        "result": {
+            "idTipoMensaje": 2,  // 2 = success, 1 = error
+            "mensaje": "Respuesta generada correctamente"
+        }
+    }
+
+    Error format:
+    {
+        "result": {
+            "idTipoMensaje": 1,
+            "mensaje": "Error message"
+        }
+    }
+    """
+    try:
+        # Validate role - only role 4 (Agente-IA) is allowed
+        role_id = current_agent.get('ID_TIPO_ROL')
+        if role_id != 4:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
+        agent_id = current_agent.get('ID_AGENTE')
+        logger.info(f"[N8N ANONYMOUS REQUEST] Agent ID: {agent_id}, User Anonymous ID: {request.user_anonymous_id}, Message: {request.message}")
+
+        # Call non-streaming RAG service for anonymous chat
+        result = await rag_service.process_rag_query_n8n_anonymous(
+            user_anonymous_id=request.user_anonymous_id,
+            message=request.message,
+            company_id=request.company_id,
+            area_id=request.area_id,
+            db=db,
+            created_at=request.created_at,
+            chat_anonymous_id=request.chat_anonymous_id,
+            request_timezone=request.request_timezone
+        )
+
+        logger.info(f"[N8N ANONYMOUS RESPONSE] Result type: {result.get('result', {}).get('idTipoMensaje')}")
+
+        # Check if the result indicates an error (idTipoMensaje = 1)
+        if result.get("result", {}).get("idTipoMensaje") == 1:
+            # Return error response with 400 status
+            logger.error(f"[N8N ANONYMOUS ERROR] {result.get('result', {}).get('mensaje')}")
+            raise HTTPException(status_code=400, detail=result)
+
+        # Return successful response
+        return result
+
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
+
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        logger.error(f"AWS Client error in n8n anonymous endpoint: {error_code} - {e}")
+        error_msg = "Error del servicio de modelo de lenguaje"
+        if error_code == 'ValidationException':
+            error_msg = "Parámetros inválidos para el modelo de lenguaje"
+        elif error_code == 'ThrottlingException':
+            error_msg = "Límite de tasa excedido. Por favor, inténtelo de nuevo más tarde"
+        error_response = create_error_response(error_msg)
+        raise HTTPException(status_code=503, detail={"result": error_response.model_dump()})
+
+    except (NoCredentialsError, EndpointConnectionError, ConnectionError) as e:
+        logger.error(f"Connection error in n8n anonymous endpoint: {e}")
+        error_response = create_error_response("Error de conexión del servicio")
+        raise HTTPException(status_code=503, detail={"result": error_response.model_dump()})
+
+    except TimeoutError as e:
+        logger.error(f"Timeout error in n8n anonymous endpoint: {e}")
+        error_response = create_error_response("Tiempo de espera de la solicitud agotado")
+        raise HTTPException(status_code=504, detail={"result": error_response.model_dump()})
+
+    except ValueError as e:
+        logger.error(f"Invalid input for n8n anonymous endpoint: {e}")
+        error_msg = str(e)
+        error_response = create_error_response(error_msg)
+        raise HTTPException(status_code=400, detail={"result": error_response.model_dump()})
+
+    except ValidationError as e:
+        logger.error(f"Validation error in n8n anonymous endpoint: {e}")
+        error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
+        raise HTTPException(status_code=422, detail={"result": error_response.model_dump()})
+
+    except Exception as e:
+        logger.error(f"Unexpected error in n8n anonymous endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
 
