@@ -6,9 +6,8 @@ from typing import Any, Optional
 from langgraph.graph import StateGraph, END
 import logging
 
-from app.workflows.states import RAGState
+from app.workflows.states import RAGAnonymousState
 from app.workflows.nodes import (
-    create_validate_inputs_node,
     create_clean_message_node,
     create_build_query_state_node,
     create_rewrite_query_node,
@@ -21,6 +20,7 @@ from app.workflows.nodes import (
     create_build_rag_prompt_node,
     create_prepare_timestamps_node
 )
+from app.workflows.nodes.validation_nodes import create_validate_inputs_node_anonymous
 from app.workflows.nodes.conversation_anonymous_nodes import create_get_conversation_history_anonymous_node
 from app.workflows.nodes.chat_anonymous_nodes import create_save_user_message_anonymous_node
 
@@ -57,7 +57,7 @@ def create_rag_anonymous_workflow(
         Compiled StateGraph ready to execute
     """
     # Create nodes using factory functions
-    validate_inputs = create_validate_inputs_node()
+    validate_inputs = create_validate_inputs_node_anonymous()
     get_conversation_history_anonymous = create_get_conversation_history_anonymous_node(message_service)
     clean_message = create_clean_message_node()
     build_query_state = create_build_query_state_node(state_builder)
@@ -73,7 +73,7 @@ def create_rag_anonymous_workflow(
     prepare_timestamps = create_prepare_timestamps_node()
 
     # Build the workflow graph
-    workflow = StateGraph(RAGState)
+    workflow = StateGraph(RAGAnonymousState)
 
     # Add all nodes
     workflow.add_node("validate_inputs", validate_inputs)

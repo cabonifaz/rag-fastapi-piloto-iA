@@ -2,7 +2,7 @@
 Workflow nodes package.
 Exports all node factory functions for workflow assembly.
 """
-from app.workflows.nodes.validation_nodes import create_validate_inputs_node
+from app.workflows.nodes.validation_nodes import create_validate_inputs_node, create_validate_inputs_node_anonymous
 from app.workflows.nodes.conversation_nodes import (
     create_get_conversation_history_node,
     create_build_query_state_node,
@@ -37,6 +37,7 @@ from app.workflows.nodes.chat_anonymous_nodes import (
 __all__ = [
     # Validation
     'create_validate_inputs_node',
+    'create_validate_inputs_node_anonymous',
     # Conversation
     'create_get_conversation_history_node',
     'create_build_query_state_node',
