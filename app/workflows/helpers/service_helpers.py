@@ -3,7 +3,7 @@ Service layer helper functions.
 Utilities for building state, validation, and event generation.
 """
 from typing import Optional
-from app.workflows.states import RAGState, LLMOnlyState
+from app.workflows.states import RAGState, RAGAnonymousState, LLMOnlyState, LLMOnlyAnonymousState
 
 
 def build_initial_state(
@@ -58,7 +58,7 @@ def build_initial_state_anonymous(
     created_at: str,
     chat_anonymous_id: Optional[str] = None,
     request_timezone: Optional[str] = None
-) -> RAGState:
+) -> RAGAnonymousState:
     """Build initial state for anonymous workflow execution"""
     return {
         # Input parameters
@@ -117,7 +117,7 @@ def validate_workflow_state(state: Optional[RAGState]) -> RAGState:
     return state
 
 
-def validate_workflow_state_anonymous(state: Optional[RAGState]) -> RAGState:
+def validate_workflow_state_anonymous(state: Optional[RAGAnonymousState]) -> RAGAnonymousState:
     """
     Validate that anonymous workflow completed successfully.
     Raises ValueError if state is invalid.
@@ -249,7 +249,7 @@ def build_llm_only_initial_state_anonymous(
     use_guidelines: bool = True,
     store_messages: bool = True,
     custom_llm: Optional[str] = None
-) -> LLMOnlyState:
+) -> LLMOnlyAnonymousState:
     """Build initial state for anonymous LLM-only workflow execution"""
     return {
         # Input parameters
@@ -277,7 +277,7 @@ def build_llm_only_initial_state_anonymous(
     }
 
 
-def validate_llm_only_workflow_state_anonymous(state: Optional[LLMOnlyState]) -> LLMOnlyState:
+def validate_llm_only_workflow_state_anonymous(state: Optional[LLMOnlyAnonymousState]) -> LLMOnlyAnonymousState:
     """
     Validate that anonymous LLM-only workflow completed successfully.
     Raises ValueError if state is invalid.

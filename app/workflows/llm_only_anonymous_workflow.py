@@ -6,8 +6,8 @@ from typing import Any, Optional
 from langgraph.graph import StateGraph, END
 import logging
 
-from app.workflows.states import LLMOnlyState
-from app.workflows.nodes.validation_nodes import create_validate_inputs_node
+from app.workflows.states import LLMOnlyAnonymousState
+from app.workflows.nodes.validation_nodes import create_validate_inputs_node_anonymous
 from app.workflows.nodes.conversation_anonymous_nodes import create_get_conversation_history_anonymous_node
 from app.workflows.nodes.preprocessing_nodes import create_clean_message_node, create_load_rag_config_node
 from app.workflows.nodes.chat_anonymous_nodes import create_save_user_message_anonymous_node
@@ -37,7 +37,7 @@ def create_llm_only_anonymous_workflow(
         Compiled StateGraph ready to execute
     """
     # Create nodes using existing factory functions with LLM-only parameters
-    validate_inputs = create_validate_inputs_node(require_area_id=False)  # No area required
+    validate_inputs = create_validate_inputs_node_anonymous(require_area_id=False)  # No area required
     get_conversation_history_anonymous = create_get_conversation_history_anonymous_node(message_service, max_ctx=8)  # Max 8 for LLM-only
     clean_message = create_clean_message_node()  # Reuse as-is
     load_config = create_load_rag_config_node(session_factory, ia_config_service, area_required=False)  # Load LLM config
@@ -45,7 +45,7 @@ def create_llm_only_anonymous_workflow(
     prepare_timestamps = create_prepare_timestamps_node()  # Reuse as-is
 
     # Build the workflow graph
-    workflow = StateGraph(LLMOnlyState)
+    workflow = StateGraph(LLMOnlyAnonymousState)
 
     # Add all nodes
     workflow.add_node("validate_inputs", validate_inputs)

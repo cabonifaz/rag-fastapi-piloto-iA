@@ -4,7 +4,7 @@ Handles complete response generation for N8N integrations.
 """
 import logging
 from typing import Any
-from app.workflows.states import RAGState, LLMOnlyState
+from app.workflows.states import RAGState, RAGAnonymousState, LLMOnlyState, LLMOnlyAnonymousState
 from app.workflows.helpers.llm_common import (
     validate_llm_parameters,
     validate_llm_response,
@@ -110,7 +110,7 @@ async def generate_complete_llm_response(
 
 
 async def generate_complete_llm_response_anonymous(
-    state: RAGState,
+    state: RAGAnonymousState,
     llm_nonstreaming_provider: Any,
     message_service: Any,
     db: Any
@@ -120,7 +120,7 @@ async def generate_complete_llm_response_anonymous(
     Consolidates all non-streaming LLM logic including validation and persistence for anonymous chats.
 
     Args:
-        state: RAGState with all necessary context
+        state: RAGAnonymousState with all necessary context
         llm_nonstreaming_provider: Non-streaming LLM provider
         message_service: Message service for DynamoDB
         db: Database session
@@ -290,7 +290,7 @@ async def generate_complete_llm_only_response(
 
 
 async def generate_complete_llm_only_response_anonymous(
-    state: LLMOnlyState,
+    state: LLMOnlyAnonymousState,
     llm_only_provider: Any,
     message_service: Any,
     db: Any
@@ -300,7 +300,7 @@ async def generate_complete_llm_only_response_anonymous(
     Consolidates all LLM-only logic including validation and persistence for anonymous chats.
 
     Args:
-        state: LLMOnlyState with all necessary context
+        state: LLMOnlyAnonymousState with all necessary context
         llm_only_provider: LLM-only provider
         message_service: Message service for DynamoDB
         db: Database session
