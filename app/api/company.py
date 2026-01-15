@@ -1,8 +1,8 @@
 """API endpoints for company management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 
 from app.core.database import get_db
@@ -409,6 +409,87 @@ async def upload_company_logo_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in upload_company_logo endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.get("/get_companies_paginated")
+async def get_companies_paginated_endpoint(
+    page: int = Query(default=1, ge=1, description="Número de página (mínimo 1)"),
+    page_size: int = Query(default=10, ge=1, le=100, description="Filas por página (1-100)"),
+    search: Optional[str] = Query(default=None, max_length=200, description="Término de búsqueda"),
+    order_field: str = Query(
+        default='RAZON_SOCIAL',
+        regex='^(ID_EMPRESA|RUC|RAZON_SOCIAL|FCHCRE|FCHMOD|ID_ESTADO_REGISTRO)$',
+        description="Campo de ordenamiento"
+    ),
+    order_direction: str = Query(
+        default='ASC',
+        regex='^(ASC|DESC)$',
+        description="Dirección de ordenamiento"
+    ),
+    company_service: CompanyService = Depends(get_company_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Get paginated companies endpoint.
+
+    Fetches companies with server-side pagination using SP_EMPRESAS_LST_PAG.
+    Requires JWT authentication and SuperAdmin role.
+
+    Query Parameters:
+        page: Page number (default 1, minimum 1)
+        page_size: Items per page (default 10, range 1-100)
+        search: Optional search term for filtering by RAZON_SOCIAL or RUC
+        order_field: Field to order by (default RAZON_SOCIAL)
+        order_direction: Order direction ASC or DESC (default ASC)
+        
+    Returns:
+        Dict with:
+        - data: List of company dictionaries
+        - pagination: Dictionary with total_records, current_page, page_size, total_pages
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for permission errors, 500 for server errors
+    """
+    try:
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        # Check if user is SuperAdmin (role_id = 1)
+        if role_id != 1:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
+        # Get paginated companies using service
+        result = await company_service.get_companies_paginated(
+            db=db,
+            page_number=page,
+            page_size=page_size,
+            search_term=search if search else None,
+            order_field=order_field,
+            order_direction=order_direction
+        )
+
+        success_response = create_success_response("Empresas obtenidas exitosamente")
+        return {
+            "data": result.get('data', []),
+            "pagination": result.get('pagination', {}),
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_companies_paginated endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,

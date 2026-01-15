@@ -1,6 +1,6 @@
 """Service for managing company operations following hexagonal architecture."""
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 import time
 from sqlalchemy.orm import Session
@@ -286,4 +286,59 @@ class CompanyService:
             raise
         except Exception as e:
             logger.error(f"Error generating logo presigned URL: {e}")
+            raise
+
+
+    async def get_companies_paginated(
+        self,
+        db: Session,
+        page_number: int = 1,
+        page_size: int = 10,
+        search_term: Optional[str] = None,
+        order_field: str = 'RAZON_SOCIAL',
+        order_direction: str = 'ASC'
+    ) -> Dict[str, Any]:
+        """
+        Get paginated companies using stored procedure SP_EMPRESAS_LST_PAG.
+
+        Args:
+            db: Database session
+            page_number: Page number (default 1)
+            page_size: Items per page (default 10)
+            search_term: Optional search term for RAZON_SOCIAL or RUC
+            order_field: Field to order by (default 'RAZON_SOCIAL')
+            order_direction: Order direction ASC or DESC (default 'ASC')
+
+        Returns:
+            Dictionary containing:
+            - data: List of company dictionaries
+            - pagination: Dictionary with pagination metadata
+        """
+        try:
+            # Create repository for this request
+            repository = CompanyRepository(db)
+
+            # Get paginated companies from repository
+            result = repository.get_companies_paginated(
+                page_number=page_number,
+                page_size=page_size,
+                search_term=search_term,
+                order_field=order_field,
+                order_direction=order_direction
+            )
+
+            if result and result.get('data'):
+                logger.info(
+                    f"Retrieved {len(result['data'])} companies "
+                    f"(page {result['pagination'].get('current_page')} of {result['pagination'].get('total_pages')}, "
+                    f"total: {result['pagination'].get('total_records')}, "
+                    f"ordered by: {order_field} {order_direction})"
+                )
+            else:
+                logger.warning("No paginated companies found")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in get_companies_paginated service: {e}")
             raise

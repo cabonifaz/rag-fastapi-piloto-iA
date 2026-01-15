@@ -354,3 +354,91 @@ class CompanyRepository:
             logger.error(f"Error updating company logo with SP: {e}")
             self.db.rollback()
             return []
+
+
+    @retry_on_db_error(max_retries=3, delay=1)
+    def get_companies_paginated(
+        self,
+        page_number: int = 1,
+        page_size: int = 10,
+        search_term: Optional[str] = None,
+        order_field: str = 'RAZON_SOCIAL',
+        order_direction: str = 'ASC'
+    ) -> Dict[str, Any]:
+        """
+        Get paginated companies using stored procedure SP_EMPRESAS_LST_PAG
+
+        Args:
+            page_number: Page number (default 1)
+            page_size: Items per page (default 10)
+            search_term: Optional search term for RAZON_SOCIAL or RUC
+            order_field: Field to order by (default 'RAZON_SOCIAL')
+            order_direction: Order direction ASC or DESC (default 'ASC')
+
+        Returns:
+            Dictionary with:
+            - data: List of company dictionaries
+            - pagination: Dictionary with total_records, current_page, page_size, total_pages
+            Empty dict if fetch failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_EMPRESAS_LST_PAG @PageNumber = ?, @PageSize = ?, @SearchTerm = ?, @OrderField = ?, @OrderDirection = ?",
+                    page_number,
+                    page_size,
+                    search_term,
+                    order_field,
+                    order_direction
+                )
+
+                companies = []
+                pagination_info = {}
+
+                # Get the company data with pagination metadata
+                if cursor.description:
+                    columns = [desc[0] for desc in cursor.description]
+                    rows = cursor.fetchall()
+
+                    # Extract pagination info from first row
+                    if rows:
+                        first_row = rows[0]
+                        row_dict = dict(zip(columns, first_row))
+
+                        # Extract pagination metadata
+                        pagination_info = {
+                            'total_records': row_dict.get('TotalRecords', 0),
+                            'current_page': row_dict.get('CurrentPage', page_number),
+                            'page_size': row_dict.get('PageSize', page_size),
+                            'total_pages': row_dict.get('TotalPages', 0)
+                        }
+
+                        # Convert all rows to dictionaries and remove pagination metadata
+                        for row in rows:
+                            company_dict = dict(zip(columns, row))
+                            # Remove pagination metadata columns
+                            company_dict.pop('TotalRecords', None)
+                            company_dict.pop('CurrentPage', None)
+                            company_dict.pop('PageSize', None)
+                            company_dict.pop('TotalPages', None)
+                            companies.append(company_dict)
+
+                cursor.close()
+
+                return {
+                    'data': companies,
+                    'pagination': pagination_info
+                }
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_companies_paginated: {cursor_error}")
+                cursor.close()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error fetching paginated companies with SP: {e}")
+            return {'data': [], 'pagination': {}}
