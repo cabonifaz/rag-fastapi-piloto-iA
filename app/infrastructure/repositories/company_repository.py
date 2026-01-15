@@ -359,6 +359,7 @@ class CompanyRepository:
     @retry_on_db_error(max_retries=3, delay=1)
     def get_companies_paginated(
         self,
+        user_id: int,
         page_number: int = 1,
         page_size: int = 10,
         search_term: Optional[str] = None,
@@ -369,6 +370,7 @@ class CompanyRepository:
         Get paginated companies using stored procedure SP_EMPRESAS_LST_PAG
 
         Args:
+            user_id: User ID for permission filtering
             page_number: Page number (default 1)
             page_size: Items per page (default 10)
             search_term: Optional search term for RAZON_SOCIAL or RUC
@@ -379,6 +381,7 @@ class CompanyRepository:
             Dictionary with:
             - data: List of company dictionaries
             - pagination: Dictionary with total_records, current_page, page_size, total_pages
+            - message_result: Dict with ID_TIPO_MENSAJE and MENSAJE if authorization error
             Empty dict if fetch failed
         """
         try:
@@ -388,57 +391,99 @@ class CompanyRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_EMPRESAS_LST_PAG @PageNumber = ?, @PageSize = ?, @SearchTerm = ?, @OrderField = ?, @OrderDirection = ?",
+                    "EXEC SP_EMPRESAS_LST_PAG @PageNumber = ?, @PageSize = ?, @SearchTerm = ?, @OrderField = ?, @OrderDirection = ?, @ID_USUARIO = ?",
                     page_number,
                     page_size,
                     search_term,
                     order_field,
-                    order_direction
+                    order_direction,
+                    user_id
                 )
 
                 companies = []
                 pagination_info = {}
+                message_result = None
+                result_set_num = 0
 
-                # Get the company data with pagination metadata
-                if cursor.description:
-                    columns = [desc[0] for desc in cursor.description]
-                    rows = cursor.fetchall()
+                # Iterate through all result sets
+                while True:
+                    result_set_num += 1
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
 
-                    # Extract pagination info from first row
-                    if rows:
-                        first_row = rows[0]
-                        row_dict = dict(zip(columns, first_row))
+                            # Check if this result set contains the message columns (authorization error)
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
 
-                        # Extract pagination metadata
-                        pagination_info = {
-                            'total_records': row_dict.get('TotalRecords', 0),
-                            'current_page': row_dict.get('CurrentPage', page_number),
-                            'page_size': row_dict.get('PageSize', page_size),
-                            'total_pages': row_dict.get('TotalPages', 0)
-                        }
+                            # Check if this result set contains company data
+                            has_company_data = 'ID_EMPRESA' in columns and 'RUC' in columns and 'TotalRecords' in columns
 
-                        # Convert all rows to dictionaries and remove pagination metadata
-                        for row in rows:
-                            company_dict = dict(zip(columns, row))
-                            # Remove pagination metadata columns
-                            company_dict.pop('TotalRecords', None)
-                            company_dict.pop('CurrentPage', None)
-                            company_dict.pop('PageSize', None)
-                            company_dict.pop('TotalPages', None)
-                            companies.append(company_dict)
+                            if has_message_columns and rows:
+                                # This is an authorization error message
+                                row = rows[0]
+                                result_dict = dict(zip(columns, row))
+                                # Convert Decimal to int for ID_TIPO_MENSAJE
+                                if 'ID_TIPO_MENSAJE' in result_dict:
+                                    result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                message_result = result_dict
+                                logger.warning(f"Authorization error from SP: {result_dict.get('MENSAJE')}")
+
+                            elif has_company_data and rows:
+                                # This is the company data with pagination
+                                # Extract pagination info from first row
+                                first_row = rows[0]
+                                row_dict = dict(zip(columns, first_row))
+
+                                pagination_info = {
+                                    'total_records': row_dict.get('TotalRecords', 0),
+                                    'current_page': row_dict.get('CurrentPage', page_number),
+                                    'page_size': row_dict.get('PageSize', page_size),
+                                    'total_pages': row_dict.get('TotalPages', 0)
+                                }
+
+                                # Convert all rows to dictionaries and remove pagination metadata
+                                for row in rows:
+                                    company_dict = dict(zip(columns, row))
+                                    # Remove pagination metadata columns
+                                    company_dict.pop('TotalRecords', None)
+                                    company_dict.pop('CurrentPage', None)
+                                    company_dict.pop('PageSize', None)
+                                    company_dict.pop('TotalPages', None)
+                                    companies.append(company_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
 
                 cursor.close()
+                self.db.commit()
 
                 return {
                     'data': companies,
-                    'pagination': pagination_info
+                    'pagination': pagination_info,
+                    'message_result': message_result
                 }
 
             except Exception as cursor_error:
                 logger.error(f"Cursor error in get_companies_paginated: {cursor_error}")
                 cursor.close()
+                self.db.rollback()
                 raise
 
         except Exception as e:
             logger.error(f"Error fetching paginated companies with SP: {e}")
+            self.db.rollback()
             return {'data': [], 'pagination': {}}

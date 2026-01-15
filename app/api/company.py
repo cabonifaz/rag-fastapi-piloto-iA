@@ -435,47 +435,39 @@ async def get_companies_paginated_endpoint(
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """
-    Get paginated companies endpoint.
-
-    Fetches companies with server-side pagination using SP_EMPRESAS_LST_PAG.
-    Requires JWT authentication and SuperAdmin role.
-
-    Query Parameters:
-        page: Page number (default 1, minimum 1)
-        page_size: Items per page (default 10, range 1-100)
-        search: Optional search term for filtering by RAZON_SOCIAL or RUC
-        order_field: Field to order by (default RAZON_SOCIAL)
-        order_direction: Order direction ASC or DESC (default ASC)
-        
-    Returns:
-        Dict with:
-        - data: List of company dictionaries
-        - pagination: Dictionary with total_records, current_page, page_size, total_pages
-        - result: Success/error response
-
-    Raises:
-        HTTPException: 401 for auth errors, 403 for permission errors, 500 for server errors
-    """
     try:
-        role_id = current_user.get('ID_TIPO_ROL')
-
-        # Check if user is SuperAdmin (role_id = 1)
-        if role_id != 1:
+        user_id = current_user.get('ID_USUARIO')
+        
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
             raise HTTPException(
-                status_code=403,
-                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+                status_code=400,
+                detail={"result": error_response.model_dump()}
             )
 
-        # Get paginated companies using service
         result = await company_service.get_companies_paginated(
             db=db,
+            user_id=user_id,
             page_number=page,
             page_size=page_size,
             search_term=search if search else None,
             order_field=order_field,
             order_direction=order_direction
         )
+
+        # Check if there's an authorization error from the SP
+        if result.get('message_result'):
+            message_result = result['message_result']
+            tipo_mensaje = message_result.get('ID_TIPO_MENSAJE')
+            mensaje = message_result.get('MENSAJE', 'Error desconocido')
+            
+            # Log the authorization error
+            logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje}: {mensaje}")
+            
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+            )
 
         success_response = create_success_response("Empresas obtenidas exitosamente")
         return {
@@ -485,7 +477,6 @@ async def get_companies_paginated_endpoint(
         }
 
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
 
     except Exception as e:

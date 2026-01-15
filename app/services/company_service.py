@@ -292,40 +292,34 @@ class CompanyService:
     async def get_companies_paginated(
         self,
         db: Session,
+        user_id: int,
         page_number: int = 1,
         page_size: int = 10,
         search_term: Optional[str] = None,
         order_field: str = 'RAZON_SOCIAL',
         order_direction: str = 'ASC'
     ) -> Dict[str, Any]:
-        """
-        Get paginated companies using stored procedure SP_EMPRESAS_LST_PAG.
-
-        Args:
-            db: Database session
-            page_number: Page number (default 1)
-            page_size: Items per page (default 10)
-            search_term: Optional search term for RAZON_SOCIAL or RUC
-            order_field: Field to order by (default 'RAZON_SOCIAL')
-            order_direction: Order direction ASC or DESC (default 'ASC')
-
-        Returns:
-            Dictionary containing:
-            - data: List of company dictionaries
-            - pagination: Dictionary with pagination metadata
-        """
         try:
-            # Create repository for this request
             repository = CompanyRepository(db)
 
-            # Get paginated companies from repository
             result = repository.get_companies_paginated(
+                user_id=user_id,
                 page_number=page_number,
                 page_size=page_size,
                 search_term=search_term,
                 order_field=order_field,
                 order_direction=order_direction
             )
+
+            # Check if there's an authorization error message
+            if result.get('message_result'):
+                message_result = result['message_result']
+                logger.warning(f"Authorization error for user {user_id}: {message_result.get('MENSAJE')}")
+                return {
+                    'data': [],
+                    'pagination': {},
+                    'message_result': message_result
+                }
 
             if result and result.get('data'):
                 logger.info(
