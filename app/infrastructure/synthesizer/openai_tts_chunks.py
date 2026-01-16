@@ -28,7 +28,7 @@ class OpenAITTSChunks:
         self,
         api_key: Optional[str] = None,
         model: str = "gpt-4o-mini-tts",
-        voice: str = "aloy",
+        voice: str = "shimmer",
         response_format: str = "pcm",
     ):
         self.api_key = api_key or getattr(settings, "openai_api_key", None)
@@ -50,8 +50,9 @@ class OpenAITTSChunks:
             return
 
         instructions = instructions or (
-            "Speak naturally, clearly, and at a conversational pace. "
-            "Pause slightly at punctuation."
+            "Speak in neutral Latin American Spanish. "
+            "Speak clearly at a fast, natural conversational pace."
+            "Pause briefly at punctuation."
         )
 
         async with self._semaphore:
