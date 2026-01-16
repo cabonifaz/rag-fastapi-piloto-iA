@@ -1,5 +1,8 @@
 from typing import Dict, Any, AsyncGenerator, Optional
 import logging
+import asyncio
+import base64
+import time
 from sqlalchemy.orm import Session
 
 # Domain ports (for dependency injection in __init__)
@@ -14,6 +17,9 @@ from app.domain.ports.query_rewriter import QueryRewriterPort
 # Services (for dependency injection in __init__)
 from app.services.message_service import MessageService
 from app.services.ia_config_service import IaConfigService
+
+# TTS provider
+from app.infrastructure.synthesizer.openai_tts_chunks import OpenAITTSChunks
 
 # Workflows (everything else is in here now!)
 from app.workflows.rag_workflow import (
@@ -307,7 +313,8 @@ class RagService:
         db: Session,
         created_at: str,
         chat_id: str = None,
-        request_timezone: str = None
+        request_timezone: str = None,
+        tts: bool = False
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
@@ -344,13 +351,65 @@ class RagService:
                 yield event
 
             # Stream LLM response and save message
-            async for chunk_event in stream_llm_response(
-                state=result_state,
-                llm_provider=self.llm_provider,
-                message_service=self.message_service,
-                db=db
-            ):
-                yield chunk_event
+            if tts:
+                # TTS enabled: buffer text and generate audio chunks
+                tts_provider = OpenAITTSChunks()
+                tts_buffer = ""
+                last_tts_time = time.time()
+                min_buffer_size = 40
+                tts_timeout = 1.2
+                punctuation = ".!?:;"
+
+                async def generate_tts_audio(text: str):
+                    """Generate and yield TTS audio chunks for buffered text."""
+                    async for audio_chunk in tts_provider.synthesize_chunks(text):
+                        yield {
+                            "type": "audio_chunk",
+                            "content": base64.b64encode(audio_chunk).decode("utf-8")
+                        }
+
+                async for chunk_event in stream_llm_response(
+                    state=result_state,
+                    llm_provider=self.llm_provider,
+                    message_service=self.message_service,
+                    db=db
+                ):
+                    # Always yield text chunk immediately
+                    yield chunk_event
+
+                    if chunk_event["type"] == "chunk":
+                        tts_buffer += chunk_event["content"]
+                        current_time = time.time()
+
+                        # Check TTS trigger conditions
+                        should_generate_tts = (
+                            len(tts_buffer) >= min_buffer_size and
+                            (tts_buffer.rstrip()[-1:] in punctuation or
+                             current_time - last_tts_time >= tts_timeout)
+                        )
+
+                        if should_generate_tts and tts_buffer.strip():
+                            # Generate TTS for buffered text
+                            async for audio_event in generate_tts_audio(tts_buffer):
+                                yield audio_event
+                            tts_buffer = ""
+                            last_tts_time = current_time
+
+                # Flush remaining buffer
+                if tts_buffer.strip():
+                    async for audio_event in generate_tts_audio(tts_buffer):
+                        yield audio_event
+
+                await tts_provider.close()
+            else:
+                # TTS disabled: stream text only
+                async for chunk_event in stream_llm_response(
+                    state=result_state,
+                    llm_provider=self.llm_provider,
+                    message_service=self.message_service,
+                    db=db
+                ):
+                    yield chunk_event
 
             # Send completion signal
             yield {

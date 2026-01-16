@@ -22,21 +22,14 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAITTSChunks:
-    """
-    OpenAI TTS provider for realtime / chunk-based audio generation.
-
-    Designed for:
-    - RAG + LLM streaming responses
-    - Reading text as it is generated
-    - Minimal latency audio playback
-    """
+    _semaphore = asyncio.Semaphore(3)
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         model: str = "gpt-4o-mini-tts",
         voice: str = "aloy",
-        response_format: str = "pcm",  # pcm = fastest, wav = compatible
+        response_format: str = "pcm",
     ):
         self.api_key = api_key or getattr(settings, "openai_api_key", None)
         if not self.api_key:
@@ -45,51 +38,33 @@ class OpenAITTSChunks:
         self.model = model
         self.voice = voice
         self.response_format = response_format
-
         self.client = AsyncOpenAI(api_key=self.api_key)
-
-        logger.info(
-            f"OpenAI TTS initialized | model={model} voice={voice} format={response_format}"
-        )
 
     async def synthesize_chunks(
         self,
         text: str,
         instructions: Optional[str] = None,
     ) -> AsyncGenerator[bytes, None]:
-        """
-        Generate speech audio in streaming chunks.
 
-        Args:
-            text: Text to convert to speech
-            instructions: Optional voice/style instructions
+        if not text or len(text.strip()) < 3:
+            return
 
-        Yields:
-            Audio chunks (raw PCM or WAV bytes depending on response_format)
-        """
+        instructions = instructions or (
+            "Speak naturally, clearly, and at a conversational pace. "
+            "Pause slightly at punctuation."
+        )
 
-        logger.debug(f"Generating TTS audio | chars={len(text)}")
-
-        async with self.client.audio.speech.with_streaming_response.create(
-            model=self.model,
-            voice=self.voice,
-            input=text,
-            instructions=instructions,
-            response_format=self.response_format,  # pcm or wav
-        ) as response:
-
-            async for chunk in response.iter_bytes():
-                if chunk:
-                    yield chunk
-
-        logger.debug("TTS streaming completed")
+        async with self._semaphore:
+            async with self.client.audio.speech.with_streaming_response.create(
+                model=self.model,
+                voice=self.voice,
+                input=text,
+                instructions=instructions,
+                response_format=self.response_format,
+            ) as response:
+                async for chunk in response.iter_bytes():
+                    if chunk:
+                        yield chunk
 
     async def close(self) -> None:
-        """
-        Cleanup resources.
-        """
-        try:
-            await self.client.close()
-            logger.info("OpenAI TTS client closed")
-        except Exception as e:
-            logger.error(f"Error closing OpenAI TTS client: {e}")
+        await self.client.close()

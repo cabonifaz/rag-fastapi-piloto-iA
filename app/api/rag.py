@@ -70,15 +70,20 @@ async def chat_streaming_endpoint(
                     db=db,
                     created_at=request.created_at,
                     chat_id=request.chat_id,
-                    request_timezone=request.request_timezone
+                    request_timezone=request.request_timezone,
+                    tts=request.tts
                 ):
                     if chunk_data["type"] == "chunk":
-                        # Concatenate content
+                        # Concatenate text content
                         answer += chunk_data["content"]
-                        output = f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
+                        output = f"data: {json.dumps({'type': 'text_chunk', 'content': answer})}\n\n"
+                        yield output
+                    elif chunk_data["type"] == "audio_chunk":
+                        # Pass audio chunk as-is (base64 encoded)
+                        output = f"data: {json.dumps({'type': 'audio_chunk', 'content': chunk_data['content']})}\n\n"
                         yield output
                     else:
-                        # Send metadata and complete as-is
+                        # Send metadata, progress, complete, and errors as-is
                         output = f"data: {json.dumps(chunk_data)}\n\n"
                         yield output
 
