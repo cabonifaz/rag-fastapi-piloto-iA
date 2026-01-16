@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 import json
 from typing import Optional, Dict, Any
 import logging
+from sqlalchemy.orm import Session
+from app.core.database import get_db
 
 from app.services.message_service import MessageService
 from app.models.message_models import (
@@ -28,8 +30,9 @@ def get_message_service() -> MessageService:
 @router.post("/chat", response_model=MessageListResponse)
 async def get_messages_by_chat_endpoint(
     request: GetMessagesByChat,
-    limit: int = Query(50, ge=1, le=100, description="Maximum messages to return"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Maximum messages to return (if omitted, loaded from DB parameter)") ,
     last_evaluated_key: Optional[str] = Query(None, description="Pagination key (JSON string)"),
+    db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation),
     message_service: MessageService = Depends(get_message_service)
 ):
@@ -69,7 +72,8 @@ async def get_messages_by_chat_endpoint(
         message_list = await message_service.get_messages_by_chat(
             chat_id=request.chat_id,
             limit=limit,
-            last_evaluated_key=last_key
+            last_evaluated_key=last_key,
+            db=db
         )
 
         return message_list
