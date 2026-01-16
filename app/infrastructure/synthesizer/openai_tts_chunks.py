@@ -28,7 +28,7 @@ class OpenAITTSChunks:
         self,
         api_key: Optional[str] = None,
         model: str = "gpt-4o-mini-tts",
-        voice: str = "shimmer",
+        voice: str = "nova",
         response_format: str = "pcm",
     ):
         self.api_key = api_key or getattr(settings, "openai_api_key", None)
