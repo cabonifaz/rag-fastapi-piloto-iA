@@ -309,113 +309,6 @@ async def get_companies_login_endpoint(
     return result
 
 
-@router.post("/upload_logo")
-async def upload_company_logo_endpoint(
-    request: CompanyLogoUploadRequest,
-    company_service: CompanyService = Depends(get_company_service),
-    db: Session = Depends(get_db),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-):
-    """
-    Generate presigned URL for company logo upload endpoint.
-
-    Generates presigned S3 URL and updates database with logo path.
-    Frontend then uploads the logo file directly to S3 using the presigned URL.
-    Requires JWT authentication and SuperAdmin role.
-
-    Args:
-        request: CompanyLogoUploadRequest with id_empresa and logo_filename
-
-    Returns:
-        Dict with:
-        - presigned_url: S3 presigned PUT URL (5 min expiration)
-        - s3_key: S3 object key path
-        - logo_filename: Original filename
-        - results: DB update results
-        - result: Success/error response
-
-    Raises:
-        HTTPException: 400 for validation errors, 403 for permission errors, 500 for server errors
-    """
-    try:
-        user_id = current_user.get('ID_USUARIO')
-        role_id = current_user.get('ID_TIPO_ROL')
-
-        if not user_id:
-            error_response = create_error_response("Informacion de usuario incompleta en el token")
-            raise HTTPException(
-                status_code=400,
-                detail={"result": error_response.model_dump()}
-            )
-
-        # Check if user is SuperAdmin (role_id = 1)
-        if role_id != 1:
-            raise HTTPException(
-                status_code=403,
-                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
-            )
-
-        # Generate presigned URL and update database
-        result = await company_service.generate_logo_presigned_url(
-            db=db,
-            id_usuario=user_id,
-            id_empresa=request.id_empresa,
-            logo_filename=request.logo_filename
-        )
-
-        # Check if the stored procedure returned an error
-        if result.get('results') and 'ID_TIPO_MENSAJE' in result['results'][0]:
-            tipo_mensaje = result['results'][0].get('ID_TIPO_MENSAJE')
-            mensaje = result['results'][0].get('MENSAJE', 'Error desconocido')
-
-            # Log when ID_TIPO_MENSAJE is not 2 (success)
-            if tipo_mensaje != 2:
-                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje}: {mensaje}")
-
-            if tipo_mensaje == 1:
-                raise HTTPException(
-                    status_code=403,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
-                )
-            elif tipo_mensaje == 3:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
-                )
-
-        # Invalidate companies cache after successful logo upload
-        companies_cache.clear("companies_login")
-
-        success_response = create_success_response("Presigned URL generada exitosamente")
-        return {
-            "presigned_url": result['presigned_url'],
-            "s3_key": result['s3_key'],
-            "logo_filename": result['logo_filename'],
-            "result": success_response.model_dump()
-        }
-
-    except ValueError as ve:
-        # Handle validation errors from service (e.g., invalid file type)
-        logger.warning(f"Validation error in upload_company_logo endpoint: {ve}")
-        error_response = create_error_response(str(ve))
-        raise HTTPException(
-            status_code=400,
-            detail={"result": error_response.model_dump()}
-        )
-
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
-        raise
-
-    except Exception as e:
-        logger.error(f"Unexpected error in upload_company_logo endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(
-            status_code=500,
-            detail={"result": error_response.model_dump()}
-        )
-
-
 @router.get("/get_companies_paginated")
 async def get_companies_paginated_endpoint(
     page: int = Query(default=1, ge=1, description="Número de página (mínimo 1)"),
@@ -423,7 +316,7 @@ async def get_companies_paginated_endpoint(
     search: Optional[str] = Query(default=None, max_length=200, description="Término de búsqueda"),
     order_field: str = Query(
         default='RAZON_SOCIAL',
-        regex='^(ID_EMPRESA|RUC|RAZON_SOCIAL|FCHCRE|FCHMOD|ID_ESTADO_REGISTRO)$',
+        regex='^(ID_EMPRESA|RUC|RAZON_SOCIAL|FCHCRE|ID_ESTADO_REGISTRO)$',
         description="Campo de ordenamiento"
     ),
     order_direction: str = Query(
@@ -431,10 +324,34 @@ async def get_companies_paginated_endpoint(
         regex='^(ASC|DESC)$',
         description="Dirección de ordenamiento"
     ),
+    status_filter: Optional[int] = Query(default=None, ge=0, le=1, description="Filtro de estado: 0=inactivo, 1=activo, null=todos"),  
     company_service: CompanyService = Depends(get_company_service),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
+    """
+    Get paginated companies endpoint.
+
+    Fetches paginated companies using SP_EMPRESAS_LST_PAG with server-side pagination,
+    sorting, and search. Requires JWT authentication and validates role permissions.
+
+    Query Parameters:
+        page: Page number (starting at 1)
+        page_size: Number of items per page (1-100)
+        search: Optional search term for RAZON_SOCIAL or RUC
+        order_field: Field to sort by (default 'RAZON_SOCIAL')
+        order_direction: Sort direction ASC or DESC (default 'ASC')
+        status_filter: Filter by status (0=inactive, 1=active, null=all)
+
+    Returns:
+        Dict with:
+        - data: List of company dictionaries
+        - pagination: Object with total_records, current_page, page_size, total_pages
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 400 for validation errors, 403 for permission errors, 500 for server errors
+    """
     try:
         user_id = current_user.get('ID_USUARIO')
         
@@ -445,29 +362,42 @@ async def get_companies_paginated_endpoint(
                 detail={"result": error_response.model_dump()}
             )
 
+        # Call service with Spanish parameter names
         result = await company_service.get_companies_paginated(
             db=db,
-            user_id=user_id,
-            page_number=page,
-            page_size=page_size,
-            search_term=search if search else None,
-            order_field=order_field,
-            order_direction=order_direction
+            id_usuario=user_id,
+            num_pagina=page,
+            tam_pagina=page_size,
+            term_busqueda=search if search else None,
+            campo_orden=order_field,
+            dir_orden=order_direction,
+            filtro_estado=status_filter
         )
 
-        # Check if there's an authorization error from the SP
-        if result.get('message_result'):
+        # ✅ Check if there's a message from the SP
+        if result.get('message_result'):  # ✅ Cambio aquí: message_result en vez de results
             message_result = result['message_result']
             tipo_mensaje = message_result.get('ID_TIPO_MENSAJE')
             mensaje = message_result.get('MENSAJE', 'Error desconocido')
             
-            # Log the authorization error
-            logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje}: {mensaje}")
             
-            raise HTTPException(
-                status_code=403,
-                detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
-            )
+            if tipo_mensaje == 2:
+                logger.info(f"SP returned success message: {mensaje}")
+        
+            
+            elif tipo_mensaje == 1:
+                logger.warning(f"SP returned business error: {mensaje}")
+                raise HTTPException(
+                    status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+                     
+            elif tipo_mensaje == 3:
+                logger.error(f"SP returned technical error: {mensaje}")
+                raise HTTPException(
+                    status_code=422,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
 
         success_response = create_success_response("Empresas obtenidas exitosamente")
         return {

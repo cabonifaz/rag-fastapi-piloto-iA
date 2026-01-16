@@ -292,44 +292,70 @@ class CompanyService:
     async def get_companies_paginated(
         self,
         db: Session,
-        user_id: int,
-        page_number: int = 1,
-        page_size: int = 10,
-        search_term: Optional[str] = None,
-        order_field: str = 'RAZON_SOCIAL',
-        order_direction: str = 'ASC'
+        id_usuario: int,
+        num_pagina: int = 1,
+        tam_pagina: int = 10,
+        term_busqueda: Optional[str] = None,
+        campo_orden: str = 'RAZON_SOCIAL',
+        dir_orden: str = 'ASC',
+        filtro_estado: Optional[int] = None
     ) -> Dict[str, Any]:
+        """
+        Get paginated companies using stored procedure SP_EMPRESAS_LST_PAG.
+
+        Args:
+            db: Database session
+            id_usuario: User ID for role validation
+            num_pagina: Page number (starting at 1)
+            tam_pagina: Number of rows per page
+            term_busqueda: Optional search term for RAZON_SOCIAL or RUC
+            campo_orden: Field to sort by (default 'RAZON_SOCIAL')
+            dir_orden: Sort direction ASC or DESC (default 'ASC')
+            filtro_estado: Optional filter for company status (1=active, 0=deleted)
+        Returns:
+            Dictionary with:
+                - data: List of company dictionaries
+                - pagination: Dictionary with pagination metadata
+                - message_result: Dict with ID_TIPO_MENSAJE and MENSAJE if error/authorization
+        """
         try:
             repository = CompanyRepository(db)
 
             result = repository.get_companies_paginated(
-                user_id=user_id,
-                page_number=page_number,
-                page_size=page_size,
-                search_term=search_term,
-                order_field=order_field,
-                order_direction=order_direction
+                id_usuario=id_usuario,
+                num_pagina=num_pagina,
+                tam_pagina=tam_pagina,
+                term_busqueda=term_busqueda,
+                campo_orden=campo_orden,
+                dir_orden=dir_orden,
+                filtro_estado=filtro_estado
             )
 
             # Check if there's an authorization error message
-            if result.get('message_result'):
-                message_result = result['message_result']
-                logger.warning(f"Authorization error for user {user_id}: {message_result.get('MENSAJE')}")
-                return {
-                    'data': [],
-                    'pagination': {},
-                    'message_result': message_result
-                }
+            message_result = result.get('message_result')
 
-            if result and result.get('data'):
-                logger.info(
-                    f"Retrieved {len(result['data'])} companies "
-                    f"(page {result['pagination'].get('current_page')} of {result['pagination'].get('total_pages')}, "
-                    f"total: {result['pagination'].get('total_records')}, "
-                    f"ordered by: {order_field} {order_direction})"
-                )
-            else:
-                logger.warning("No paginated companies found")
+            if message_result:
+                tipo = message_result.get('ID_TIPO_MENSAJE')
+
+                if tipo == 1:
+                    logger.warning(f"Business error for user {id_usuario}: {message_result.get('MENSAJE')}")
+                    return {
+                        'data': [],
+                        'pagination': {},
+                        'message_result': message_result
+                    }
+
+                if tipo == 3:
+                    logger.error(f"Technical error for user {id_usuario}: {message_result.get('MENSAJE')}")
+                    return {
+                        'data': [],
+                        'pagination': {},
+                        'message_result': message_result
+                    }
+
+                if tipo == 2:
+                    logger.info(f"SP success message: {message_result.get('MENSAJE')}")
+
 
             return result
 
