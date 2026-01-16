@@ -1,6 +1,6 @@
 """Service for managing company operations following hexagonal architecture."""
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 import time
 from sqlalchemy.orm import Session
@@ -286,4 +286,79 @@ class CompanyService:
             raise
         except Exception as e:
             logger.error(f"Error generating logo presigned URL: {e}")
+            raise
+
+
+    async def get_companies_paginated(
+        self,
+        db: Session,
+        id_usuario: int,
+        num_pagina: int = 1,
+        tam_pagina: int = 10,
+        term_busqueda: Optional[str] = None,
+        campo_orden: str = 'RAZON_SOCIAL',
+        dir_orden: str = 'ASC',
+        filtro_estado: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Get paginated companies using stored procedure SP_EMPRESAS_LST_PAG.
+
+        Args:
+            db: Database session
+            id_usuario: User ID for role validation
+            num_pagina: Page number (starting at 1)
+            tam_pagina: Number of rows per page
+            term_busqueda: Optional search term for RAZON_SOCIAL or RUC
+            campo_orden: Field to sort by (default 'RAZON_SOCIAL')
+            dir_orden: Sort direction ASC or DESC (default 'ASC')
+            filtro_estado: Optional filter for company status (1=active, 0=deleted)
+        Returns:
+            Dictionary with:
+                - data: List of company dictionaries
+                - pagination: Dictionary with pagination metadata
+                - message_result: Dict with ID_TIPO_MENSAJE and MENSAJE if error/authorization
+        """
+        try:
+            repository = CompanyRepository(db)
+
+            result = repository.get_companies_paginated(
+                id_usuario=id_usuario,
+                num_pagina=num_pagina,
+                tam_pagina=tam_pagina,
+                term_busqueda=term_busqueda,
+                campo_orden=campo_orden,
+                dir_orden=dir_orden,
+                filtro_estado=filtro_estado
+            )
+
+            # Check if there's an authorization error message
+            message_result = result.get('message_result')
+
+            if message_result:
+                tipo = message_result.get('ID_TIPO_MENSAJE')
+
+                if tipo == 1:
+                    logger.warning(f"Business error for user {id_usuario}: {message_result.get('MENSAJE')}")
+                    return {
+                        'data': [],
+                        'pagination': {},
+                        'message_result': message_result
+                    }
+
+                if tipo == 3:
+                    logger.error(f"Technical error for user {id_usuario}: {message_result.get('MENSAJE')}")
+                    return {
+                        'data': [],
+                        'pagination': {},
+                        'message_result': message_result
+                    }
+
+                if tipo == 2:
+                    logger.info(f"SP success message: {message_result.get('MENSAJE')}")
+
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in get_companies_paginated service: {e}")
             raise
