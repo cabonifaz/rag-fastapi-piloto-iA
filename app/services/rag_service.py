@@ -1,8 +1,6 @@
 from typing import Dict, Any, AsyncGenerator, Optional
 import logging
 import asyncio
-import base64
-import time
 from sqlalchemy.orm import Session
 
 # Domain ports (for dependency injection in __init__)
@@ -18,8 +16,8 @@ from app.domain.ports.query_rewriter import QueryRewriterPort
 from app.services.message_service import MessageService
 from app.services.ia_config_service import IaConfigService
 
-# TTS provider
-from app.infrastructure.synthesizer.openai_tts_chunks import OpenAITTSChunks
+# TTS streaming workflow
+from app.workflows.tts_streaming import stream_with_tts
 
 # Workflows (everything else is in here now!)
 from app.workflows.rag_workflow import (
@@ -77,7 +75,8 @@ class RagService:
         query_rewriter: QueryRewriterPort,
         orchestrator: Optional[QueryAnalysisPort] = None,
         llm_nonstreaming_provider: LLMNonStreamingPort = None,
-        llm_only_provider: LLMNonStreamingPort = None
+        llm_only_provider: LLMNonStreamingPort = None,
+        tts_provider = None  # Optional: inject for connection reuse
     ):
         """
         Initialize RagService with all dependencies injected.
@@ -93,6 +92,7 @@ class RagService:
             orchestrator: Optional port for query analysis and task decomposition
             llm_nonstreaming_provider: Optional port for non-streaming LLM operations (for n8n RAG mode)
             llm_only_provider: Optional port for non-streaming LLM operations in LLM-only mode (no RAG)
+            tts_provider: Optional TTS provider for connection reuse (recommended for production)
         """
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
@@ -104,6 +104,7 @@ class RagService:
         self.orchestrator = orchestrator
         self.llm_nonstreaming_provider = llm_nonstreaming_provider
         self.llm_only_provider = llm_only_provider
+        self.tts_provider = tts_provider
 
     # async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
     #     """
@@ -352,55 +353,21 @@ class RagService:
 
             # Stream LLM response and save message
             if tts:
-                # TTS enabled: buffer text and generate audio chunks
-                tts_provider = OpenAITTSChunks()
-                tts_buffer = ""
-                last_tts_time = time.time()
-                min_buffer_size = 40
-                tts_timeout = 1.2
-                punctuation = ".!?:;"
-
-                async def generate_tts_audio(text: str):
-                    """Generate and yield TTS audio chunks for buffered text."""
-                    async for audio_chunk in tts_provider.synthesize_chunks(text):
-                        yield {
-                            "type": "audio_chunk",
-                            "content": base64.b64encode(audio_chunk).decode("utf-8")
-                        }
-
-                async for chunk_event in stream_llm_response(
+                # TTS enabled: use the TTS streaming workflow
+                llm_stream = stream_llm_response(
                     state=result_state,
                     llm_provider=self.llm_provider,
                     message_service=self.message_service,
                     db=db
+                )
+
+                # Use injected TTS provider if available (connection reuse)
+                async for event in stream_with_tts(
+                    llm_stream,
+                    tts_provider=self.tts_provider,
+                    debug=True
                 ):
-                    # Always yield text chunk immediately
-                    yield chunk_event
-
-                    if chunk_event["type"] == "chunk":
-                        tts_buffer += chunk_event["content"]
-                        current_time = time.time()
-
-                        # Check TTS trigger conditions
-                        should_generate_tts = (
-                            len(tts_buffer) >= min_buffer_size and
-                            (tts_buffer.rstrip()[-1:] in punctuation or
-                             current_time - last_tts_time >= tts_timeout)
-                        )
-
-                        if should_generate_tts and tts_buffer.strip():
-                            # Generate TTS for buffered text
-                            async for audio_event in generate_tts_audio(tts_buffer):
-                                yield audio_event
-                            tts_buffer = ""
-                            last_tts_time = current_time
-
-                # Flush remaining buffer
-                if tts_buffer.strip():
-                    async for audio_event in generate_tts_audio(tts_buffer):
-                        yield audio_event
-
-                await tts_provider.close()
+                    yield event
             else:
                 # TTS disabled: stream text only
                 async for chunk_event in stream_llm_response(
