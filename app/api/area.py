@@ -1,8 +1,8 @@
 """API endpoints for area management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 
 from app.core.database import get_db
@@ -10,7 +10,7 @@ from app.core.container import container
 from app.services.area_service import AreaService
 from app.models.response_models import create_success_response, create_error_response
 from app.models.area_models import AreaCreateRequest, AreaUpdateStatusRequest, AreaUpdateNameRequest
-from app.utils.jwt_auth import get_current_user_with_company_validation
+from app.utils.jwt_auth import get_current_user, get_current_user_with_company_validation
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +393,127 @@ async def get_areas_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in get_areas endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.get("/get_areas_paginated/{id_empresa}")
+async def get_areas_paginated_endpoint(
+    id_empresa: int,
+    num_pagina: int = Query(default=1, ge=1, description="Número de página (mínimo 1)"),
+    tam_pagina: int = Query(default=10, ge=1, le=100, description="Filas por página (1-100)"),
+    term_busqueda: Optional[str] = Query(default=None, max_length=200, description="Término de búsqueda"),
+    campo_orden: str = Query(
+        default='AREA',
+        pattern='^(ID_AREA|AREA|FCHCRE|ID_ESTADO_REGISTRO)$',
+        description="Campo de ordenamiento"
+    ),
+    dir_orden: str = Query(
+        default='ASC',
+        pattern='^(ASC|DESC)$',
+        description="Dirección de ordenamiento"
+    ),
+    filtro_estado: Optional[int] = Query(default=None, ge=0, le=1, description="Filtro de estado (None=todos, 1=activo, 0=inactivo)"),
+    area_service: AreaService = Depends(get_area_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Get paginated areas endpoint.
+
+    Fetches paginated areas using SP_AREAS_LST_PAG with server-side pagination,
+    sorting, and search. Requires JWT authentication and validates role permissions.
+
+    Path Parameters:
+        id_empresa: Company ID
+
+    Query Parameters:
+        num_pagina: Page number (starting at 1)
+        tam_pagina: Number of items per page (1-100)
+        term_busqueda: Optional search term for AREA
+        campo_orden: Field to sort by (default 'AREA')
+        dir_orden: Sort direction ASC or DESC (default 'ASC')
+
+    Returns:
+        Dict with:
+        - areas: List of area dictionaries with pagination metadata
+        - total_paginas: Total number of pages
+        - total_registros: Total number of records
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 400 for validation errors, 403 for permission errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Call service with Spanish parameter names
+        result = await area_service.get_areas_paginated(
+            db=db,
+            id_usuario=user_id,
+            id_empresa=id_empresa,
+            num_pagina=num_pagina,
+            tam_pagina=tam_pagina,
+            term_busqueda=term_busqueda if term_busqueda else None,
+            campo_orden=campo_orden,
+            dir_orden=dir_orden,
+            filtro_estado=filtro_estado
+        )
+
+        # Check if there's a message from the SP
+        if result.get('message_result'):
+            message_result = result['message_result']
+            tipo_mensaje = message_result.get('ID_TIPO_MENSAJE')
+            mensaje = message_result.get('MENSAJE', 'Error desconocido')
+            
+            # Si es tipo 2 (éxito), solo loguear y continuar
+            if tipo_mensaje == 2:
+                logger.info(f"SP returned success message: {mensaje}")
+                # NO lanzar error, continuar normalmente
+            
+            # Si es tipo 1 (error de negocio/permisos), lanzar 403
+            elif tipo_mensaje == 1:
+                logger.warning(f"SP returned business error: {mensaje}")
+                raise HTTPException(
+                    status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+            
+            # Si es tipo 3 (error técnico), lanzar 422
+            elif tipo_mensaje == 3:
+                logger.error(f"SP returned technical error: {mensaje}")
+                raise HTTPException(
+                    status_code=422,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+
+        # Extract areas and pagination from result
+        areas = result.get('data', [])
+        pagination_info = result.get('pagination', {})
+
+        success_response = create_success_response("Areas obtenidas exitosamente")
+        return {
+            "areas": areas,
+            "total_paginas": pagination_info.get('total_pages', 0),
+            "total_registros": pagination_info.get('total_records', 0),
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_areas_paginated endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,
