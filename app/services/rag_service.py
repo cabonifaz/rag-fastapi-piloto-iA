@@ -1,5 +1,6 @@
 from typing import Dict, Any, AsyncGenerator, Optional
 import logging
+import asyncio
 from sqlalchemy.orm import Session
 
 # Domain ports (for dependency injection in __init__)
@@ -14,6 +15,9 @@ from app.domain.ports.query_rewriter import QueryRewriterPort
 # Services (for dependency injection in __init__)
 from app.services.message_service import MessageService
 from app.services.ia_config_service import IaConfigService
+
+# TTS streaming workflow
+from app.workflows.tts_streaming import stream_with_tts
 
 # Workflows (everything else is in here now!)
 from app.workflows.rag_workflow import (
@@ -71,7 +75,8 @@ class RagService:
         query_rewriter: QueryRewriterPort,
         orchestrator: Optional[QueryAnalysisPort] = None,
         llm_nonstreaming_provider: LLMNonStreamingPort = None,
-        llm_only_provider: LLMNonStreamingPort = None
+        llm_only_provider: LLMNonStreamingPort = None,
+        tts_provider = None  # Optional: inject for connection reuse
     ):
         """
         Initialize RagService with all dependencies injected.
@@ -87,6 +92,7 @@ class RagService:
             orchestrator: Optional port for query analysis and task decomposition
             llm_nonstreaming_provider: Optional port for non-streaming LLM operations (for n8n RAG mode)
             llm_only_provider: Optional port for non-streaming LLM operations in LLM-only mode (no RAG)
+            tts_provider: Optional TTS provider for connection reuse (recommended for production)
         """
         self.embeddings_provider = embeddings_provider
         self.vectorstore = vectorstore
@@ -98,6 +104,7 @@ class RagService:
         self.orchestrator = orchestrator
         self.llm_nonstreaming_provider = llm_nonstreaming_provider
         self.llm_only_provider = llm_only_provider
+        self.tts_provider = tts_provider
 
     # async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
     #     """
@@ -307,7 +314,8 @@ class RagService:
         db: Session,
         created_at: str,
         chat_id: str = None,
-        request_timezone: str = None
+        request_timezone: str = None,
+        tts: bool = False
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Proceso RAG completo con streaming: embeddings → search → LLM streaming → response
@@ -344,13 +352,31 @@ class RagService:
                 yield event
 
             # Stream LLM response and save message
-            async for chunk_event in stream_llm_response(
-                state=result_state,
-                llm_provider=self.llm_provider,
-                message_service=self.message_service,
-                db=db
-            ):
-                yield chunk_event
+            if tts:
+                # TTS enabled: use the TTS streaming workflow
+                llm_stream = stream_llm_response(
+                    state=result_state,
+                    llm_provider=self.llm_provider,
+                    message_service=self.message_service,
+                    db=db
+                )
+
+                # Use injected TTS provider if available (connection reuse)
+                async for event in stream_with_tts(
+                    llm_stream,
+                    tts_provider=self.tts_provider,
+                    debug=True
+                ):
+                    yield event
+            else:
+                # TTS disabled: stream text only
+                async for chunk_event in stream_llm_response(
+                    state=result_state,
+                    llm_provider=self.llm_provider,
+                    message_service=self.message_service,
+                    db=db
+                ):
+                    yield chunk_event
 
             # Send completion signal
             yield {

@@ -1,8 +1,8 @@
 """API endpoints for company management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 
 from app.core.database import get_db
@@ -308,6 +308,114 @@ async def get_companies_login_endpoint(
 
     return result
 
+
+@router.get("/get_companies_paginated")
+async def get_companies_paginated_endpoint(
+    page: int = Query(default=1, ge=1, description="Número de página (mínimo 1)"),
+    page_size: int = Query(default=10, ge=1, le=100, description="Filas por página (1-100)"),
+    search: Optional[str] = Query(default=None, max_length=200, description="Término de búsqueda"),
+    order_field: str = Query(
+        default='RAZON_SOCIAL',
+        regex='^(ID_EMPRESA|RUC|RAZON_SOCIAL|FCHCRE|ID_ESTADO_REGISTRO)$',
+        description="Campo de ordenamiento"
+    ),
+    order_direction: str = Query(
+        default='ASC',
+        regex='^(ASC|DESC)$',
+        description="Dirección de ordenamiento"
+    ),
+    status_filter: Optional[int] = Query(default=None, ge=0, le=1, description="Filtro de estado: 0=inactivo, 1=activo, null=todos"),  
+    company_service: CompanyService = Depends(get_company_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Get paginated companies endpoint.
+
+    Fetches paginated companies using SP_EMPRESAS_LST_PAG with server-side pagination,
+    sorting, and search. Requires JWT authentication and validates role permissions.
+
+    Query Parameters:
+        page: Page number (starting at 1)
+        page_size: Number of items per page (1-100)
+        search: Optional search term for RAZON_SOCIAL or RUC
+        order_field: Field to sort by (default 'RAZON_SOCIAL')
+        order_direction: Sort direction ASC or DESC (default 'ASC')
+        status_filter: Filter by status (0=inactive, 1=active, null=all)
+
+    Returns:
+        Dict with:
+        - data: List of company dictionaries
+        - pagination: Object with total_records, current_page, page_size, total_pages
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 400 for validation errors, 403 for permission errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Call service with Spanish parameter names
+        result = await company_service.get_companies_paginated(
+            db=db,
+            id_usuario=user_id,
+            num_pagina=page,
+            tam_pagina=page_size,
+            term_busqueda=search if search else None,
+            campo_orden=order_field,
+            dir_orden=order_direction,
+            filtro_estado=status_filter
+        )
+
+        # ✅ Check if there's a message from the SP
+        if result.get('message_result'):  # ✅ Cambio aquí: message_result en vez de results
+            message_result = result['message_result']
+            tipo_mensaje = message_result.get('ID_TIPO_MENSAJE')
+            mensaje = message_result.get('MENSAJE', 'Error desconocido')
+            
+            
+            if tipo_mensaje == 2:
+                logger.info(f"SP returned success message: {mensaje}")
+        
+            
+            elif tipo_mensaje == 1:
+                logger.warning(f"SP returned business error: {mensaje}")
+                raise HTTPException(
+                    status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+                     
+            elif tipo_mensaje == 3:
+                logger.error(f"SP returned technical error: {mensaje}")
+                raise HTTPException(
+                    status_code=422,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+
+        success_response = create_success_response("Empresas obtenidas exitosamente")
+        return {
+            "data": result.get('data', []),
+            "pagination": result.get('pagination', {}),
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_companies_paginated endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
 
 @router.post("/upload_logo")
 async def upload_company_logo_endpoint(

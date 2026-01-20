@@ -13,6 +13,7 @@ class UnifiedRequest(BaseModel):
     created_at: str                         # Message date
     chat_id: Optional[int] = None           # Optional, chat id
     request_timezone: Optional[str] = None   # Optional, user's timezone for time-aware responses
+    tts: bool = False                        # Optional, enable text-to-speech streaming
 
 
 class N8NRequest(BaseModel):
