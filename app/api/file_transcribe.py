@@ -1,6 +1,6 @@
 """REST API endpoint for file-based audio transcription (OpenAI)."""
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status, Depends
 import logging
 
 from app.core.container import container
@@ -16,7 +16,7 @@ router = APIRouter()
 @router.post("/transcribe/file", response_model=TranscribeFileResponse)
 async def transcribe_audio_file(
     file: UploadFile = File(..., description="Audio file to transcribe (max 25MB)"),
-    language_code: str = "es-ES",
+    language_code: str = Form("es"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -30,7 +30,7 @@ async def transcribe_audio_file(
 
     Args:
         file: Audio file (max 25MB)
-        language_code: Language code (e.g., 'es-ES', 'en-US', 'pt-BR')
+        language_code: Language code (e.g., 'es', 'en', 'de', 'pt')
         current_user: Authenticated user (from JWT token)
 
     Returns:
