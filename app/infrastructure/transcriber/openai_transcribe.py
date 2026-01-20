@@ -65,7 +65,7 @@ class OpenAITranscribe(FileTranscribePort):
     async def transcribe_file(
         self,
         audio_data: bytes,
-        language_code: str = "es-ES",
+        language_code: str = "es",
         filename: str = "audio.wav"
     ) -> Dict[str, Any]:
         """
@@ -73,7 +73,7 @@ class OpenAITranscribe(FileTranscribePort):
 
         Args:
             audio_data: Audio file bytes
-            language_code: Language code (e.g., 'es-ES', 'en-US')
+            language_code: Language code (e.g., 'es', 'en', 'de')
             filename: Filename with extension (determines audio format)
 
         Returns:
@@ -87,10 +87,7 @@ class OpenAITranscribe(FileTranscribePort):
                 }
         """
         try:
-            # Extract language (e.g., 'es-ES' -> 'es')
-            language = language_code.split('-')[0] if language_code else None
-
-            logger.info(f"Transcribing file: {filename}, size: {len(audio_data)} bytes, language: {language}")
+            logger.info(f"Transcribing file: {filename}, size: {len(audio_data)} bytes, language: {language_code}")
 
             # Check size limit (25MB for OpenAI)
             if len(audio_data) > 25 * 1024 * 1024:
@@ -107,10 +104,8 @@ class OpenAITranscribe(FileTranscribePort):
             data = {
                 'model': self.model,
                 'response_format': 'json',  # Get detailed response with language and duration
+                'language': language_code  # Language code (e.g., 'es', 'en', 'de')
             }
-
-            if language:
-                data['language'] = language
 
             # Make API request
             response = await self.client.post(
@@ -124,7 +119,7 @@ class OpenAITranscribe(FileTranscribePort):
 
             # Parse OpenAI response
             transcript = result.get('text', '')
-            detected_language = result.get('language', language or 'unknown')
+            detected_language = result.get('language', language_code or 'unknown')
             duration = result.get('duration', 0.0)
 
             logger.info(f"Transcription complete: {len(transcript)} chars, duration: {duration}s, language: {detected_language}")

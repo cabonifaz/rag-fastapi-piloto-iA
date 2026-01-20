@@ -35,7 +35,7 @@ class FileTranscribeService:
     async def transcribe_file(
         self,
         audio_file: bytes,
-        language_code: str = "es-ES",
+        language_code: str = "es",
         filename: str = "audio.wav",
         user_id: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -44,7 +44,7 @@ class FileTranscribeService:
 
         Args:
             audio_file: Audio file bytes
-            language_code: Language code (e.g., 'es-ES', 'en-US')
+            language_code: Language code (e.g., 'es', 'en', 'de')
             filename: Filename with extension (determines audio format)
             user_id: ID del usuario (opcional, para logging)
 
