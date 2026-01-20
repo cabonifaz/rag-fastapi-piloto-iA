@@ -20,7 +20,7 @@ class FileTranscribePort(ABC):
     async def transcribe_file(
         self,
         audio_data: bytes,
-        language_code: str = "es-ES",
+        language_code: str = "es",
         filename: str = "audio.wav"
     ) -> Dict[str, Any]:
         """
@@ -28,7 +28,7 @@ class FileTranscribePort(ABC):
 
         Args:
             audio_data: Bytes del archivo de audio
-            language_code: Código de idioma (ej: 'es-ES', 'en-US', 'pt-BR')
+            language_code: Código de idioma (ej: 'es', 'en', 'pt')
             filename: Nombre del archivo con extensión (para determinar formato)
 
         Returns:

@@ -40,11 +40,6 @@ class Settings(BaseSettings):
     state_builder_model_id: str
     query_rewriter_model_id: str
 
-    # Transcribe Configuration
-    transcribe_language_code: str
-    transcribe_sample_rate: int
-    transcribe_media_encoding: str
-
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
     openai_transcribe_model: Optional[str] = None
@@ -142,29 +137,6 @@ class Settings(BaseSettings):
     def validate_jwt_expiration_minutes(cls, v):
         if v <= 0 or v > 2880:
             raise ValueError("JWT expiration minutes must be between 1 and 1440")
-        return v
-
-    @field_validator('transcribe_sample_rate')
-    @classmethod
-    def validate_transcribe_sample_rate(cls, v):
-        valid_rates = [8000, 16000, 44100, 48000]
-        if v not in valid_rates:
-            raise ValueError(f"Transcribe sample rate must be one of {valid_rates}")
-        return v
-
-    @field_validator('transcribe_media_encoding')
-    @classmethod
-    def validate_transcribe_media_encoding(cls, v):
-        valid_encodings = ['pcm', 'ogg-opus', 'flac']
-        if v not in valid_encodings:
-            raise ValueError(f"Transcribe media encoding must be one of {valid_encodings}")
-        return v
-
-    @field_validator('transcribe_language_code')
-    @classmethod
-    def validate_transcribe_language_code(cls, v):
-        if not v or len(v) < 5 or '-' not in v:
-            raise ValueError("Transcribe language code must be in format 'xx-XX' (e.g., 'es-ES', 'en-US')")
         return v
 
     @property

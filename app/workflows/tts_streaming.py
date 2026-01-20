@@ -53,6 +53,9 @@ def normalize_text_for_tts(text: str) -> str:
     text = re.sub(r'\|[-:]+\|', ' ', text)
     text = re.sub(r'\s*\|\s*', '. ', text)
 
+    # Markdown headings (remove # symbols)
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+
     # Markdown emphasis
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
     text = re.sub(r'\*([^*]+)\*', r'\1', text)
