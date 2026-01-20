@@ -2,7 +2,7 @@
 
 import logging
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.infrastructure.repositories.knowledge_repository import KnowledgeRepository
 from app.core.config import settings
@@ -644,4 +644,53 @@ class KnowledgeService:
 
         except Exception as e:
             logger.error(f"Error batch deleting knowledge: {e}")
+            raise
+
+    async def get_knowledge_by_company_paginated(
+        self,
+        id_usuario: int,
+        id_empresa: int,
+        id_area: Optional[int] = None,
+        num_pagina: int = 1,
+        tam_pagina: int = 10,
+        term_busqueda: Optional[str] = None,
+        campo_orden: str = "FCHMOD",
+        dir_orden: str = "DESC",
+        filtro_estado: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Get paginated knowledge/documents for a company and optional area.
+
+        Args:
+            id_usuario: User ID requesting the documents
+            id_empresa: Company ID
+            id_area: Area ID (optional, retrieves all areas if None)
+            num_pagina: Page number (1-based)
+            tam_pagina: Page size
+            term_busqueda: Search term for document name (optional)
+            campo_orden: Field to order by (NOMBRE_DOCUMENTO, FCHMOD, FCHCRE, ID_ESTADO_PROCESO, AREA, USUARIO_CARGA)
+            dir_orden: Sort direction (ASC or DESC)
+            filtro_estado: Filter by process state ID (0-7, None for all)
+
+        Returns:
+            Dictionary with paginated knowledge/document records
+        """
+        try:
+            result = self.repository.get_knowledge_by_company_paginated(
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                id_area=id_area,
+                num_pagina=num_pagina,
+                tam_pagina=tam_pagina,
+                term_busqueda=term_busqueda,
+                campo_orden=campo_orden,
+                dir_orden=dir_orden,
+                filtro_estado=filtro_estado
+            )
+
+            logger.info(f"Retrieved paginated knowledge: page {result['pagina_actual']} of {result['total_paginas']} ({result['total_registros']} total records)")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error getting paginated knowledge for company {id_empresa}: {e}")
             raise

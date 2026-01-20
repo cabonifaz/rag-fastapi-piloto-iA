@@ -31,3 +31,23 @@ class BatchUpdateKnowledgeStateRequest(BaseModel):
 class BatchDeleteKnowledgeRequest(BaseModel):
     """Request model for batch deleting knowledge/documents"""
     id_cargas: List[int]
+
+
+class GetKnowledgePaginatedRequest(BaseModel):
+    """Request model for getting paginated knowledge/documents by company"""
+    id_empresa: int
+    id_area: Optional[int] = None
+    num_pagina: int = 1
+    tam_pagina: int = 10
+    term_busqueda: Optional[str] = None
+    campo_orden: Optional[str] = "FCHMOD"
+    dir_orden: Optional[str] = "DESC"
+    filtro_estado: Optional[int] = None
+
+
+class PaginatedKnowledgeResponse(BaseModel):
+    """Response model for paginated knowledge list"""
+    registros: list 
+    total_registros: int
+    total_paginas: int
+    pagina_actual: int
