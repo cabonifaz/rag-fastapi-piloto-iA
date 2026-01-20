@@ -416,3 +416,109 @@ async def get_companies_paginated_endpoint(
             status_code=500,
             detail={"result": error_response.model_dump()}
         )
+
+@router.post("/upload_logo")
+async def upload_company_logo_endpoint(
+    request: CompanyLogoUploadRequest,
+    company_service: CompanyService = Depends(get_company_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Generate presigned URL for company logo upload endpoint.
+
+    Generates presigned S3 URL and updates database with logo path.
+    Frontend then uploads the logo file directly to S3 using the presigned URL.
+    Requires JWT authentication and SuperAdmin role.
+
+    Args:
+        request: CompanyLogoUploadRequest with id_empresa and logo_filename
+
+    Returns:
+        Dict with:
+        - presigned_url: S3 presigned PUT URL (5 min expiration)
+        - s3_key: S3 object key path
+        - logo_filename: Original filename
+        - results: DB update results
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 400 for validation errors, 403 for permission errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1)
+        if role_id != 1:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
+        # Generate presigned URL and update database
+        result = await company_service.generate_logo_presigned_url(
+            db=db,
+            id_usuario=user_id,
+            id_empresa=request.id_empresa,
+            logo_filename=request.logo_filename
+        )
+
+        # Check if the stored procedure returned an error
+        if result.get('results') and 'ID_TIPO_MENSAJE' in result['results'][0]:
+            tipo_mensaje = result['results'][0].get('ID_TIPO_MENSAJE')
+            mensaje = result['results'][0].get('MENSAJE', 'Error desconocido')
+
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje}: {mensaje}")
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"result": {"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}}
+                )
+
+        # Invalidate companies cache after successful logo upload
+        companies_cache.clear("companies_login")
+
+        success_response = create_success_response("Presigned URL generada exitosamente")
+        return {
+            "presigned_url": result['presigned_url'],
+            "s3_key": result['s3_key'],
+            "logo_filename": result['logo_filename'],
+            "result": success_response.model_dump()
+        }
+
+    except ValueError as ve:
+        # Handle validation errors from service (e.g., invalid file type)
+        logger.warning(f"Validation error in upload_company_logo endpoint: {ve}")
+        error_response = create_error_response(str(ve))
+        raise HTTPException(
+            status_code=400,
+            detail={"result": error_response.model_dump()}
+        )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in upload_company_logo endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
