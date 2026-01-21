@@ -300,7 +300,7 @@ async def chat_n8n_anonymous_endpoint(
             )
 
         agent_id = current_agent.get('ID_AGENTE')
-        logger.info(f"[N8N ANONYMOUS REQUEST] Agent ID: {agent_id}, User Anonymous ID: {request.user_anonymous_id}, Message: {request.message}")
+        logger.info(f"[N8N ANONYMOUS REQUEST] Agent ID: {agent_id}, User Anonymous ID: {request.user_anonymous_id}, Message: {request.message}, RAG Query: {request.rag_query}")
 
         # Call non-streaming RAG service for anonymous chat
         result = await rag_service.process_rag_query_n8n_anonymous(
@@ -311,6 +311,7 @@ async def chat_n8n_anonymous_endpoint(
             db=db,
             created_at=request.created_at,
             chat_anonymous_id=request.chat_anonymous_id,
+            rag_query=request.rag_query,
             request_timezone=request.request_timezone
         )
 
