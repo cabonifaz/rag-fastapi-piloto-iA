@@ -56,6 +56,7 @@ def build_initial_state_anonymous(
     company_id: int,
     area_id: int,
     created_at: str,
+    rag_query: str,
     chat_anonymous_id: Optional[str] = None,
     request_timezone: Optional[str] = None
 ) -> RAGAnonymousState:
@@ -69,6 +70,7 @@ def build_initial_state_anonymous(
         "created_at": created_at,
         "chat_anonymous_id": chat_anonymous_id,
         "request_timezone": request_timezone,
+        "rag_query": rag_query,
         # Processing state (will be populated by workflow)
         "cleaned_message": None,
         "conversation_history": [],

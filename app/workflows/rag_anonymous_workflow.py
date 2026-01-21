@@ -8,7 +8,6 @@ import logging
 
 from app.workflows.states import RAGAnonymousState
 from app.workflows.nodes import (
-    create_clean_message_node,
     create_build_query_state_node,
     create_rewrite_query_node,
     create_load_rag_config_node,
@@ -20,9 +19,10 @@ from app.workflows.nodes import (
     create_build_rag_prompt_node,
     create_prepare_timestamps_node
 )
-from app.workflows.nodes.validation_nodes import create_validate_inputs_node_anonymous
+from app.workflows.nodes.validation_nodes import create_validate_inputs_node_rag_anonymous
 from app.workflows.nodes.conversation_anonymous_nodes import create_get_conversation_history_anonymous_node
-from app.workflows.nodes.chat_anonymous_nodes import create_save_user_message_anonymous_node
+from app.workflows.nodes.chat_anonymous_nodes import create_save_original_message_anonymous_node
+from app.workflows.nodes.preprocessing_nodes import create_clean_rag_query_node
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +57,13 @@ def create_rag_anonymous_workflow(
         Compiled StateGraph ready to execute
     """
     # Create nodes using factory functions
-    validate_inputs = create_validate_inputs_node_anonymous()
+    validate_inputs = create_validate_inputs_node_rag_anonymous()
     get_conversation_history_anonymous = create_get_conversation_history_anonymous_node(message_service)
-    clean_message = create_clean_message_node()
+    clean_rag_query = create_clean_rag_query_node()
     build_query_state = create_build_query_state_node(state_builder)
     rewrite_query = create_rewrite_query_node(query_rewriter)
     load_rag_config = create_load_rag_config_node(session_factory, ia_config_service)
-    save_user_message_anonymous = create_save_user_message_anonymous_node(message_service)
+    save_original_message_anonymous = create_save_original_message_anonymous_node(message_service)
     determine_query_for_search = create_determine_query_for_search_node()
     generate_embedding = create_generate_embedding_node(embeddings_provider)
     search_vector_db = create_search_vector_db_node(vectorstore)
@@ -78,11 +78,11 @@ def create_rag_anonymous_workflow(
     # Add all nodes
     workflow.add_node("validate_inputs", validate_inputs)
     workflow.add_node("get_conversation_history_anonymous", get_conversation_history_anonymous)
-    workflow.add_node("clean_message", clean_message)
+    workflow.add_node("clean_rag_query", clean_rag_query)
     workflow.add_node("build_query_state", build_query_state)
     workflow.add_node("rewrite_query", rewrite_query)
     workflow.add_node("load_rag_config", load_rag_config)
-    workflow.add_node("save_user_message_anonymous", save_user_message_anonymous)
+    workflow.add_node("save_original_message_anonymous", save_original_message_anonymous)
     workflow.add_node("determine_query_for_search", determine_query_for_search)
     workflow.add_node("generate_embedding", generate_embedding)
     workflow.add_node("search_vector_db", search_vector_db)
@@ -104,14 +104,14 @@ def create_rag_anonymous_workflow(
         }
     )
 
-    workflow.add_edge("get_conversation_history_anonymous", "clean_message")
-    workflow.add_edge("clean_message", "build_query_state")
+    workflow.add_edge("get_conversation_history_anonymous", "clean_rag_query")
+    workflow.add_edge("clean_rag_query", "build_query_state")
     workflow.add_edge("build_query_state", "rewrite_query")
     workflow.add_edge("rewrite_query", "load_rag_config")
-    workflow.add_edge("load_rag_config", "save_user_message_anonymous")
+    workflow.add_edge("load_rag_config", "save_original_message_anonymous")
 
     workflow.add_conditional_edges(
-        "save_user_message_anonymous",
+        "save_original_message_anonymous",
         lambda state: "stop" if state.get("should_stop", False) else "continue",
         {
             "continue": "determine_query_for_search",

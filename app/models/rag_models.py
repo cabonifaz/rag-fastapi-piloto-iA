@@ -29,7 +29,8 @@ class N8NRequest(BaseModel):
 
 class N8NAnonymousRequest(BaseModel):
     """Request Schema for n8n non-streaming anonymous chat endpoint."""
-    message: str
+    message: str                            # Required, message to be stored
+    rag_query: str                          # Required, query to be processed by RAG
     user_anonymous_id: int                  # Required, anonymous user ID for database operations
     company_id: int                         # Required, company ID for database operations
     area_id: int                            # Required, area ID for database operations
