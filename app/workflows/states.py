@@ -51,6 +51,7 @@ class RAGAnonymousState(TypedDict):
     created_at: str
     chat_anonymous_id: Optional[str]
     request_timezone: Optional[str]
+    rag_query: str
 
     # Processing state
     cleaned_message: Optional[str]

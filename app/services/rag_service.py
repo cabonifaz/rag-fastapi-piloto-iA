@@ -469,7 +469,7 @@ class RagService:
                 }
             }
 
-    async def process_rag_query_n8n_anonymous(self, user_anonymous_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_anonymous_id: int, request_timezone: str = None) -> Dict[str, Any]:
+    async def process_rag_query_n8n_anonymous(self, user_anonymous_id: int, message: str, company_id: int, area_id: int, db: Session, created_at: str, chat_anonymous_id: int, rag_query: str, request_timezone: str = None) -> Dict[str, Any]:
         """
         Proceso RAG completo sin streaming para chats anónimos (para n8n): embeddings → search → LLM → response completa
         Uses pre-compiled LangGraph anonymous workflow for modular processing with complete response.
@@ -485,6 +485,7 @@ class RagService:
                 company_id=company_id,
                 area_id=area_id,
                 created_at=created_at,
+                rag_query=rag_query,
                 chat_anonymous_id=str(chat_anonymous_id),
                 request_timezone=request_timezone
             )

@@ -33,3 +33,30 @@ def create_save_user_message_anonymous_node(message_service):
         return state
 
     return save_user_message_anonymous
+
+
+def create_save_original_message_anonymous_node(message_service):
+    """Factory function to create save_original_message_anonymous node.
+    Saves the original message (not cleaned_message which contains the processed rag_query).
+    Used in RAG anonymous workflow where message is stored and rag_query is processed.
+    """
+    async def save_original_message_anonymous(state) -> dict:
+        """Save original user message to DynamoDB for anonymous chat"""
+        chat_anonymous_id = state.get("chat_anonymous_id")
+
+        if chat_anonymous_id:
+            try:
+                await message_service.create_message_anonymous(
+                    chat_anonymous_id=chat_anonymous_id,
+                    created_at=state["created_at"],
+                    sender=0,
+                    message=state["message"]
+                )
+            except Exception as e:
+                logger.error(f"Failed to save original anonymous user message: {e}")
+                state["error"] = "Failed to save original anonymous user message"
+                state["should_stop"] = True
+
+        return state
+
+    return save_original_message_anonymous

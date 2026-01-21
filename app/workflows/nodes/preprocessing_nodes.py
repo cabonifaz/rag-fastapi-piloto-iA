@@ -19,6 +19,18 @@ def create_clean_message_node():
     return clean_message
 
 
+def create_clean_rag_query_node():
+    """Factory function to create clean_rag_query node for RAG anonymous workflows.
+    Cleans rag_query and stores in cleaned_message so downstream nodes work without modification.
+    """
+    async def clean_rag_query(state) -> dict:
+        """Clean RAG query (not the message) for processing"""
+        state["cleaned_message"] = clean_user_query(state["rag_query"])
+        return state
+
+    return clean_rag_query
+
+
 def create_load_rag_config_node(session_factory, ia_config_service, area_required: bool = True):
     """Factory function to create load_rag_config node
 
