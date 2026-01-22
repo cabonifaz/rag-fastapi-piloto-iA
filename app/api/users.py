@@ -22,6 +22,128 @@ def get_users_service() -> UsersService:
     return container.get_users_service()
 
 
+@router.get("/get_usuarios_paginated")
+async def get_usuarios_paginated_endpoint(
+    id_empresa: int,
+    num_pagina: int = 1,
+    tam_pagina: int = 10,
+    term_busqueda: str = None,
+    campo_orden: str = 'APELLIDOS',
+    dir_orden: str = 'ASC',
+    filtro_estado: int = None,
+    users_service: UsersService = Depends(get_users_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Get paginated users endpoint.
+
+    Fetches paginated users for a specific company using SP_USUARIOS_LST_PAG.
+    Requires JWT authentication and validates company access.
+
+    Query Parameters:
+        id_empresa: Company ID (required)
+        num_pagina: Page number, starting at 1 (default: 1)
+        tam_pagina: Number of rows per page (default: 10)
+        term_busqueda: Optional search term for USUARIO, NOMBRES, APELLIDOS, TELEFONO, AREA, ROL
+        campo_orden: Field to sort by (default: 'APELLIDOS')
+        dir_orden: Sort direction ASC or DESC (default: 'ASC')
+        filtro_estado: Optional filter for ID_ESTADO_REGISTRO (None=all, 1=active, 0=inactive)
+
+    Returns:
+        Dict with:
+        - data: List of user dictionaries
+        - pagination: Dictionary with pagination metadata
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
+            )
+
+        # Validate id_empresa parameter
+        if not isinstance(id_empresa, int) or id_empresa <= 0:
+            error_response = create_error_response("ID de empresa inválido")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Get paginated usuarios using service
+        result = await users_service.get_usuarios_paginated(
+            db=db,
+            id_usuario=user_id,
+            id_empresa=id_empresa,
+            num_pagina=num_pagina,
+            tam_pagina=tam_pagina,
+            term_busqueda=term_busqueda,
+            campo_orden=campo_orden,
+            dir_orden=dir_orden,
+            filtro_estado=filtro_estado
+        )
+
+        # Check if there's an authorization/error message from SP
+        if result.get('message_result'):
+            message = result['message_result']
+            tipo_mensaje = message.get('ID_TIPO_MENSAJE')
+            mensaje = message.get('MENSAJE', 'Error desconocido')
+
+            if tipo_mensaje == 3:
+                # Authorization error from SP
+                raise HTTPException(
+                    status_code=403,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+            elif tipo_mensaje == 1:
+                # General error from SP
+                raise HTTPException(
+                    status_code=400,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+
+        # Check if result is None or empty
+        if result is None or not isinstance(result, dict):
+            error_response = create_error_response("Error al obtener los usuarios paginados")
+            raise HTTPException(
+                status_code=500,
+                detail={"result": error_response.model_dump()}
+            )
+
+        success_response = create_success_response("Usuarios obtenidos exitosamente")
+        return {
+            "data": result.get('data', []),
+            "pagination": result.get('pagination', {}),
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_usuarios_paginated endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
 @router.get("/get_usuarios/{id_empresa}")
 async def get_usuarios_endpoint(
     id_empresa: int,

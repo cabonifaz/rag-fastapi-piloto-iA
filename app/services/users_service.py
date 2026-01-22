@@ -516,3 +516,110 @@ class UsersService:
         except Exception as e:
             logger.error(f"Error in get_usuario_by_telefono service: {e}")
             raise
+
+
+    async def get_usuarios_paginated(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_empresa: int,
+        num_pagina: int = 1,
+        tam_pagina: int = 10,
+        term_busqueda: str = None,
+        campo_orden: str = 'APELLIDOS',
+        dir_orden: str = 'ASC',
+        filtro_estado: int = None
+    ) -> Dict[str, Any]:
+        """
+        Get paginated users using stored procedure.
+
+        Args:
+            db: Database session
+            id_usuario: User ID for role validation
+            id_empresa: Company ID
+            num_pagina: Page number (starting at 1)
+            tam_pagina: Number of rows per page
+            term_busqueda: Optional search term for USUARIO, NOMBRES, APELLIDOS, TELEFONO, AREA, ROL
+            campo_orden: Field to sort by (default 'APELLIDOS')
+            dir_orden: Sort direction ASC or DESC (default 'ASC')
+            filtro_estado: Optional filter for ID_ESTADO_REGISTRO (None=all, 1=active, 0=inactive)
+
+        Returns:
+            Dictionary with:
+                - data: List of user dictionaries
+                - pagination: Dictionary with pagination metadata (total_records, current_page, page_size, total_pages)
+                - message_result: Dict with ID_TIPO_MENSAJE and MENSAJE if error/authorization
+            Empty dict with empty list if fetch failed
+        """
+        try:
+            # Create repository for this request
+            repository = UsersRepository(db)
+
+            # Validate input
+            if not isinstance(id_usuario, int) or id_usuario <= 0:
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return {'data': [], 'pagination': {}, 'message_result': None}
+
+            if not isinstance(id_empresa, int) or id_empresa <= 0:
+                logger.error(f"Invalid id_empresa: {id_empresa}")
+                return {'data': [], 'pagination': {}, 'message_result': None}
+
+            if not isinstance(num_pagina, int) or num_pagina < 1:
+                logger.warning(f"Invalid num_pagina: {num_pagina}, using default 1")
+                num_pagina = 1
+
+            if not isinstance(tam_pagina, int) or tam_pagina < 1:
+                logger.warning(f"Invalid tam_pagina: {tam_pagina}, using default 10")
+                tam_pagina = 10
+
+            if campo_orden not in ['USUARIO', 'NOMBRES', 'APELLIDOS', 'TELEFONO', 'AREA', 'ROL', 'FCHCRE', 'ID_ESTADO_REGISTRO']:
+                logger.warning(f"Invalid campo_orden: {campo_orden}, using default 'APELLIDOS'")
+                campo_orden = 'APELLIDOS'
+
+            if dir_orden not in ['ASC', 'DESC']:
+                logger.warning(f"Invalid dir_orden: {dir_orden}, using default 'ASC'")
+                dir_orden = 'ASC'
+
+            if filtro_estado is not None and filtro_estado not in [0, 1]:
+                logger.warning(f"Invalid filtro_estado: {filtro_estado}, using None")
+                filtro_estado = None
+
+            # Trim search term if provided
+            if term_busqueda:
+                term_busqueda = term_busqueda.strip()[:200]
+
+            # Use repository to get paginated users with SP_USUARIOS_LST_PAG
+            result = repository.get_usuarios_paginated(
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                num_pagina=num_pagina,
+                tam_pagina=tam_pagina,
+                term_busqueda=term_busqueda,
+                campo_orden=campo_orden,
+                dir_orden=dir_orden,
+                filtro_estado=filtro_estado
+            )
+
+            # Log results
+            if result.get('message_result'):
+                # Authorization or error message
+                msg_type = result['message_result'].get('ID_TIPO_MENSAJE')
+                mensaje = result['message_result'].get('MENSAJE')
+                logger.warning(f"Users pagination returned message: Type={msg_type}, Message={mensaje}")
+            elif result.get('data'):
+                # Successful pagination
+                pagination = result.get('pagination', {})
+                logger.info(
+                    f"Users paginated successfully: Company={id_empresa}, "
+                    f"Page={pagination.get('current_page')}/{pagination.get('total_pages')}, "
+                    f"Records={len(result['data'])}/{pagination.get('total_records')}, "
+                    f"Search='{term_busqueda}', Order={campo_orden} {dir_orden}, Status={filtro_estado}"
+                )
+            else:
+                logger.info(f"No users found for company: {id_empresa}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in get_usuarios_paginated service: {e}")
+            raise
