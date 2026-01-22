@@ -13,6 +13,7 @@ from app.services.knowledge_service import KnowledgeService
 from app.models.response_models import create_success_response, create_error_response
 from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest, BatchUpdateKnowledgeStateRequest, BatchDeleteKnowledgeRequest
 from app.utils.jwt_auth import get_current_user_with_company_validation, get_current_user, JWTAuth
+from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest, BatchUpdateKnowledgeStateRequest, BatchDeleteKnowledgeRequest, GetKnowledgePaginatedRequest
 
 logger = logging.getLogger(__name__)
 
@@ -547,3 +548,132 @@ async def batch_delete_knowledge_endpoint(
             status_code=500,
             detail={"result": error_response.model_dump()}
         )
+
+
+@router.post("/get_knowledge_paginated")
+async def get_knowledge_paginated_endpoint(
+    http_request: Request,
+    request: GetKnowledgePaginatedRequest,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Get paginated knowledge/documents for a company endpoint.
+
+    Fetches paginated knowledge/documents for a specific company and optionally a specific area
+    using SP_CARGA_CONOCIMIENTO_EMPRESA_LST_PAG with server-side pagination, filtering, and sorting.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: GetKnowledgePaginatedRequest with pagination, filtering, and sorting parameters
+
+    Returns:
+        Dict with:
+        - registros: List of knowledge/document dictionaries for current page
+        - total_registros: Total number of records matching filters
+        - total_paginas: Total number of pages
+        - pagina_actual: Current page number
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
+            )
+
+        # Validate id_empresa parameter
+        if not isinstance(request.id_empresa, int) or request.id_empresa <= 0:
+            error_response = create_error_response("ID de empresa inválido")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Validate id_area parameter if provided
+        if request.id_area is not None and (not isinstance(request.id_area, int) or request.id_area <= 0):
+            error_response = create_error_response("ID de área inválido")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Validate pagination parameters
+        if request.num_pagina < 1:
+            error_response = create_error_response("Número de página debe ser mayor a 0")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        if request.tam_pagina < 1 or request.tam_pagina > 100:
+            error_response = create_error_response("Tamaño de página debe estar entre 1 y 100")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Validate filtro_estado if provided (must be between 0 and 7)
+        if request.filtro_estado is not None and (request.filtro_estado < 0 or request.filtro_estado > 7):
+            error_response = create_error_response("Estado de proceso debe estar entre 0 y 7")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Get paginated knowledge using service
+        blob_storage = container.get_blob_storage()
+        service = KnowledgeService(db, blob_storage)
+        result = await service.get_knowledge_by_company_paginated(
+            id_usuario=user_id,
+            id_empresa=request.id_empresa,
+            id_area=request.id_area,
+            num_pagina=request.num_pagina,
+            tam_pagina=request.tam_pagina,
+            term_busqueda=request.term_busqueda,
+            campo_orden=request.campo_orden,
+            dir_orden=request.dir_orden,
+            filtro_estado=request.filtro_estado
+        )
+
+        if result is None:
+            error_response = create_error_response("Error al obtener los documentos")
+            raise HTTPException(
+                status_code=500,
+                detail={"result": error_response.model_dump()}
+            )
+
+        success_response = create_success_response("Documentos obtenidos exitosamente")
+        return {
+            "registros": result.get('registros', []),
+            "total_registros": result.get('total_registros', 0),
+            "total_paginas": result.get('total_paginas', 0),
+            "pagina_actual": result.get('pagina_actual', 1),
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_knowledge_paginated endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )    
