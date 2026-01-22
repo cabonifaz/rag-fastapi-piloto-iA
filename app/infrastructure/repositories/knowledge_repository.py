@@ -763,3 +763,171 @@ class KnowledgeRepository:
             logger.error(f"Error batch updating EN_EJECUCION with SP_CARGA_CONOCIMIENTO_DETENER_EJECUCION: {e}")
             self.db.rollback()
             return None
+
+
+    @retry_on_db_error(max_retries=3, delay=1)
+    def get_knowledge_by_company_paginated(
+        self,
+        id_usuario: int,
+        id_empresa: int,
+        id_area: Optional[int] = None,
+        num_pagina: int = 1,
+        tam_pagina: int = 10,
+        term_busqueda: Optional[str] = None,
+        campo_orden: str = "FCHMOD",
+        dir_orden: str = "DESC",
+        filtro_estado: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Get paginated knowledge/documents for a company using stored procedure 
+        SP_CARGA_CONOCIMIENTO_EMPRESA_LST_PAG
+
+        Args:
+            id_usuario: User ID requesting the documents
+            id_empresa: Company ID
+            id_area: Area ID (optional, if None retrieves all areas)
+            num_pagina: Page number (1-based)
+            tam_pagina: Page size
+            term_busqueda: Search term for document name (optional)
+            campo_orden: Field to order by (NOMBRE_DOCUMENTO, FCHMOD, FCHCRE, ID_ESTADO_PROCESO, AREA, USUARIO_CARGA)
+            dir_orden: Sort direction (ASC or DESC)
+            filtro_estado: Filter by process state ID (0-7, None for all)
+
+        Returns:
+            Dictionary with:
+            - registros: List of knowledge/document records
+            - total_registros: Total number of records
+            - total_paginas: Total number of pages
+            - pagina_actual: Current page number
+            - message_result: Message from SP
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    """EXEC SP_CARGA_CONOCIMIENTO_EMPRESA_LST_PAG 
+                    @ID_USUARIO = ?, 
+                    @ID_EMPRESA = ?, 
+                    @ID_AREA = ?, 
+                    @NUM_PAGINA = ?, 
+                    @TAM_PAGINA = ?, 
+                    @TERM_BUSQUEDA = ?,
+                    @CAMPO_ORDEN = ?,
+                    @DIR_ORDEN = ?,
+                    @FILTRO_ESTADO = ?""",
+                    id_usuario,
+                    id_empresa,
+                    id_area,
+                    num_pagina,
+                    tam_pagina,
+                    term_busqueda,
+                    campo_orden,
+                    dir_orden,
+                    filtro_estado
+                )
+
+                registros = []
+                message_result = None
+                total_registros = 0
+                total_paginas = 0
+                pagina_actual = num_pagina
+
+                # Iterate through all result sets
+                result_set_num = 0
+                while True:
+                    result_set_num += 1
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check for message result set
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            # Check for knowledge data result set
+                            has_knowledge_data = any(col in ['id', 'documento', 'total_registros'] for col in columns)
+
+                            if has_message_columns and rows:
+                                # This is the message result set
+                                row = rows[0]
+                                result_dict = dict(zip(columns, row))
+                                if 'ID_TIPO_MENSAJE' in result_dict:
+                                    result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                message_result = result_dict
+
+                            elif has_knowledge_data and rows:
+                                # This is the knowledge data result set
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+
+                                    # Convert numeric IDs to appropriate types
+                                    if 'id' in result_dict and result_dict['id'] is not None:
+                                        result_dict['id'] = str(result_dict['id'])
+
+                                    for id_field in ['id_usuario', 'id_empresa', 'id_area', 'id_estado_proceso', 'en_ejecucion']:
+                                        if id_field in result_dict and result_dict[id_field] is not None:
+                                            result_dict[id_field] = int(result_dict[id_field])
+
+                                    # Extract pagination metadata from first row
+                                    if 'total_registros' in result_dict:
+                                        total_registros = int(result_dict['total_registros'])
+                                        del result_dict['total_registros']
+
+                                    if 'total_paginas' in result_dict:
+                                        total_paginas = int(result_dict['total_paginas'])
+                                        del result_dict['total_paginas']
+
+                                    if 'pagina_actual' in result_dict:
+                                        pagina_actual = int(result_dict['pagina_actual'])
+                                        del result_dict['pagina_actual']
+
+                                    registros.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+
+                logger.info(f"Retrieved paginated knowledge: page {pagina_actual} of {total_paginas} ({total_registros} total records)")
+
+                return {
+                    'registros': registros,
+                    'total_registros': total_registros,
+                    'total_paginas': total_paginas,
+                    'pagina_actual': pagina_actual,
+                    'message_result': message_result
+                }
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_knowledge_by_company_paginated: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error getting paginated knowledge with SP_CARGA_CONOCIMIENTO_EMPRESA_LST_PAG: {e}")
+            self.db.rollback()
+            return {
+                'registros': [],
+                'total_registros': 0,
+                'total_paginas': 0,
+                'pagina_actual': num_pagina,
+                'message_result': None
+            }
