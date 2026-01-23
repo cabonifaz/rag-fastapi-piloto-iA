@@ -657,3 +657,153 @@ class UsersRepository:
             logger.error(f"Error getting user data for n8n with SP_GET_USER_DATA_FOR_N8N: {e}")
             self.db.rollback()
             return []
+
+
+    @retry_on_db_error(max_retries=3, delay=1)
+    def get_usuarios_paginated(
+        self,
+        id_usuario: int,
+        id_empresa: int,
+        num_pagina: int = 1,
+        tam_pagina: int = 10,
+        term_busqueda: Optional[str] = None,
+        campo_orden: str = 'APELLIDOS',
+        dir_orden: str = 'ASC',
+        filtro_estado: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Get paginated users using stored procedure SP_USUARIOS_LST_PAG
+
+        Args:
+            id_usuario: User ID for role validation
+            id_empresa: Company ID
+            num_pagina: Page number (starting at 1)
+            tam_pagina: Number of rows per page
+            term_busqueda: Optional search term for USUARIO, NOMBRES, APELLIDOS, TELEFONO, AREA, ROL
+            campo_orden: Field to sort by (default 'APELLIDOS')
+            dir_orden: Sort direction ASC or DESC (default 'ASC')
+            filtro_estado: Optional filter for ID_ESTADO_REGISTRO (None=all, 1=active, 0=inactive)
+
+        Returns:
+            Dictionary with:
+                - data: List of user dictionaries
+                - pagination: Dictionary with pagination metadata (total_records, current_page, page_size, total_pages)
+                - message_result: Dict with ID_TIPO_MENSAJE and MENSAJE if error/authorization
+            Empty dict with empty list if fetch failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_USUARIOS_LST_PAG @NUM_PAGINA = ?, @TAM_PAGINA = ?, @TERM_BUSQUEDA = ?, @CAMPO_ORDEN = ?, @DIR_ORDEN = ?, @ID_USUARIO = ?, @ID_EMPRESA = ?, @FILTRO_ESTADO = ?",
+                    num_pagina,
+                    tam_pagina,
+                    term_busqueda,
+                    campo_orden,
+                    dir_orden,
+                    id_usuario,
+                    id_empresa,
+                    filtro_estado
+                )
+
+                usuarios = []
+                pagination_info = {}  
+                message_result = None  
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            # Check if this result set contains USER data
+                            has_user_data = 'ID_USUARIO' in columns and 'USUARIO' in columns
+
+                            if has_message_columns and rows:
+                                # This is an error/authorization message result
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for ID_TIPO_MENSAJE
+                                    if 'ID_TIPO_MENSAJE' in result_dict:
+                                        result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                    message_result = result_dict
+                                    
+                            elif has_user_data and rows:  
+                                # This is the user data with pagination
+                                # Extract pagination info from first row
+                                first_row = rows[0]
+                                row_dict = dict(zip(columns, first_row))
+                                
+                                if 'TotalRecords' in columns:
+                                    pagination_info = {
+                                        'total_records': int(row_dict.get('TotalRecords', 0)),
+                                        'current_page': int(row_dict.get('CurrentPage', num_pagina)),
+                                        'page_size': int(row_dict.get('PageSize', tam_pagina)),
+                                        'total_pages': int(row_dict.get('TotalPages', 0))
+                                    }
+
+                                # Convert rows to list of dictionaries and remove pagination metadata
+                                for row in rows:
+                                    user_dict = dict(zip(columns, row))
+                                    
+                                    # Convert Decimal to int for numeric IDs
+                                    numeric_fields = [
+                                        'ID_USUARIO_EMPR_AREA',
+                                        'ID_USUARIO',
+                                        'ID_ESTADO_REGISTRO',
+                                        'ID_EMPRESA',
+                                        'ID_AREA',
+                                        'ID_TIPO_ROL'
+                                    ]
+                                    for field in numeric_fields:
+                                        if field in user_dict and user_dict[field] is not None:
+                                            user_dict[field] = int(user_dict[field])
+                                    
+                                    # Remove pagination metadata columns
+                                    user_dict.pop('TotalRecords', None)
+                                    user_dict.pop('CurrentPage', None)
+                                    user_dict.pop('PageSize', None)
+                                    user_dict.pop('TotalPages', None)
+                                    usuarios.append(user_dict)  
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error in get_usuarios_paginated: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error in get_usuarios_paginated: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                
+                return {
+                    'data': usuarios,
+                    'pagination': pagination_info,
+                    'message_result': message_result
+                }
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_usuarios_paginated: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error fetching paginated usuarios with SP: {e}")
+            self.db.rollback()
+            return {'data': [], 'pagination': {}, 'message_result': None}
