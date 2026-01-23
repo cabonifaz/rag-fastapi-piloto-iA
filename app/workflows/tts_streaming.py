@@ -4,6 +4,12 @@ TTS Streaming Workflow
 Handles real-time text-to-speech generation with parallel processing and ordered delivery.
 Cleans markdown/technical content for natural speech synthesis.
 
+Architecture:
+    - LLM reading and TTS processing run in SEPARATE async tasks
+    - Uses asyncio.Queue to decouple streams with different latencies
+    - SSE generator only reads from output queue (never blocks on TTS)
+    - Text streams fast while audio can lag without blocking LLM
+
 Usage:
     # Option 1: Per-request (creates new provider each time)
     async for event in stream_with_tts(text_stream):
@@ -15,6 +21,7 @@ Usage:
         yield event
 """
 
+import asyncio
 import base64
 import re
 import logging
@@ -159,10 +166,33 @@ def is_sentence_end(text: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────
-# Stream processor
+# Sentinel for queue termination
+# ─────────────────────────────────────────────────────────────
+
+class _QueueSentinel:
+    """Marker to signal end of queue processing."""
+    pass
+
+_QUEUE_END = _QueueSentinel()
+
+
+# ─────────────────────────────────────────────────────────────
+# Decoupled TTS Stream Processor
 # ─────────────────────────────────────────────────────────────
 
 class TTSStreamProcessor:
+    """
+    Processes LLM text stream and generates TTS audio without blocking.
+
+    Architecture:
+        - Task A (LLM reader): Reads LLM stream, yields text immediately,
+          and enqueues sentences for TTS processing.
+        - Task B (TTS worker): Reads from TTS queue, generates audio,
+          and enqueues audio events for output.
+        - SSE generator: Only reads from output queue and yields events.
+
+    This ensures LLM reading never waits for TTS, preventing backpressure.
+    """
 
     def __init__(
         self,
@@ -173,52 +203,160 @@ class TTSStreamProcessor:
         self._injected_provider = tts_provider
         self._owns_provider = tts_provider is None
         self.tts_provider: Optional[TTSProviderProtocol] = None
-        self.buffer = ""
 
     async def process_stream(
         self,
         text_stream: AsyncGenerator[Dict[str, Any], None]
     ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Process text stream with decoupled TTS generation.
 
+        Yields text events immediately while TTS runs in background.
+        Audio events are yielded as they become available without blocking text.
+        """
+        # Initialize TTS provider
         if self._injected_provider is not None:
             self.tts_provider = self._injected_provider
         else:
             from app.infrastructure.synthesizer.openai_tts_chunks import OpenAITTSChunks
             self.tts_provider = OpenAITTSChunks()
 
-        try:
-            async for event in text_stream:
-                yield event
+        # Queues for decoupled processing
+        tts_input_queue: asyncio.Queue[str | _QueueSentinel] = asyncio.Queue()
+        output_queue: asyncio.Queue[Dict[str, Any] | _QueueSentinel] = asyncio.Queue()
 
-                if event.get("type") != "chunk":
+        # Track errors from background tasks
+        llm_error: Optional[Exception] = None
+        tts_error: Optional[Exception] = None
+
+        async def llm_reader_task():
+            """
+            Task A: Read LLM stream, enqueue text events and sentences for TTS.
+            This task NEVER waits for TTS - it just reads and enqueues.
+            """
+            nonlocal llm_error
+            buffer = ""
+
+            try:
+                async for event in text_stream:
+                    # Immediately enqueue ALL events for output (text streams fast)
+                    await output_queue.put(event)
+
+                    # Only process chunk events for TTS
+                    if event.get("type") != "chunk":
+                        continue
+
+                    buffer += event["content"]
+                    prepared = prepare_text_for_tts(buffer)
+
+                    # When sentence ends, enqueue for TTS (non-blocking)
+                    if is_sentence_end(prepared):
+                        buffer = ""
+                        await tts_input_queue.put(prepared)
+
+                # Flush remaining buffer
+                if buffer.strip():
+                    prepared = prepare_text_for_tts(buffer)
+                    await tts_input_queue.put(prepared)
+
+            except Exception as e:
+                llm_error = e
+                logger.error(f"Error in LLM reader task: {e}")
+            finally:
+                # Signal TTS task that no more input is coming
+                await tts_input_queue.put(_QUEUE_END)
+
+        async def tts_worker_task():
+            """
+            Task B: Read sentences from queue, generate TTS, enqueue audio events.
+            Runs independently - LLM reader never waits for this.
+            """
+            nonlocal tts_error
+
+            try:
+                while True:
+                    item = await tts_input_queue.get()
+
+                    if isinstance(item, _QueueSentinel):
+                        break
+
+                    text = item
+                    try:
+                        async for audio in self.tts_provider.synthesize_chunks(text):
+                            await output_queue.put({
+                                "type": "audio_chunk",
+                                "content": base64.b64encode(audio).decode("utf-8")
+                            })
+                    except Exception as e:
+                        logger.error(f"TTS synthesis error for text '{text[:50]}...': {e}")
+                        # Continue processing other sentences even if one fails
+
+            except Exception as e:
+                tts_error = e
+                logger.error(f"Error in TTS worker task: {e}")
+            finally:
+                # Signal output that TTS is done
+                await output_queue.put(_QUEUE_END)
+
+        # Start both tasks concurrently
+        llm_task = asyncio.create_task(llm_reader_task())
+        tts_task = asyncio.create_task(tts_worker_task())
+
+        try:
+            # Track completion of both tasks
+            llm_done = False
+            tts_done = False
+
+            while not (llm_done and tts_done):
+                try:
+                    # Use timeout to periodically check task status
+                    item = await asyncio.wait_for(output_queue.get(), timeout=0.1)
+
+                    if isinstance(item, _QueueSentinel):
+                        # TTS task signaled completion
+                        tts_done = True
+                        continue
+
+                    yield item
+
+                except asyncio.TimeoutError:
+                    # Check if LLM task finished (even if queue is empty)
+                    if llm_task.done() and not llm_done:
+                        llm_done = True
+                    # Continue waiting for more events
                     continue
 
-                self.buffer += event["content"]
-
-                prepared = prepare_text_for_tts(self.buffer)
-
-                if is_sentence_end(prepared):
-                    self.buffer = ""
-
-                    async for audio in self.tts_provider.synthesize_chunks(prepared):
-                        yield {
-                            "type": "audio_chunk",
-                            "content": base64.b64encode(audio).decode("utf-8")
-                        }
-
-            # Flush final buffer
-            if self.buffer.strip():
-                prepared = prepare_text_for_tts(self.buffer)
-
-                async for audio in self.tts_provider.synthesize_chunks(prepared):
-                    yield {
-                        "type": "audio_chunk",
-                        "content": base64.b64encode(audio).decode("utf-8")
-                    }
+            # Drain any remaining items in output queue
+            while not output_queue.empty():
+                item = await output_queue.get()
+                if not isinstance(item, _QueueSentinel):
+                    yield item
 
         finally:
+            # Ensure tasks are cleaned up
+            if not llm_task.done():
+                llm_task.cancel()
+                try:
+                    await llm_task
+                except asyncio.CancelledError:
+                    pass
+
+            if not tts_task.done():
+                tts_task.cancel()
+                try:
+                    await tts_task
+                except asyncio.CancelledError:
+                    pass
+
+            # Close TTS provider if we own it
             if self.tts_provider and self._owns_provider:
                 await self.tts_provider.close()
+
+            # Re-raise errors if any occurred
+            if llm_error:
+                raise llm_error
+            if tts_error:
+                raise tts_error
 
 
 # ─────────────────────────────────────────────────────────────
@@ -230,7 +368,23 @@ async def stream_with_tts(
     tts_provider: Optional[TTSProviderProtocol] = None,
     debug: bool = True
 ) -> AsyncGenerator[Dict[str, Any], None]:
+    """
+    Stream text with parallel TTS audio generation.
 
+    Architecture ensures:
+        - Text events are yielded immediately (no blocking on TTS)
+        - TTS runs in background task with its own queue
+        - Audio events are yielded as they become available
+        - LLM reading never stalls waiting for slow TTS network calls
+
+    Args:
+        text_stream: Async generator yielding text chunk events
+        tts_provider: Optional TTS provider (creates new one if not provided)
+        debug: Enable debug logging
+
+    Yields:
+        Events from text_stream (immediately) and audio_chunk events (as ready)
+    """
     processor = TTSStreamProcessor(
         tts_provider=tts_provider,
         debug=debug
