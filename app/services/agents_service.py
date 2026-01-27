@@ -158,6 +158,120 @@ class AgentsService:
             logger.error(f"Error in create_agente service: {e}")
             raise
 
+    async def get_agentes_paginated(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_empresa: int,
+        num_pagina: int = 1,
+        tam_pagina: int = 10,
+        term_busqueda: str = None,
+        campo_orden: str = 'NUMERO_TELF',
+        dir_orden: str = 'ASC',
+        filtro_estado: int = None,
+        filtro_operativo: int = None
+    ) -> Dict[str, Any]:
+        """
+        Get paginated agents using stored procedure.
+
+        Args:
+            db: Database session
+            id_usuario: User ID for role validation
+            id_empresa: Company ID
+            num_pagina: Page number (starting at 1)
+            tam_pagina: Number of rows per page
+            term_busqueda: Optional search term for NUMERO_TELF, AREA
+            campo_orden: Field to sort by (default 'NUMERO_TELF')
+            dir_orden: Sort direction ASC or DESC (default 'ASC')
+            filtro_estado: Optional filter for ID_ESTADO_REGISTRO (None=all, 1=active, 0=inactive)
+            filtro_operativo: Optional filter for ESTADO_OPERATIVO (None=all, 1=operative, 0=inoperative)
+
+        Returns:
+            Dictionary with:
+                - data: List of agent dictionaries
+                - pagination: Dictionary with pagination metadata (total_records, current_page, page_size, total_pages)
+                - message_result: Dict with ID_TIPO_MENSAJE and MENSAJE if error/authorization
+            Empty dict with empty list if fetch failed
+        """
+        try:
+            # Create repository for this request
+            repository = AgentsRepository(db)
+
+            # Validate input
+            if not isinstance(id_usuario, int) or id_usuario <= 0:
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return {'data': [], 'pagination': {}, 'message_result': None}
+
+            if not isinstance(id_empresa, int) or id_empresa <= 0:
+                logger.error(f"Invalid id_empresa: {id_empresa}")
+                return {'data': [], 'pagination': {}, 'message_result': None}
+
+            if not isinstance(num_pagina, int) or num_pagina < 1:
+                logger.warning(f"Invalid num_pagina: {num_pagina}, using default 1")
+                num_pagina = 1
+
+            if not isinstance(tam_pagina, int) or tam_pagina < 1:
+                logger.warning(f"Invalid tam_pagina: {tam_pagina}, using default 10")
+                tam_pagina = 10
+
+            if campo_orden not in ['NUMERO_TELF', 'ID_TIPO_AGENTE', 'ACCESO_GENERAL', 'ESTADO_OPERATIVO', 'AREA', 'ID_ESTADO_REGISTRO']:
+                logger.warning(f"Invalid campo_orden: {campo_orden}, using default 'NUMERO_TELF'")
+                campo_orden = 'NUMERO_TELF'
+
+            if dir_orden not in ['ASC', 'DESC']:
+                logger.warning(f"Invalid dir_orden: {dir_orden}, using default 'ASC'")
+                dir_orden = 'ASC'
+
+            if filtro_estado is not None and filtro_estado not in [0, 1]:
+                logger.warning(f"Invalid filtro_estado: {filtro_estado}, using None")
+                filtro_estado = None
+
+            if filtro_operativo is not None and filtro_operativo not in [0, 1]:
+                logger.warning(f"Invalid filtro_operativo: {filtro_operativo}, using None")
+                filtro_operativo = None
+
+            # Trim search term if provided
+            if term_busqueda:
+                term_busqueda = term_busqueda.strip()[:200]
+
+            # Use repository to get paginated agents with SP_AGENTES_LST_PAG
+            result = repository.get_agentes_paginated(
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                num_pagina=num_pagina,
+                tam_pagina=tam_pagina,
+                term_busqueda=term_busqueda,
+                campo_orden=campo_orden,
+                dir_orden=dir_orden,
+                filtro_estado=filtro_estado,
+                filtro_operativo=filtro_operativo
+            )
+
+            # Log results
+            if result.get('message_result'):
+                # Authorization or error message
+                msg_type = result['message_result'].get('ID_TIPO_MENSAJE')
+                mensaje = result['message_result'].get('MENSAJE')
+                logger.warning(f"Agents pagination returned message: Type={msg_type}, Message={mensaje}")
+            elif result.get('data'):
+                # Successful pagination
+                pagination = result.get('pagination', {})
+                logger.info(
+                    f"Agents paginated successfully: Company={id_empresa}, "
+                    f"Page={pagination.get('current_page')}/{pagination.get('total_pages')}, "
+                    f"Records={len(result['data'])}/{pagination.get('total_records')}, "
+                    f"Search='{term_busqueda}', Order={campo_orden} {dir_orden}, "
+                    f"StatusFilter={filtro_estado}, OperativeFilter={filtro_operativo}"
+                )
+            else:
+                logger.info(f"No agents found for company: {id_empresa}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in get_agentes_paginated service: {e}")
+            raise
+    
     async def verify_acceso_agente(
         self,
         db: Session,
