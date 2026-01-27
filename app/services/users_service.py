@@ -18,55 +18,6 @@ class UsersService:
         """Initialize stateless UsersService - no db parameter."""
         pass
 
-    async def get_usuarios(
-        self,
-        db: Session,
-        id_empresa: int
-    ) -> List[Dict[str, Any]]:
-        """
-        Get all users for a company using stored procedure.
-
-        Args:
-            db: Database session
-            id_empresa: Company ID
-
-        Returns:
-            List of dictionaries containing user information:
-            - ID_USUARIO_EMPR_AREA: User Company Area ID
-            - ID_USUARIO: User ID
-            - USUARIO: Username
-            - NOMBRES: First names
-            - APELLIDOS: Last names
-            - ID_ESTADO_REGISTRO: Record status
-            - ID_EMPRESA: Company ID
-            - ID_AREA: Area ID
-            - AREA: Area name
-            - ID_TIPO_ROL: Role type ID
-            - ROL: Role name
-            Empty list if query failed
-        """
-        try:
-            # Create repository for this request
-            repository = UsersRepository(db)
-
-            # Validate input
-            if not isinstance(id_empresa, int) or id_empresa <= 0:
-                logger.error(f"Invalid id_empresa: {id_empresa}")
-                return []
-
-            # Use repository to get users with SP_USUARIOS_LST
-            results = repository.get_usuarios(id_empresa=id_empresa)
-
-            if results:
-                logger.info(f"Users retrieved successfully: Company={id_empresa}, Count={len(results)}")
-            else:
-                logger.info(f"No users found for company: {id_empresa}")
-
-            return results
-
-        except Exception as e:
-            logger.error(f"Error in get_usuarios service: {e}")
-            raise
 
     async def create_usuario(
         self,
