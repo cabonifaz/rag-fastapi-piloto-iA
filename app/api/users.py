@@ -294,6 +294,7 @@ async def update_usuario_endpoint(
             usuario=request.usuario,
             nombres=request.nombres,
             apellidos=request.apellidos,
+            codigo_pais=request.codigo_pais,
             telefono=request.telefono
         )
 

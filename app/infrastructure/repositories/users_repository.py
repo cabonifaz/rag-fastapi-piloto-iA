@@ -131,7 +131,8 @@ class UsersRepository:
         usuario: str,
         nombres: str,
         apellidos: str,
-        telefono: str = None
+        codigo_pais: str,
+        telefono: str
     ) -> List[Dict[str, Any]]:
         """
         Update user data using stored procedure SP_UPDATE_DATOS_USUARIO
@@ -142,7 +143,8 @@ class UsersRepository:
             usuario: New username (max 200 chars)
             nombres: New first names (max 200 chars)
             apellidos: New last names (max 200 chars)
-            telefono: Phone number (max 15 chars), optional (default None)
+            codigo_pais: Country code (max 8 chars)
+            telefono: Phone number (max 15 chars)
 
         Returns:
             List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
@@ -155,12 +157,13 @@ class UsersRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_UPDATE_DATOS_USUARIO @ID_ADMIN = ?, @ID_USUARIO = ?, @USUARIO = ?, @NOMBRES = ?, @APELLIDOS = ?, @TELEFONO = ?",
+                    "EXEC SP_UPDATE_DATOS_USUARIO @ID_ADMIN = ?, @ID_USUARIO = ?, @USUARIO = ?, @NOMBRES = ?, @APELLIDOS = ?, @CODIGO_PAIS = ?, @TELEFONO = ?",
                     id_admin,
                     id_usuario,
                     usuario,
                     nombres,
                     apellidos,
+                    codigo_pais,
                     telefono
                 )
 

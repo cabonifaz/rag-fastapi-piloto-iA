@@ -134,7 +134,8 @@ class UsersService:
         usuario: str,
         nombres: str,
         apellidos: str,
-        telefono: str = None
+        codigo_pais: str,
+        telefono: str
     ) -> List[Dict[str, Any]]:
         """
         Update user data using stored procedure.
@@ -146,7 +147,8 @@ class UsersService:
             usuario: New username (max 200 chars)
             nombres: New first names (max 200 chars)
             apellidos: New last names (max 200 chars)
-            telefono: Phone number (max 15 chars), optional (default None)
+            codigo_pais: Country code (max 8 chars)
+            telefono: Phone number (max 15 chars)
 
         Returns:
             List of dictionaries containing:
@@ -183,6 +185,7 @@ class UsersService:
             usuario = usuario.strip()[:200]
             nombres = nombres.strip()[:200]
             apellidos = apellidos.strip()[:200]
+            codigo_pais = codigo_pais.strip()[:8]
             telefono = telefono.strip()[:15]
 
             # Use repository to update user with SP_UPDATE_DATOS_USUARIO
@@ -192,6 +195,7 @@ class UsersService:
                 usuario=usuario,
                 nombres=nombres,
                 apellidos=apellidos,
+                codigo_pais=codigo_pais,
                 telefono=telefono
             )
 

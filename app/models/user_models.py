@@ -69,7 +69,8 @@ class UpdateUserRequest(BaseModel):
     usuario: str
     nombres: str
     apellidos: str
-    telefono: Optional[str] = None
+    codigo_pais: str
+    telefono: str
 
 
 class UpdateUserStatusRequest(BaseModel):
