@@ -27,6 +27,7 @@ class UsersService:
         password: str,
         nombres: str,
         apellidos: str,
+        codigo_pais: str,
         telefono: str,
         nuevo_rol: int,
         id_empresa: int,
@@ -42,6 +43,7 @@ class UsersService:
             password: Password (max 100 chars)
             nombres: First names (max 100 chars)
             apellidos: Last names (max 100 chars)
+            codigo_pais: Country code (max 8 chars)
             telefono: Phone number (max 15 chars)
             nuevo_rol: Role type ID (1=Super Admin, 2=Admin, 3=User)
             id_empresa: Company ID
@@ -95,7 +97,8 @@ class UsersService:
             password = password.strip()[:100]
             nombres = nombres.strip()[:100]
             apellidos = apellidos.strip()[:100]
-            telefono = telefono.strip()[:15] if telefono else ""
+            codigo_pais = codigo_pais.strip()[:8]
+            telefono = telefono.strip()[:15]
             areas_string = areas_string.strip()[:100]
 
             # Use repository to create user with SP_CREATE_USUARIO
@@ -105,6 +108,7 @@ class UsersService:
                 password=password,
                 nombres=nombres,
                 apellidos=apellidos,
+                codigo_pais=codigo_pais,
                 telefono=telefono,
                 nuevo_rol=nuevo_rol,
                 id_empresa=id_empresa,

@@ -26,6 +26,7 @@ class UsersRepository:
         password: str,
         nombres: str,
         apellidos: str,
+        codigo_pais: str,
         telefono: str,
         nuevo_rol: int,
         id_empresa: int,
@@ -40,6 +41,7 @@ class UsersRepository:
             password: Password (max 100 chars)
             nombres: First names (max 100 chars)
             apellidos: Last names (max 100 chars)
+            codigo_pais: Country code (max 8 chars)
             telefono: Phone number (max 15 chars)
             nuevo_rol: Role type ID
             id_empresa: Company ID
@@ -56,12 +58,13 @@ class UsersRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_CREATE_USUARIO @ID_USUARIO = ?, @NUEVO_USUARIO = ?, @PASSWORD = ?, @NOMBRES = ?, @APELLIDOS = ?, @TELEFONO = ?, @NUEVO_ROL = ?, @ID_EMPRESA = ?, @AREAS_STRING = ?",
+                    "EXEC SP_CREATE_USUARIO @ID_USUARIO = ?, @NUEVO_USUARIO = ?, @PASSWORD = ?, @NOMBRES = ?, @APELLIDOS = ?, @CODIGO_PAIS = ?, @TELEFONO = ?, @NUEVO_ROL = ?, @ID_EMPRESA = ?, @AREAS_STRING = ?",
                     id_usuario,
                     nuevo_usuario,
                     password,
                     nombres,
                     apellidos,
+                    codigo_pais,
                     telefono,
                     nuevo_rol,
                     id_empresa,

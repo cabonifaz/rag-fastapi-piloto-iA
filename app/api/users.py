@@ -196,7 +196,8 @@ async def create_usuario_endpoint(
             password=request.password,
             nombres=request.nombres,
             apellidos=request.apellidos,
-            telefono=request.telefono or "",
+            codigo_pais=request.codigo_pais,
+            telefono=request.telefono,
             nuevo_rol=request.nuevo_rol,
             id_empresa=request.id_empresa,
             areas_string=request.areas_string
