@@ -1,8 +1,8 @@
 """API endpoints for users management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 
 from app.core.database import get_db
@@ -24,13 +24,13 @@ def get_users_service() -> UsersService:
 
 @router.get("/get_usuarios_paginated")
 async def get_usuarios_paginated_endpoint(
-    id_empresa: int,
-    num_pagina: int = 1,
-    tam_pagina: int = 10,
-    term_busqueda: str = None,
-    campo_orden: str = 'APELLIDOS',
-    dir_orden: str = 'ASC',
-    filtro_estado: int = None,
+    id_empresa: int = Query(..., gt=0, description="ID de empresa"),
+    num_pagina: int = Query(default=1, ge=1, description="Número de página"),
+    tam_pagina: int = Query(default=10, ge=1, le=100, description="Filas por página (1-100)"),
+    term_busqueda: Optional[str] = Query(default=None, max_length=200, description="Término de búsqueda"),
+    campo_orden: str = Query(default='APELLIDOS', description="Campo de ordenamiento"),
+    dir_orden: str = Query(default='ASC', pattern='^(ASC|DESC)$', description="Dirección de ordenamiento"),
+    filtro_estado: Optional[int] = Query(default=None, ge=0, le=1, description="Filtro de estado: 0=inactivo, 1=activo, null=todos"),
     users_service: UsersService = Depends(get_users_service),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
@@ -75,14 +75,6 @@ async def get_usuarios_paginated_endpoint(
             raise HTTPException(
                 status_code=403,
                 detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
-            )
-
-        # Validate id_empresa parameter
-        if not isinstance(id_empresa, int) or id_empresa <= 0:
-            error_response = create_error_response("ID de empresa inválido")
-            raise HTTPException(
-                status_code=422,
-                detail={"result": error_response.model_dump()}
             )
 
         # Get paginated usuarios using service

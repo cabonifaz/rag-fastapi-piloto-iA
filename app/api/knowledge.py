@@ -1,8 +1,8 @@
 """API endpoints for knowledge/document management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 import httpx
 
@@ -13,7 +13,6 @@ from app.services.knowledge_service import KnowledgeService
 from app.models.response_models import create_success_response, create_error_response
 from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest, BatchUpdateKnowledgeStateRequest, BatchDeleteKnowledgeRequest
 from app.utils.jwt_auth import get_current_user_with_company_validation, get_current_user, JWTAuth
-from app.models.knowledge_models import GetKnowledgeRequest, UpdateKnowledgeStateRequest, BatchUploadKnowledgeRequest, BatchUpdateKnowledgeStateRequest, BatchDeleteKnowledgeRequest, GetKnowledgePaginatedRequest
 
 logger = logging.getLogger(__name__)
 
@@ -550,10 +549,17 @@ async def batch_delete_knowledge_endpoint(
         )
 
 
-@router.post("/get_knowledge_paginated")
+@router.get("/get_knowledge_paginated")
 async def get_knowledge_paginated_endpoint(
     http_request: Request,
-    request: GetKnowledgePaginatedRequest,
+    id_empresa: int = Query(..., gt=0, description="ID de empresa"),
+    id_area: Optional[int] = Query(default=None, gt=0, description="ID de área (opcional)"),
+    num_pagina: int = Query(default=1, ge=1, description="Número de página"),
+    tam_pagina: int = Query(default=10, ge=1, le=100, description="Filas por página (1-100)"),
+    term_busqueda: Optional[str] = Query(default=None, max_length=200, description="Término de búsqueda"),
+    campo_orden: str = Query(default='FCHMOD', description="Campo de ordenamiento"),
+    dir_orden: str = Query(default='DESC', pattern='^(ASC|DESC)$', description="Dirección de ordenamiento"),
+    filtro_estado: Optional[int] = Query(default=None, ge=0, le=7, description="Filtro de estado (0-7)"),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
 ):
@@ -596,58 +602,19 @@ async def get_knowledge_paginated_endpoint(
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
             )
 
-        # Validate id_empresa parameter
-        if not isinstance(request.id_empresa, int) or request.id_empresa <= 0:
-            error_response = create_error_response("ID de empresa inválido")
-            raise HTTPException(
-                status_code=422,
-                detail={"result": error_response.model_dump()}
-            )
-
-        # Validate id_area parameter if provided
-        if request.id_area is not None and (not isinstance(request.id_area, int) or request.id_area <= 0):
-            error_response = create_error_response("ID de área inválido")
-            raise HTTPException(
-                status_code=422,
-                detail={"result": error_response.model_dump()}
-            )
-
-        # Validate pagination parameters
-        if request.num_pagina < 1:
-            error_response = create_error_response("Número de página debe ser mayor a 0")
-            raise HTTPException(
-                status_code=422,
-                detail={"result": error_response.model_dump()}
-            )
-
-        if request.tam_pagina < 1 or request.tam_pagina > 100:
-            error_response = create_error_response("Tamaño de página debe estar entre 1 y 100")
-            raise HTTPException(
-                status_code=422,
-                detail={"result": error_response.model_dump()}
-            )
-
-        # Validate filtro_estado if provided (must be between 0 and 7)
-        if request.filtro_estado is not None and (request.filtro_estado < 0 or request.filtro_estado > 7):
-            error_response = create_error_response("Estado de proceso debe estar entre 0 y 7")
-            raise HTTPException(
-                status_code=422,
-                detail={"result": error_response.model_dump()}
-            )
-
         # Get paginated knowledge using service
         blob_storage = container.get_blob_storage()
         service = KnowledgeService(db, blob_storage)
         result = await service.get_knowledge_by_company_paginated(
             id_usuario=user_id,
-            id_empresa=request.id_empresa,
-            id_area=request.id_area,
-            num_pagina=request.num_pagina,
-            tam_pagina=request.tam_pagina,
-            term_busqueda=request.term_busqueda,
-            campo_orden=request.campo_orden,
-            dir_orden=request.dir_orden,
-            filtro_estado=request.filtro_estado
+            id_empresa=id_empresa,
+            id_area=id_area,
+            num_pagina=num_pagina,
+            tam_pagina=tam_pagina,
+            term_busqueda=term_busqueda if term_busqueda else None,
+            campo_orden=campo_orden,
+            dir_orden=dir_orden,
+            filtro_estado=filtro_estado
         )
 
         if result is None:

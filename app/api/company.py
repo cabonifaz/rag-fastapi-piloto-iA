@@ -354,12 +354,20 @@ async def get_companies_paginated_endpoint(
     """
     try:
         user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
         
         if not user_id:
             error_response = create_error_response("Informacion de usuario incompleta en el token")
             raise HTTPException(
                 status_code=400,
                 detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1)
+        if role_id != 1:
+            raise HTTPException(
+                status_code=403,
+                detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
             )
 
         # Call service with Spanish parameter names
