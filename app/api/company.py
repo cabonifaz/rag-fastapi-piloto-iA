@@ -316,15 +316,15 @@ async def get_companies_paginated_endpoint(
     search: Optional[str] = Query(default=None, max_length=200, description="Término de búsqueda"),
     order_field: str = Query(
         default='RAZON_SOCIAL',
-        regex='^(ID_EMPRESA|RUC|RAZON_SOCIAL|FCHCRE|ID_ESTADO_REGISTRO)$',
+        pattern='^(ID_EMPRESA|RUC|RAZON_SOCIAL|FCHCRE|ID_ESTADO_REGISTRO)$',
         description="Campo de ordenamiento"
     ),
     order_direction: str = Query(
         default='ASC',
-        regex='^(ASC|DESC)$',
+        pattern='^(ASC|DESC)$',
         description="Dirección de ordenamiento"
     ),
-    status_filter: Optional[int] = Query(default=None, ge=0, le=1, description="Filtro de estado: 0=inactivo, 1=activo, null=todos"),  
+    status_filter: Optional[int] = Query(default=None, ge=0, le=1, description="Filtro de estado: 0=inactivo, 1=activo, null=todos"),
     company_service: CompanyService = Depends(get_company_service),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
