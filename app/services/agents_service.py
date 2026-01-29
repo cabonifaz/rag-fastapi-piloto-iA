@@ -19,54 +19,6 @@ class AgentsService:
         """Initialize stateless AgentsService - no db parameter."""
         pass
 
-    async def get_agentes(
-        self,
-        db: Session,
-        id_empresa: int
-    ) -> List[Dict[str, Any]]:
-        """
-        Get all agents for a company using stored procedure.
-
-        Args:
-            db: Database session
-            id_empresa: Company ID
-
-        Returns:
-            List of dictionaries containing agent information:
-            - ID_AGENTE_EMPR_AREA: Agent Company Area ID
-            - ID_AGENTE: Agent ID
-            - NUMERO_TELF: Phone number
-            - ID_TIPO_AGENTE: Agent type ID
-            - ACCESO_GENERAL: General access flag
-            - ESTADO_OPERATIVO: Operational status
-            - ID_ESTADO_REGISTRO: Record status
-            - ID_EMPRESA: Company ID
-            - ID_AREA: Area ID
-            - AREA: Area name
-            Empty list if query failed
-        """
-        try:
-            # Create repository for this request
-            repository = AgentsRepository(db)
-
-            # Validate input
-            if not isinstance(id_empresa, int) or id_empresa <= 0:
-                logger.error(f"Invalid id_empresa: {id_empresa}")
-                return []
-
-            # Use repository to get agents with SP_AGENTES_LST
-            results = repository.get_agentes(id_empresa=id_empresa)
-
-            if results:
-                logger.info(f"Agents retrieved successfully: Company={id_empresa}, Count={len(results)}")
-            else:
-                logger.info(f"No agents found for company: {id_empresa}")
-
-            return results
-
-        except Exception as e:
-            logger.error(f"Error in get_agentes service: {e}")
-            raise
 
     async def create_agente(
         self,

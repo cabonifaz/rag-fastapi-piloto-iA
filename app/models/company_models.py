@@ -1,7 +1,7 @@
 """Pydantic models for company management."""
 
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 
 class CompanyCreateRequest(BaseModel):
@@ -20,6 +20,16 @@ class CompanyLogoUploadRequest(BaseModel):
     """Request model for generating presigned URL for logo upload."""
     id_empresa: int = Field(..., gt=0, description="Company ID")
     logo_filename: str = Field(..., min_length=1, max_length=255, description="Logo filename (e.g., 'logo.png')")
+
+
+class GetCompaniesPaginatedRequest(BaseModel):
+    """Request model for getting paginated companies"""
+    num_pagina: int = 1
+    tam_pagina: int = 10
+    term_busqueda: Optional[str] = None
+    campo_orden: Optional[str] = "RAZON_SOCIAL"
+    dir_orden: Optional[str] = "ASC"
+    filtro_estado: Optional[int] = None
 
 
 class PaginationInfo(BaseModel):

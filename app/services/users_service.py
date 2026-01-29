@@ -18,55 +18,6 @@ class UsersService:
         """Initialize stateless UsersService - no db parameter."""
         pass
 
-    async def get_usuarios(
-        self,
-        db: Session,
-        id_empresa: int
-    ) -> List[Dict[str, Any]]:
-        """
-        Get all users for a company using stored procedure.
-
-        Args:
-            db: Database session
-            id_empresa: Company ID
-
-        Returns:
-            List of dictionaries containing user information:
-            - ID_USUARIO_EMPR_AREA: User Company Area ID
-            - ID_USUARIO: User ID
-            - USUARIO: Username
-            - NOMBRES: First names
-            - APELLIDOS: Last names
-            - ID_ESTADO_REGISTRO: Record status
-            - ID_EMPRESA: Company ID
-            - ID_AREA: Area ID
-            - AREA: Area name
-            - ID_TIPO_ROL: Role type ID
-            - ROL: Role name
-            Empty list if query failed
-        """
-        try:
-            # Create repository for this request
-            repository = UsersRepository(db)
-
-            # Validate input
-            if not isinstance(id_empresa, int) or id_empresa <= 0:
-                logger.error(f"Invalid id_empresa: {id_empresa}")
-                return []
-
-            # Use repository to get users with SP_USUARIOS_LST
-            results = repository.get_usuarios(id_empresa=id_empresa)
-
-            if results:
-                logger.info(f"Users retrieved successfully: Company={id_empresa}, Count={len(results)}")
-            else:
-                logger.info(f"No users found for company: {id_empresa}")
-
-            return results
-
-        except Exception as e:
-            logger.error(f"Error in get_usuarios service: {e}")
-            raise
 
     async def create_usuario(
         self,
@@ -76,6 +27,7 @@ class UsersService:
         password: str,
         nombres: str,
         apellidos: str,
+        codigo_pais: str,
         telefono: str,
         nuevo_rol: int,
         id_empresa: int,
@@ -91,6 +43,7 @@ class UsersService:
             password: Password (max 100 chars)
             nombres: First names (max 100 chars)
             apellidos: Last names (max 100 chars)
+            codigo_pais: Country code (max 8 chars)
             telefono: Phone number (max 15 chars)
             nuevo_rol: Role type ID (1=Super Admin, 2=Admin, 3=User)
             id_empresa: Company ID
@@ -144,7 +97,8 @@ class UsersService:
             password = password.strip()[:100]
             nombres = nombres.strip()[:100]
             apellidos = apellidos.strip()[:100]
-            telefono = telefono.strip()[:15] if telefono else ""
+            codigo_pais = codigo_pais.strip()[:8]
+            telefono = telefono.strip()[:15]
             areas_string = areas_string.strip()[:100]
 
             # Use repository to create user with SP_CREATE_USUARIO
@@ -154,6 +108,7 @@ class UsersService:
                 password=password,
                 nombres=nombres,
                 apellidos=apellidos,
+                codigo_pais=codigo_pais,
                 telefono=telefono,
                 nuevo_rol=nuevo_rol,
                 id_empresa=id_empresa,
@@ -179,7 +134,8 @@ class UsersService:
         usuario: str,
         nombres: str,
         apellidos: str,
-        telefono: str = None
+        codigo_pais: str,
+        telefono: str
     ) -> List[Dict[str, Any]]:
         """
         Update user data using stored procedure.
@@ -191,7 +147,8 @@ class UsersService:
             usuario: New username (max 200 chars)
             nombres: New first names (max 200 chars)
             apellidos: New last names (max 200 chars)
-            telefono: Phone number (max 15 chars), optional (default None)
+            codigo_pais: Country code (max 8 chars)
+            telefono: Phone number (max 15 chars)
 
         Returns:
             List of dictionaries containing:
@@ -228,6 +185,7 @@ class UsersService:
             usuario = usuario.strip()[:200]
             nombres = nombres.strip()[:200]
             apellidos = apellidos.strip()[:200]
+            codigo_pais = codigo_pais.strip()[:8]
             telefono = telefono.strip()[:15]
 
             # Use repository to update user with SP_UPDATE_DATOS_USUARIO
@@ -237,6 +195,7 @@ class UsersService:
                 usuario=usuario,
                 nombres=nombres,
                 apellidos=apellidos,
+                codigo_pais=codigo_pais,
                 telefono=telefono
             )
 

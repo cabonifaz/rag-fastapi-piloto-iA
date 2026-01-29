@@ -1,8 +1,8 @@
 """API endpoints for users management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 
 from app.core.database import get_db
@@ -24,13 +24,13 @@ def get_users_service() -> UsersService:
 
 @router.get("/get_usuarios_paginated")
 async def get_usuarios_paginated_endpoint(
-    id_empresa: int,
-    num_pagina: int = 1,
-    tam_pagina: int = 10,
-    term_busqueda: str = None,
-    campo_orden: str = 'APELLIDOS',
-    dir_orden: str = 'ASC',
-    filtro_estado: int = None,
+    id_empresa: int = Query(..., gt=0, description="ID de empresa"),
+    num_pagina: int = Query(default=1, ge=1, description="Número de página"),
+    tam_pagina: int = Query(default=10, ge=1, le=100, description="Filas por página (1-100)"),
+    term_busqueda: Optional[str] = Query(default=None, max_length=200, description="Término de búsqueda"),
+    campo_orden: str = Query(default='APELLIDOS', description="Campo de ordenamiento"),
+    dir_orden: str = Query(default='ASC', pattern='^(ASC|DESC)$', description="Dirección de ordenamiento"),
+    filtro_estado: Optional[int] = Query(default=None, ge=0, le=1, description="Filtro de estado: 0=inactivo, 1=activo, null=todos"),
     users_service: UsersService = Depends(get_users_service),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
@@ -75,14 +75,6 @@ async def get_usuarios_paginated_endpoint(
             raise HTTPException(
                 status_code=403,
                 detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
-            )
-
-        # Validate id_empresa parameter
-        if not isinstance(id_empresa, int) or id_empresa <= 0:
-            error_response = create_error_response("ID de empresa inválido")
-            raise HTTPException(
-                status_code=422,
-                detail={"result": error_response.model_dump()}
             )
 
         # Get paginated usuarios using service
@@ -144,87 +136,6 @@ async def get_usuarios_paginated_endpoint(
             detail={"result": error_response.model_dump()}
         )
 
-@router.get("/get_usuarios/{id_empresa}")
-async def get_usuarios_endpoint(
-    id_empresa: int,
-    users_service: UsersService = Depends(get_users_service),
-    db: Session = Depends(get_db),
-    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
-):
-    """
-    Get all users for a company endpoint.
-
-    Fetches all users for a specific company using SP_USUARIOS_LST.
-    Requires JWT authentication and validates company access.
-
-    Args:
-        id_empresa: Company ID from URL path
-
-    Returns:
-        Dict with:
-        - usuarios: List of user dictionaries
-        - result: Success/error response
-
-    Raises:
-        HTTPException: 401 for auth errors, 403 for access denied, 500 for server errors
-    """
-    try:
-        user_id = current_user.get('ID_USUARIO')
-        role_id = current_user.get('ID_TIPO_ROL')
-
-        if not user_id:
-            error_response = create_error_response("Informacion de usuario incompleta en el token")
-            raise HTTPException(
-                status_code=400,
-                detail={"result": error_response.model_dump()}
-            )
-
-        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
-        if role_id not in [1, 2]:
-            raise HTTPException(
-                status_code=403,
-                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
-            )
-
-        # Validate id_empresa parameter
-        if not isinstance(id_empresa, int) or id_empresa <= 0:
-            error_response = create_error_response("ID de empresa inválido")
-            raise HTTPException(
-                status_code=422,
-                detail={"result": error_response.model_dump()}
-            )
-
-        # Get usuarios using service
-        usuarios = await users_service.get_usuarios(
-            db=db,
-            id_empresa=id_empresa
-        )
-
-        if usuarios is None:
-            error_response = create_error_response("Error al obtener los usuarios")
-            raise HTTPException(
-                status_code=500,
-                detail={"result": error_response.model_dump()}
-            )
-
-        success_response = create_success_response("Usuarios obtenidos exitosamente")
-        return {
-            "usuarios": usuarios,
-            "result": success_response.model_dump()
-        }
-
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
-        raise
-
-    except Exception as e:
-        logger.error(f"Unexpected error in get_usuarios endpoint: {e}")
-        error_response = create_error_response("Error interno del servidor")
-        raise HTTPException(
-            status_code=500,
-            detail={"result": error_response.model_dump()}
-        )
-
 
 @router.post("/create_usuario")
 async def create_usuario_endpoint(
@@ -277,7 +188,8 @@ async def create_usuario_endpoint(
             password=request.password,
             nombres=request.nombres,
             apellidos=request.apellidos,
-            telefono=request.telefono or "",
+            codigo_pais=request.codigo_pais,
+            telefono=request.telefono,
             nuevo_rol=request.nuevo_rol,
             id_empresa=request.id_empresa,
             areas_string=request.areas_string
@@ -374,6 +286,7 @@ async def update_usuario_endpoint(
             usuario=request.usuario,
             nombres=request.nombres,
             apellidos=request.apellidos,
+            codigo_pais=request.codigo_pais,
             telefono=request.telefono
         )
 

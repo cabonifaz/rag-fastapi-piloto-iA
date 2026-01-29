@@ -56,7 +56,8 @@ class CreateUserRequest(BaseModel):
     password: str
     nombres: str
     apellidos: str
-    telefono: Optional[str] = None
+    codigo_pais: str
+    telefono: str
     nuevo_rol: int
     id_empresa: int
     areas_string: str
@@ -68,7 +69,8 @@ class UpdateUserRequest(BaseModel):
     usuario: str
     nombres: str
     apellidos: str
-    telefono: Optional[str] = None
+    codigo_pais: str
+    telefono: str
 
 
 class UpdateUserStatusRequest(BaseModel):
