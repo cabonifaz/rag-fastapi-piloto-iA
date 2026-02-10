@@ -224,6 +224,321 @@ class AgentsService:
             logger.error(f"Error in get_agentes_paginated service: {e}")
             raise
     
+    async def update_datos_agente(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_agente: int,
+        numero_telf: str,
+        codigo_pais: str,
+        id_tipo_agente: int,
+        acceso_general: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent data using stored procedure.
+
+        Args:
+            db: Database session
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to update
+            numero_telf: Phone number (max 20 chars)
+            codigo_pais: Country code (max 8 chars)
+            id_tipo_agente: Agent type ID
+            acceso_general: General access flag (0 or 1)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = AgentsRepository(db)
+
+            # Validate input
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not isinstance(id_agente, int):
+                logger.error(f"Invalid id_agente: {id_agente}")
+                return []
+
+            if not numero_telf or len(numero_telf.strip()) == 0:
+                logger.error("Phone number cannot be empty")
+                return []
+
+            if not codigo_pais or len(codigo_pais.strip()) == 0:
+                logger.error("Country code cannot be empty")
+                return []
+
+            if not isinstance(id_tipo_agente, int) or id_tipo_agente <= 0:
+                logger.error(f"Invalid id_tipo_agente: {id_tipo_agente}")
+                return []
+
+            if not isinstance(acceso_general, int) or acceso_general not in [0, 1]:
+                logger.error(f"Invalid acceso_general: {acceso_general}. Must be 0 or 1")
+                return []
+
+            # Trim inputs to match database constraints
+            numero_telf = numero_telf.strip()[:20]
+            codigo_pais = codigo_pais.strip()[:8]
+
+            # Use repository to update agent with SP_UPDATE_DATOS_AGENTE
+            results = repository.update_datos_agente(
+                id_usuario=id_usuario,
+                id_agente=id_agente,
+                numero_telf=numero_telf,
+                codigo_pais=codigo_pais,
+                id_tipo_agente=id_tipo_agente,
+                acceso_general=acceso_general
+            )
+
+            if results:
+                logger.info(f"Agent updated successfully: ID_AGENTE={id_agente}, Results count={len(results)}")
+            else:
+                logger.warning(f"Agent update returned no results: ID_AGENTE={id_agente}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_datos_agente service: {e}")
+            raise
+
+    async def update_agente_status(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_agente: int,
+        status: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent status using stored procedure.
+
+        Args:
+            db: Database session
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to update
+            status: New status (0 = inactive, 1 = active)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = AgentsRepository(db)
+
+            # Validate input
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not isinstance(id_agente, int):
+                logger.error(f"Invalid id_agente: {id_agente}")
+                return []
+
+            if not isinstance(status, int) or status not in [0, 1]:
+                logger.error(f"Invalid status: {status}. Must be 0 (inactive) or 1 (active)")
+                return []
+
+            # Use repository to update agent status with SP_UPDATE_AGENTE_STATUS
+            results = repository.update_agente_status(
+                id_usuario=id_usuario,
+                id_agente=id_agente,
+                status=status
+            )
+
+            if results:
+                status_text = "active" if status == 1 else "inactive"
+                logger.info(f"Agent status updated successfully: ID_AGENTE={id_agente}, Status={status_text}, Results count={len(results)}")
+            else:
+                logger.warning(f"Agent status update returned no results: ID_AGENTE={id_agente}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_agente_status service: {e}")
+            raise
+
+    async def update_agente_operativo(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_agente: int,
+        operativo: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent operative status using stored procedure.
+
+        Args:
+            db: Database session
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to update
+            operativo: Operative status (0 = inoperative, 1 = operative)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = AgentsRepository(db)
+
+            # Validate input
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not isinstance(id_agente, int):
+                logger.error(f"Invalid id_agente: {id_agente}")
+                return []
+
+            if not isinstance(operativo, int) or operativo not in [0, 1]:
+                logger.error(f"Invalid operativo: {operativo}. Must be 0 (inoperative) or 1 (operative)")
+                return []
+
+            # Use repository to update agent operative status with SP_UPDATE_AGENTE_OPERATIVO
+            results = repository.update_agente_operativo(
+                id_usuario=id_usuario,
+                id_agente=id_agente,
+                operativo=operativo
+            )
+
+            if results:
+                operativo_text = "operative" if operativo == 1 else "inoperative"
+                logger.info(f"Agent operative status updated successfully: ID_AGENTE={id_agente}, Operativo={operativo_text}, Results count={len(results)}")
+            else:
+                logger.warning(f"Agent operative status update returned no results: ID_AGENTE={id_agente}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_agente_operativo service: {e}")
+            raise
+
+    async def update_agente_secret_key(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_agente: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent secret key using stored procedure.
+
+        Args:
+            db: Database session
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to regenerate secret key for
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = AgentsRepository(db)
+
+            # Validate input
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not isinstance(id_agente, int):
+                logger.error(f"Invalid id_agente: {id_agente}")
+                return []
+
+            # Use repository to update agent secret key with SP_UPDATE_AGENTE_SECRET_KEY
+            results = repository.update_agente_secret_key(
+                id_usuario=id_usuario,
+                id_agente=id_agente
+            )
+
+            if results:
+                logger.info(f"Agent secret key updated successfully: ID_AGENTE={id_agente}, Results count={len(results)}")
+            else:
+                logger.warning(f"Agent secret key update returned no results: ID_AGENTE={id_agente}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_agente_secret_key service: {e}")
+            raise
+
+    async def update_agente_access(
+        self,
+        db: Session,
+        id_usuario: int,
+        id_agente: int,
+        id_empresa: int,
+        areas_string: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent area access using stored procedure.
+
+        Args:
+            db: Database session
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to update
+            id_empresa: Company ID
+            areas_string: Comma-separated area IDs (max 100 chars)
+
+        Returns:
+            List of dictionaries containing:
+            - ID_TIPO_MENSAJE: Message type ID
+            - MENSAJE: Status message
+            Empty list if update failed
+        """
+        try:
+            # Create repository for this request
+            repository = AgentsRepository(db)
+
+            # Validate input
+            if not isinstance(id_usuario, int):
+                logger.error(f"Invalid id_usuario: {id_usuario}")
+                return []
+
+            if not isinstance(id_agente, int):
+                logger.error(f"Invalid id_agente: {id_agente}")
+                return []
+
+            if not isinstance(id_empresa, int) or id_empresa <= 0:
+                logger.error(f"Invalid id_empresa: {id_empresa}")
+                return []
+
+            if not areas_string or len(areas_string.strip()) == 0:
+                logger.error("Areas string cannot be empty")
+                return []
+
+            # Trim input to match database constraints
+            areas_string = areas_string.strip()[:100]
+
+            # Use repository to update agent access with SP_UPDATE_AGENTE_ACCESS
+            results = repository.update_agente_access(
+                id_usuario=id_usuario,
+                id_agente=id_agente,
+                id_empresa=id_empresa,
+                areas_string=areas_string
+            )
+
+            if results:
+                logger.info(f"Agent access updated successfully: ID_AGENTE={id_agente}, ID_EMPRESA={id_empresa}, AREAS={areas_string}, Results count={len(results)}")
+            else:
+                logger.warning(f"Agent access update returned no results: ID_AGENTE={id_agente}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in update_agente_access service: {e}")
+            raise
+
     async def verify_acceso_agente(
         self,
         db: Session,

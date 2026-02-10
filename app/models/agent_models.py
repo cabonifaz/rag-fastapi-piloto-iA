@@ -12,6 +12,39 @@ class CreateAgentRequest(BaseModel):
     areas_string: str
 
 
+class UpdateAgentRequest(BaseModel):
+    """Request model for updating agent data"""
+    id_agente: int
+    numero_telf: str
+    codigo_pais: str
+    id_tipo_agente: int
+    acceso_general: int
+
+
+class UpdateAgentStatusRequest(BaseModel):
+    """Request model for updating agent status"""
+    id_agente: int
+    status: int
+
+
+class UpdateAgentOperativoRequest(BaseModel):
+    """Request model for updating agent operative status"""
+    id_agente: int
+    operativo: int
+
+
+class UpdateAgentSecretKeyRequest(BaseModel):
+    """Request model for updating agent secret key"""
+    id_agente: int
+
+
+class UpdateAgentAccessRequest(BaseModel):
+    """Request model for updating agent area access"""
+    id_agente: int
+    id_empresa: int
+    areas_string: str
+
+
 class AgentLoginRequest(BaseModel):
     """Request model for agent login"""
     numero_telf: str

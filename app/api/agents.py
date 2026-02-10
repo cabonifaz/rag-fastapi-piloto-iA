@@ -9,7 +9,11 @@ from app.core.database import get_db
 from app.core.container import container
 from app.services.agents_service import AgentsService
 from app.models.response_models import create_success_response, create_error_response
-from app.models.agent_models import CreateAgentRequest, AgentLoginRequest, AgentLoginResponse
+from app.models.agent_models import (
+    CreateAgentRequest, AgentLoginRequest, AgentLoginResponse,
+    UpdateAgentRequest, UpdateAgentStatusRequest, UpdateAgentOperativoRequest,
+    UpdateAgentSecretKeyRequest, UpdateAgentAccessRequest
+)
 from app.utils.jwt_auth import get_current_user_with_company_validation, get_current_user
 from pydantic import ValidationError
 
@@ -309,6 +313,464 @@ async def create_agente_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in create_agente endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.put("/update_datos_agente")
+async def update_datos_agente_endpoint(
+    request: UpdateAgentRequest,
+    agents_service: AgentsService = Depends(get_agents_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Update agent data endpoint.
+
+    Updates agent information using SP_UPDATE_DATOS_AGENTE.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: UpdateAgentRequest with agent data to update
+
+    Returns:
+        Dict with agent update results including:
+        - results: List of dictionaries with ID_TIPO_MENSAJE, MENSAJE
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
+            )
+
+        # Update agent using service (user_id is the user performing the update)
+        results = await agents_service.update_datos_agente(
+            db=db,
+            id_usuario=user_id,
+            id_agente=request.id_agente,
+            numero_telf=request.numero_telf,
+            codigo_pais=request.codigo_pais,
+            id_tipo_agente=request.id_tipo_agente,
+            acceso_general=request.acceso_general
+        )
+
+        # Check if the stored procedure returned an error message
+        if results and 'ID_TIPO_MENSAJE' in results[0]:
+            tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
+            mensaje = results[0].get('MENSAJE', 'Error desconocido')
+
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje} in update_datos_agente: {mensaje}")
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+
+        success_response = create_success_response("Agente actualizado exitosamente")
+        return {
+            "results": results if results else [],
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in update_datos_agente endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.put("/update_agente_status")
+async def update_agente_status_endpoint(
+    request: UpdateAgentStatusRequest,
+    agents_service: AgentsService = Depends(get_agents_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Update agent status endpoint.
+
+    Updates agent status (active/inactive) using SP_UPDATE_AGENTE_STATUS.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: UpdateAgentStatusRequest with id_agente and status
+
+    Returns:
+        Dict with agent status update results including:
+        - results: List of dictionaries with ID_TIPO_MENSAJE, MENSAJE
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
+            )
+
+        # Update agent status using service (user_id is the user performing the update)
+        results = await agents_service.update_agente_status(
+            db=db,
+            id_usuario=user_id,
+            id_agente=request.id_agente,
+            status=request.status
+        )
+
+        # Check if the stored procedure returned an error message
+        if results and 'ID_TIPO_MENSAJE' in results[0]:
+            tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
+            mensaje = results[0].get('MENSAJE', 'Error desconocido')
+
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje} in update_agente_status: {mensaje}")
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+
+        success_response = create_success_response("Estado del agente actualizado exitosamente")
+        return {
+            "results": results if results else [],
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in update_agente_status endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.put("/update_agente_operativo")
+async def update_agente_operativo_endpoint(
+    request: UpdateAgentOperativoRequest,
+    agents_service: AgentsService = Depends(get_agents_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Update agent operative status endpoint.
+
+    Updates agent operative status (operative/inoperative) using SP_UPDATE_AGENTE_OPERATIVO.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: UpdateAgentOperativoRequest with id_agente and operativo
+
+    Returns:
+        Dict with agent operative status update results including:
+        - results: List of dictionaries with ID_TIPO_MENSAJE, MENSAJE
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1]:
+            raise HTTPException(
+                status_code=403,
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
+            )
+
+        # Update agent operative status using service
+        results = await agents_service.update_agente_operativo(
+            db=db,
+            id_usuario=user_id,
+            id_agente=request.id_agente,
+            operativo=request.operativo
+        )
+
+        # Check if the stored procedure returned an error message
+        if results and 'ID_TIPO_MENSAJE' in results[0]:
+            tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
+            mensaje = results[0].get('MENSAJE', 'Error desconocido')
+
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje} in update_agente_operativo: {mensaje}")
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+
+        success_response = create_success_response("Estado operativo del agente actualizado exitosamente")
+        return {
+            "results": results if results else [],
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in update_agente_operativo endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.put("/update_agente_secret_key")
+async def update_agente_secret_key_endpoint(
+    request: UpdateAgentSecretKeyRequest,
+    agents_service: AgentsService = Depends(get_agents_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Update agent secret key endpoint.
+
+    Regenerates agent secret key using SP_UPDATE_AGENTE_SECRET_KEY.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: UpdateAgentSecretKeyRequest with id_agente
+
+    Returns:
+        Dict with agent secret key update results including:
+        - results: List of dictionaries with ID_TIPO_MENSAJE, MENSAJE
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
+            )
+
+        # Update agent secret key using service
+        results = await agents_service.update_agente_secret_key(
+            db=db,
+            id_usuario=user_id,
+            id_agente=request.id_agente
+        )
+
+        # Check if the stored procedure returned an error message
+        if results and 'ID_TIPO_MENSAJE' in results[0]:
+            tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
+            mensaje = results[0].get('MENSAJE', 'Error desconocido')
+
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje} in update_agente_secret_key: {mensaje}")
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+
+        success_response = create_success_response("Secret key del agente actualizada exitosamente")
+        return {
+            "results": results if results else [],
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in update_agente_secret_key endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=500,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.put("/update_agente_access")
+async def update_agente_access_endpoint(
+    request: UpdateAgentAccessRequest,
+    agents_service: AgentsService = Depends(get_agents_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_validation)
+):
+    """
+    Update agent area access endpoint.
+
+    Updates agent area assignments using SP_UPDATE_AGENTE_ACCESS.
+    Requires JWT authentication and validates company access.
+
+    Args:
+        request: UpdateAgentAccessRequest with id_agente, id_empresa, and areas_string
+
+    Returns:
+        Dict with agent access update results including:
+        - results: List of dictionaries with ID_TIPO_MENSAJE, MENSAJE
+        - result: Success/error response
+
+    Raises:
+        HTTPException: 401 for auth errors, 403 for access denied, 422 for validation errors, 500 for server errors
+    """
+    try:
+        user_id = current_user.get('ID_USUARIO')
+        role_id = current_user.get('ID_TIPO_ROL')
+        # Get company ID from request body (frontend sends it)
+        id_empresa = request.id_empresa
+
+        if not user_id:
+            error_response = create_error_response("Informacion de usuario incompleta en el token")
+            raise HTTPException(
+                status_code=400,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
+        if role_id not in [1, 2]:
+            raise HTTPException(
+                status_code=403,
+                detail={"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}
+            )
+
+        # Validate company ID from request
+        if not id_empresa or id_empresa <= 0:
+            error_response = create_error_response("ID de empresa inválido")
+            raise HTTPException(
+                status_code=422,
+                detail={"result": error_response.model_dump()}
+            )
+
+        # Update agent access using service
+        results = await agents_service.update_agente_access(
+            db=db,
+            id_usuario=user_id,
+            id_agente=request.id_agente,
+            id_empresa=id_empresa,
+            areas_string=request.areas_string
+        )
+
+        # Check if the stored procedure returned an error message
+        if results and 'ID_TIPO_MENSAJE' in results[0]:
+            tipo_mensaje = results[0].get('ID_TIPO_MENSAJE')
+            mensaje = results[0].get('MENSAJE', 'Error desconocido')
+
+            # Log when ID_TIPO_MENSAJE is not 2 (success)
+            if tipo_mensaje != 2:
+                logger.warning(f"SP returned ID_TIPO_MENSAJE={tipo_mensaje} in update_agente_access: {mensaje}")
+
+            if tipo_mensaje == 1:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+            elif tipo_mensaje == 3:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"idTipoMensaje": tipo_mensaje, "mensaje": mensaje}
+                )
+
+        success_response = create_success_response("Acceso del agente actualizado exitosamente")
+        return {
+            "results": results if results else [],
+            "result": success_response.model_dump()
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error in update_agente_access endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=500,

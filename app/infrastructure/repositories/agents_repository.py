@@ -115,6 +115,435 @@ class AgentsRepository:
             return []
 
     @retry_on_db_error(max_retries=3, delay=1)
+    def update_datos_agente(
+        self,
+        id_usuario: int,
+        id_agente: int,
+        numero_telf: str,
+        codigo_pais: str,
+        id_tipo_agente: int,
+        acceso_general: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent data using stored procedure SP_UPDATE_DATOS_AGENTE
+
+        Args:
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to update
+            numero_telf: Phone number (max 20 chars)
+            codigo_pais: Country code (max 8 chars)
+            id_tipo_agente: Agent type ID
+            acceso_general: General access flag
+
+        Returns:
+            List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
+            Empty list if update failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_DATOS_AGENTE @ID_USUARIO = ?, @ID_AGENTE = ?, @NUMERO_TELF = ?, @CODIGO_PAIS = ?, @ID_TIPO_AGENTE = ?, @ACCESO_GENERAL = ?",
+                    id_usuario,
+                    id_agente,
+                    numero_telf,
+                    codigo_pais,
+                    id_tipo_agente,
+                    acceso_general
+                )
+
+                results = []
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            if has_message_columns and rows:
+                                # This is the result set we want to capture
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for ID_TIPO_MENSAJE
+                                    if 'ID_TIPO_MENSAJE' in result_dict:
+                                        result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_datos_agente: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating agente with SP_UPDATE_DATOS_AGENTE: {e}")
+            self.db.rollback()
+            return []
+
+    @retry_on_db_error(max_retries=3, delay=1)
+    def update_agente_status(
+        self,
+        id_usuario: int,
+        id_agente: int,
+        status: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent status using stored procedure SP_UPDATE_AGENTE_STATUS
+
+        Args:
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to update
+            status: New status (0 = inactive, 1 = active)
+
+        Returns:
+            List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
+            Empty list if update failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_AGENTE_STATUS @ID_USUARIO = ?, @ID_AGENTE = ?, @STATUS = ?",
+                    id_usuario,
+                    id_agente,
+                    status
+                )
+
+                results = []
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            if has_message_columns and rows:
+                                # This is the result set we want to capture
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for ID_TIPO_MENSAJE
+                                    if 'ID_TIPO_MENSAJE' in result_dict:
+                                        result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_agente_status: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating agente status with SP_UPDATE_AGENTE_STATUS: {e}")
+            self.db.rollback()
+            return []
+
+    @retry_on_db_error(max_retries=3, delay=1)
+    def update_agente_operativo(
+        self,
+        id_usuario: int,
+        id_agente: int,
+        operativo: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent operative status using stored procedure SP_UPDATE_AGENTE_OPERATIVO
+
+        Args:
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to update
+            operativo: Operative status (0 = inoperative, 1 = operative)
+
+        Returns:
+            List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
+            Empty list if update failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_AGENTE_OPERATIVO @ID_USUARIO = ?, @ID_AGENTE = ?, @OPERATIVO = ?",
+                    id_usuario,
+                    id_agente,
+                    operativo
+                )
+
+                results = []
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            if has_message_columns and rows:
+                                # This is the result set we want to capture
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for ID_TIPO_MENSAJE
+                                    if 'ID_TIPO_MENSAJE' in result_dict:
+                                        result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_agente_operativo: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating agente operativo with SP_UPDATE_AGENTE_OPERATIVO: {e}")
+            self.db.rollback()
+            return []
+
+    @retry_on_db_error(max_retries=3, delay=1)
+    def update_agente_secret_key(
+        self,
+        id_usuario: int,
+        id_agente: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent secret key using stored procedure SP_UPDATE_AGENTE_SECRET_KEY
+
+        Args:
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to regenerate secret key for
+
+        Returns:
+            List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
+            Empty list if update failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_AGENTE_SECRET_KEY @ID_USUARIO = ?, @ID_AGENTE = ?",
+                    id_usuario,
+                    id_agente
+                )
+
+                results = []
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            if has_message_columns and rows:
+                                # This is the result set we want to capture
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for ID_TIPO_MENSAJE
+                                    if 'ID_TIPO_MENSAJE' in result_dict:
+                                        result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_agente_secret_key: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating agente secret key with SP_UPDATE_AGENTE_SECRET_KEY: {e}")
+            self.db.rollback()
+            return []
+
+    @retry_on_db_error(max_retries=3, delay=1)
+    def update_agente_access(
+        self,
+        id_usuario: int,
+        id_agente: int,
+        id_empresa: int,
+        areas_string: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Update agent area access using stored procedure SP_UPDATE_AGENTE_ACCESS
+
+        Args:
+            id_usuario: User ID performing the update
+            id_agente: Agent ID to update
+            id_empresa: Company ID
+            areas_string: Comma-separated area IDs (max 100 chars)
+
+        Returns:
+            List of dictionaries with: ID_TIPO_MENSAJE, MENSAJE
+            Empty list if update failed
+        """
+        try:
+            # Use raw connection to handle stored procedure execution
+            raw_conn = self.db.connection().connection
+            cursor = raw_conn.cursor()
+
+            try:
+                cursor.execute(
+                    "EXEC SP_UPDATE_AGENTE_ACCESS @ID_USUARIO = ?, @ID_AGENTE = ?, @ID_EMPRESA = ?, @AREAS_STRING = ?",
+                    id_usuario,
+                    id_agente,
+                    id_empresa,
+                    areas_string
+                )
+
+                results = []
+
+                # Iterate through all result sets
+                while True:
+                    try:
+                        # Check if we have columns (indicating data)
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
+                            rows = cursor.fetchall()
+
+                            # Check if this result set contains the message columns
+                            has_message_columns = 'ID_TIPO_MENSAJE' in columns and 'MENSAJE' in columns
+
+                            if has_message_columns and rows:
+                                # This is the result set we want to capture
+                                for row in rows:
+                                    result_dict = dict(zip(columns, row))
+                                    # Convert Decimal to int for ID_TIPO_MENSAJE
+                                    if 'ID_TIPO_MENSAJE' in result_dict:
+                                        result_dict['ID_TIPO_MENSAJE'] = int(result_dict['ID_TIPO_MENSAJE'])
+                                    results.append(result_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in update_agente_access: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
+
+        except Exception as e:
+            logger.error(f"Error updating agente access with SP_UPDATE_AGENTE_ACCESS: {e}")
+            self.db.rollback()
+            return []
+
+    @retry_on_db_error(max_retries=3, delay=1)
     def verify_acceso_agente(
         self,
         numero_telf: str,
