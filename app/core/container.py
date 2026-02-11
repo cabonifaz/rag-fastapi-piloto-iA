@@ -12,7 +12,6 @@ from app.services.company_service import CompanyService
 from app.services.area_service import AreaService
 from app.services.users_service import UsersService
 from app.services.agents_service import AgentsService
-from app.services.phone_code_service import PhoneCodeService
 from app.services.menu_items_service import MenuItemsService
 from app.services.parametros_service import ParametrosService
 
@@ -70,7 +69,6 @@ class DIContainer:
         self._area_service = None
         self._users_service = None
         self._agents_service = None
-        self._phone_code_service = None
         self._menu_items_service = None
         self._parametros_service = None
 
@@ -343,14 +341,6 @@ class DIContainer:
             self._agents_service = AgentsService()
 
         return self._agents_service
-
-    def get_phone_code_service(self) -> PhoneCodeService:
-        """Get phone code service as singleton (stateless, no db parameter)."""
-        if self._phone_code_service is None:
-            # Create ONCE - singleton
-            self._phone_code_service = PhoneCodeService()
-
-        return self._phone_code_service
 
     def get_menu_items_service(self) -> MenuItemsService:
         """Get menu items service as singleton (stateless, no db parameter)."""

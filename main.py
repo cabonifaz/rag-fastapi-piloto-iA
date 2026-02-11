@@ -38,7 +38,7 @@ from app.core.config import settings
 from app.core.database import init_database, close_database, SessionLocal
 
 # Then import the heavy modules
-from app.api import rag, auth, external_login, chats, messages, transcribe, file_transcribe, company, area, users, agents, knowledge, ia_models, ia_config, phone_code, menu_items, parametros
+from app.api import rag, auth, external_login, chats, messages, transcribe, file_transcribe, company, area, users, agents, knowledge, ia_models, ia_config, menu_items, parametros
 from app.core.container import container
 
 logger = logging.getLogger(__name__)
@@ -106,7 +106,6 @@ app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents-managem
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge-management"])
 app.include_router(ia_models.router, prefix="/api/v1/ia_models", tags=["ia-models-management"])
 app.include_router(ia_config.router, prefix="/api/v1/ia_config", tags=["ia-config-management"])
-app.include_router(phone_code.router, prefix="/api/v1/phone_code", tags=["phone-code-management"])
 app.include_router(menu_items.router, prefix="/api/v1/menu", tags=["menu-management"])
 app.include_router(parametros.router, prefix="/api/v1/parametros", tags=["parametros-management"])
 
