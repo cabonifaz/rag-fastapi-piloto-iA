@@ -48,11 +48,8 @@ class MessageService:
             # If limit not provided, load from DB parameter NUM1=11 (expected to be 15)
             if limit is None:
                 try:
-                    # Pass db session if provided; default fallback 15
-                    limit_from_db = await self.parametros_service.get_numeric_param(db, 11, default=15)
-                    limit = int(limit_from_db or 15)
+                    limit = await self.parametros_service.get_param_by_id_maestro(db, "11") or 15
                 except Exception:
-                    # Fallback to a safe default
                     limit = 15
 
             # Delegate the database call to the repository (now awaited)
@@ -138,8 +135,7 @@ class MessageService:
         try:
             if n is None:
                 try:
-                    n_from_db = await self.parametros_service.get_numeric_param(db, 11, default=15)
-                    n = int(n_from_db or 15)
+                    n = await self.parametros_service.get_param_by_id_maestro(db, "11") or 15
                 except Exception:
                     n = 15
 

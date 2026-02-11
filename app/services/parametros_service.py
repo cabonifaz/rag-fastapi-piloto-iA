@@ -12,23 +12,38 @@ class ParametrosService:
     """Stateless service that fetches parameter values from DB."""
 
     def __init__(self):
+        """Initialize stateless ParametrosService - no db parameter."""
         pass
 
-    async def get_numeric_param(self, db: Session, num1: int, default: Optional[int] = None) -> Optional[int]:
-        """Return numeric value for the given parameter NUM1. Returns default if not found."""
-        try:
-            if not db:
-                logger.warning("Database session not available in ParametrosService")
-                return default
+    async def get_param_by_id_maestro(self, db: Session, grp_id_maestro: str) -> Optional[int]:
+        """
+        Return numeric value (NUM1) for the given GRP_ID_MAESTRO parameter.
 
-            repo = ParametrosRepository(db)
-            val = repo.get_param_by_num1(num1)
+        Args:
+            db: Database session
+            grp_id_maestro: Group ID (GRP_ID_MAESTRO) to look up
+
+        Returns:
+            Integer NUM1 value for the matching ID_MAESTRO, or None if not found
+        """
+        try:
+            # Create repository for this request
+            repository = ParametrosRepository(db)
+
+            # Validate input
+            if not grp_id_maestro or len(grp_id_maestro.strip()) == 0:
+                logger.error("grp_id_maestro cannot be empty")
+                return None
+
+            val = repository.get_params_by_id_maestro(grp_id_maestro)
 
             if val is None:
-                return default
+                logger.warning(f"Parameter not found for grp_id_maestro={grp_id_maestro}")
+                return None
 
+            logger.info(f"Parameter fetched successfully: grp_id_maestro={grp_id_maestro}, value={val}")
             return val
 
         except Exception as e:
-            logger.error(f"Error in get_numeric_param num1={num1}: {e}")
-            return default
+            logger.error(f"Error in get_param_by_id_maestro grp_id_maestro={grp_id_maestro}: {e}")
+            raise
