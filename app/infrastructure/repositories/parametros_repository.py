@@ -1,7 +1,7 @@
 """Repository to fetch PARAMETROS values via stored procedure."""
 
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import List, Dict, Any
 from decimal import Decimal
 import logging
 from app.core.database import retry_on_db_error
@@ -16,18 +16,19 @@ class ParametrosRepository:
         self.db = db
 
     @retry_on_db_error(max_retries=3, delay=1)
-    def get_params_by_id_maestro(self, grp_id_maestro: str) -> Optional[int]:
-        """Call SP_PARAMETROS_LST for a group id (GRP_ID_MAESTRO) and return NUM1 for the matching ID_MAESTRO.
+    def get_params_by_id_maestro(self, grp_id_maestro: str) -> List[Dict[str, Any]]:
+        """Call SP_PARAMETROS_LST for a group id and return all parameter rows.
 
-        This stored procedure returns two result sets (first: messages, second: parameters). We iterate result sets
-        until we find the PARAMETERS result set (which contains columns like ID_PARAMETRO, ID_MAESTRO, NUM1, NUM2...).
-        We then locate the row where ID_MAESTRO equals the requested `grp_id_maestro` and return its NUM1 value as int.
+        This stored procedure returns two result sets:
+        - First: message (NUM2, MENSAJE)
+        - Second: parameters data (ID_PARAMETRO, ID_MAESTRO, ID_SUB_MAESTRO, NUM1, NUM2, NUM3, STRING1, STRING2, STRING3)
 
         Args:
             grp_id_maestro: Group ID (GRP_ID_MAESTRO) to look up
 
         Returns:
-            Integer NUM1 value for the matching ID_MAESTRO, or None if not found or on error
+            List of dictionaries with all parameter rows for the group.
+            Empty list if not found or on error.
         """
         try:
             # Use raw connection to handle stored procedure execution
@@ -37,35 +38,34 @@ class ParametrosRepository:
             try:
                 cursor.execute("EXEC SP_PARAMETROS_LST @GRP_ID_MAESTRO = ?", grp_id_maestro)
 
-                # Iterate over result sets until we find the one that has NUM1 in columns
+                results = []
+
+                # Iterate through all result sets
                 while True:
                     try:
                         if cursor.description:
                             columns = [desc[0] for desc in cursor.description]
+
                             # If this result set looks like the PARAMETERS table
-                            if 'NUM1' in columns and 'ID_MAESTRO' in columns:
+                            if 'ID_PARAMETRO' in columns and 'ID_MAESTRO' in columns:
                                 rows = cursor.fetchall()
                                 for row in rows:
                                     row_dict = dict(zip(columns, row))
-                                    try:
-                                        if str(row_dict.get('ID_MAESTRO', '')) == grp_id_maestro:
-                                            val = row_dict.get('NUM1')
-                                            if val is None:
-                                                continue
-                                            if isinstance(val, Decimal):
-                                                return int(val)
-                                            try:
-                                                return int(val)
-                                            except Exception:
-                                                continue
-                                    except Exception:
-                                        # ignore conversion errors and continue
-                                        continue
 
-                                # If we processed the PARAMETERS set but didn't find a matching ID_MAESTRO
-                                cursor.close()
-                                self.db.commit()
-                                return None
+                                    # Convert Decimal to int for numeric fields
+                                    numeric_fields = ['ID_PARAMETRO', 'ID_MAESTRO', 'ID_SUB_MAESTRO', 'NUM1', 'NUM2', 'NUM3']
+                                    for field in numeric_fields:
+                                        if field in row_dict and row_dict[field] is not None:
+                                            if isinstance(row_dict[field], Decimal):
+                                                row_dict[field] = int(row_dict[field])
+
+                                    # Strip whitespace from string fields
+                                    string_fields = ['STRING1', 'STRING2', 'STRING3']
+                                    for field in string_fields:
+                                        if field in row_dict and isinstance(row_dict[field], str):
+                                            row_dict[field] = row_dict[field].strip()
+
+                                    results.append(row_dict)
 
                     except Exception as fetch_error:
                         logger.error(f"Fetch error in get_params_by_id_maestro: {fetch_error}")
@@ -84,7 +84,7 @@ class ParametrosRepository:
 
                 cursor.close()
                 self.db.commit()
-                return None
+                return results
 
             except Exception as cursor_error:
                 logger.error(f"Cursor error in get_params_by_id_maestro: {cursor_error}")
@@ -93,6 +93,6 @@ class ParametrosRepository:
                 raise
 
         except Exception as e:
-            logger.error(f"Error fetching parameter num1={num1}: {e}")
+            logger.error(f"Error fetching params for grp_id_maestro={grp_id_maestro}: {e}")
             self.db.rollback()
-            return None
+            return []

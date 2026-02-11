@@ -48,7 +48,9 @@ class MessageService:
             # If limit not provided, load from DB parameter NUM1=11 (expected to be 15)
             if limit is None:
                 try:
-                    limit = await self.parametros_service.get_param_by_id_maestro(db, "11") or 15
+                    params = await self.parametros_service.get_param_by_id_maestro(db, "11")
+                    row = next((p for p in params if p.get('ID_MAESTRO') == 11), None)
+                    limit = row['NUM1'] if row else 15
                 except Exception:
                     limit = 15
 
@@ -135,7 +137,9 @@ class MessageService:
         try:
             if n is None:
                 try:
-                    n = await self.parametros_service.get_param_by_id_maestro(db, "11") or 15
+                    params = await self.parametros_service.get_param_by_id_maestro(db, "11")
+                    row = next((p for p in params if p.get('ID_MAESTRO') == 11), None)
+                    n = row['NUM1'] if row else 15
                 except Exception:
                     n = 15
 

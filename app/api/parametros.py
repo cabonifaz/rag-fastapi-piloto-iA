@@ -29,9 +29,9 @@ async def get_param_by_id_maestro_endpoint(
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get parameter value by GRP_ID_MAESTRO.
+    Get all parameter rows by GRP_ID_MAESTRO.
 
-    Fetches the NUM1 value for the given GRP_ID_MAESTRO using SP_PARAMETROS_LST.
+    Fetches all parameter rows for the given GRP_ID_MAESTRO using SP_PARAMETROS_LST.
     Requires JWT authentication.
 
     Query Parameters:
@@ -39,7 +39,7 @@ async def get_param_by_id_maestro_endpoint(
 
     Returns:
         Dict with:
-        - data: Dictionary with grp_id_maestro and value
+        - data: List of parameter dictionaries
         - result: Success/error response
 
     Raises:
@@ -55,21 +55,18 @@ async def get_param_by_id_maestro_endpoint(
                 detail={"result": error_response.model_dump()}
             )
 
-        val = await parametros_service.get_param_by_id_maestro(db, grp_id_maestro)
+        results = await parametros_service.get_param_by_id_maestro(db, grp_id_maestro)
 
-        if val is None:
-            error_response = create_error_response(f"Parametro no encontrado para grp_id_maestro={grp_id_maestro}")
+        if not results:
+            error_response = create_error_response(f"Parametros no encontrados para grp_id_maestro={grp_id_maestro}")
             raise HTTPException(
                 status_code=404,
                 detail={"result": error_response.model_dump()}
             )
 
-        success_response = create_success_response("Parametro obtenido exitosamente")
+        success_response = create_success_response("Parametros obtenidos exitosamente")
         return {
-            "data": {
-                "grp_id_maestro": grp_id_maestro,
-                "value": val
-            },
+            "data": results,
             "result": success_response.model_dump()
         }
 
