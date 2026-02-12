@@ -12,8 +12,8 @@ from app.services.company_service import CompanyService
 from app.services.area_service import AreaService
 from app.services.users_service import UsersService
 from app.services.agents_service import AgentsService
-from app.services.phone_code_service import PhoneCodeService
 from app.services.menu_items_service import MenuItemsService
+from app.services.parametros_service import ParametrosService
 
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
@@ -69,8 +69,8 @@ class DIContainer:
         self._area_service = None
         self._users_service = None
         self._agents_service = None
-        self._phone_code_service = None
         self._menu_items_service = None
+        self._parametros_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -342,14 +342,6 @@ class DIContainer:
 
         return self._agents_service
 
-    def get_phone_code_service(self) -> PhoneCodeService:
-        """Get phone code service as singleton (stateless, no db parameter)."""
-        if self._phone_code_service is None:
-            # Create ONCE - singleton
-            self._phone_code_service = PhoneCodeService()
-
-        return self._phone_code_service
-
     def get_menu_items_service(self) -> MenuItemsService:
         """Get menu items service as singleton (stateless, no db parameter)."""
         if self._menu_items_service is None:
@@ -357,6 +349,14 @@ class DIContainer:
             self._menu_items_service = MenuItemsService()
 
         return self._menu_items_service
+
+    def get_parametros_service(self) -> ParametrosService:
+        """Get parametros service as singleton (stateless, no db parameter)."""
+        if self._parametros_service is None:
+            # Create ONCE - singleton
+            self._parametros_service = ParametrosService()
+
+        return self._parametros_service
 
 
     def create_transcribe_session(self) -> TranscribePort:

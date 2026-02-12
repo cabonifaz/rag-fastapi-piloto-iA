@@ -1,8 +1,10 @@
 """Repository to fetch PARAMETROS values via stored procedure."""
 
-import logging
-from typing import Optional
+from sqlalchemy.orm import Session
+from typing import List, Dict, Any
 from decimal import Decimal
+import logging
+from app.core.database import retry_on_db_error
 
 logger = logging.getLogger(__name__)
 
@@ -10,58 +12,87 @@ logger = logging.getLogger(__name__)
 class ParametrosRepository:
     """Repository to call SP_PARAMETROS_LST and return parameter values."""
 
-    def __init__(self, db):
+    def __init__(self, db: Session):
         self.db = db
 
-    def get_param_by_num1(self, num1: int) -> Optional[int]:
-        """Call SP_PARAMETROS_LST for a group id (GRP_ID_MAESTRO) and return NUM1 for the matching ID_MAESTRO.
+    @retry_on_db_error(max_retries=3, delay=1)
+    def get_params_by_id_maestro(self, grp_id_maestro: str) -> List[Dict[str, Any]]:
+        """Call SP_PARAMETROS_LST for a group id and return all parameter rows.
 
-        This stored procedure returns two result sets (first: messages, second: parameters). We iterate result sets
-        until we find the PARAMETERS result set (which contains columns like ID_PARAMETRO, ID_MAESTRO, NUM1, NUM2...).
-        We then locate the row where ID_MAESTRO equals the requested `num1` and return its NUM1 value as int.
+        This stored procedure returns two result sets:
+        - First: message (NUM2, MENSAJE)
+        - Second: parameters data (ID_PARAMETRO, ID_MAESTRO, ID_SUB_MAESTRO, NUM1, NUM2, NUM3, STRING1, STRING2, STRING3)
+
+        Args:
+            grp_id_maestro: Group ID (GRP_ID_MAESTRO) to look up
+
+        Returns:
+            List of dictionaries with all parameter rows for the group.
+            Empty list if not found or on error.
         """
         try:
+            # Use raw connection to handle stored procedure execution
             raw_conn = self.db.connection().connection
             cursor = raw_conn.cursor()
 
-            # Ensure we pass the group id as string (SP expects VARCHAR param)
-            cursor.execute("EXEC SP_PARAMETROS_LST @GRP_ID_MAESTRO = ?", str(num1))
+            try:
+                cursor.execute("EXEC SP_PARAMETROS_LST @GRP_ID_MAESTRO = ?", grp_id_maestro)
 
-            # Iterate over result sets until we find the one that has NUM1 in columns
-            while True:
-                if cursor.description:
-                    columns = [desc[0] for desc in cursor.description]
-                    # If this result set looks like the PARAMETERS table
-                    if 'NUM1' in columns and 'ID_MAESTRO' in columns:
-                        rows = cursor.fetchall()
-                        for row in rows:
-                            row_dict = dict(zip(columns, row))
-                            try:
-                                if int(str(row_dict.get('ID_MAESTRO', 0))) == int(num1):
-                                    val = row_dict.get('NUM1')
-                                    if val is None:
-                                        continue
-                                    if isinstance(val, Decimal):
-                                        return int(val)
-                                    try:
-                                        return int(val)
-                                    except Exception:
-                                        continue
-                            except Exception:
-                                # ignore conversion errors and continue
-                                continue
+                results = []
 
-                        # If we processed the PARAMETERS set but didn't find a matching ID_MAESTRO, return None
-                        cursor.close()
-                        return None
+                # Iterate through all result sets
+                while True:
+                    try:
+                        if cursor.description:
+                            columns = [desc[0] for desc in cursor.description]
 
-                # Advance to next result set, if any
-                if not cursor.nextset():
-                    break
+                            # If this result set looks like the PARAMETERS table
+                            if 'ID_PARAMETRO' in columns and 'ID_MAESTRO' in columns:
+                                rows = cursor.fetchall()
+                                for row in rows:
+                                    row_dict = dict(zip(columns, row))
 
-            cursor.close()
-            return None
+                                    # Convert Decimal to int for numeric fields
+                                    numeric_fields = ['ID_PARAMETRO', 'ID_MAESTRO', 'ID_SUB_MAESTRO', 'NUM1', 'NUM2', 'NUM3']
+                                    for field in numeric_fields:
+                                        if field in row_dict and row_dict[field] is not None:
+                                            if isinstance(row_dict[field], Decimal):
+                                                row_dict[field] = int(row_dict[field])
+
+                                    # Strip whitespace from string fields
+                                    string_fields = ['STRING1', 'STRING2', 'STRING3']
+                                    for field in string_fields:
+                                        if field in row_dict and isinstance(row_dict[field], str):
+                                            row_dict[field] = row_dict[field].strip()
+
+                                    results.append(row_dict)
+
+                    except Exception as fetch_error:
+                        logger.error(f"Fetch error in get_params_by_id_maestro: {fetch_error}")
+
+                    # Move to next result set
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except Exception as nextset_error:
+                        # Transaction error is expected when SP manages its own transactions
+                        if "Transaction count after EXECUTE" in str(nextset_error):
+                            logger.debug(f"SP manages its own transactions (expected): {nextset_error}")
+                        else:
+                            logger.error(f"Nextset error in get_params_by_id_maestro: {nextset_error}")
+                        break
+
+                cursor.close()
+                self.db.commit()
+                return results
+
+            except Exception as cursor_error:
+                logger.error(f"Cursor error in get_params_by_id_maestro: {cursor_error}")
+                cursor.close()
+                self.db.rollback()
+                raise
 
         except Exception as e:
-            logger.error(f"Error fetching parameter num1={num1}: {e}")
-            return None
+            logger.error(f"Error fetching params for grp_id_maestro={grp_id_maestro}: {e}")
+            self.db.rollback()
+            return []

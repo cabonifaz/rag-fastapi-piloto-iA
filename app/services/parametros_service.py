@@ -1,7 +1,7 @@
 """Service wrapper for parameter repository."""
 
 import logging
-from typing import Optional
+from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from app.infrastructure.repositories.parametros_repository import ParametrosRepository
 
@@ -12,23 +12,39 @@ class ParametrosService:
     """Stateless service that fetches parameter values from DB."""
 
     def __init__(self):
+        """Initialize stateless ParametrosService - no db parameter."""
         pass
 
-    async def get_numeric_param(self, db: Session, num1: int, default: Optional[int] = None) -> Optional[int]:
-        """Return numeric value for the given parameter NUM1. Returns default if not found."""
+    async def get_param_by_id_maestro(self, db: Session, grp_id_maestro: str) -> List[Dict[str, Any]]:
+        """
+        Return all parameter rows for the given GRP_ID_MAESTRO.
+
+        Args:
+            db: Database session
+            grp_id_maestro: Group ID (GRP_ID_MAESTRO) to look up
+
+        Returns:
+            List of dictionaries with all parameter rows for the group.
+            Empty list if not found.
+        """
         try:
-            if not db:
-                logger.warning("Database session not available in ParametrosService")
-                return default
+            # Create repository for this request
+            repository = ParametrosRepository(db)
 
-            repo = ParametrosRepository(db)
-            val = repo.get_param_by_num1(num1)
+            # Validate input
+            if not grp_id_maestro or len(grp_id_maestro.strip()) == 0:
+                logger.error("grp_id_maestro cannot be empty")
+                return []
 
-            if val is None:
-                return default
+            results = repository.get_params_by_id_maestro(grp_id_maestro)
 
-            return val
+            if not results:
+                logger.warning(f"No parameters found for grp_id_maestro={grp_id_maestro}")
+                return []
+
+            logger.info(f"Parameters fetched successfully: grp_id_maestro={grp_id_maestro}, count={len(results)}")
+            return results
 
         except Exception as e:
-            logger.error(f"Error in get_numeric_param num1={num1}: {e}")
-            return default
+            logger.error(f"Error in get_param_by_id_maestro grp_id_maestro={grp_id_maestro}: {e}")
+            raise
