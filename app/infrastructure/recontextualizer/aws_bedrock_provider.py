@@ -63,9 +63,9 @@ class QueryRecontextualizer(RecontextualizerPort):
 
         # Configure botocore with connection and read timeouts
         self.boto_config = Config(
-            connect_timeout=30,  # 30 seconds to establish connection
-            read_timeout=120,    # 2 minutes max for reading response
-            retries={'max_attempts': 2, 'mode': 'standard'}  # Retry failed requests
+            connect_timeout=5,
+            read_timeout=30,
+            retries={'max_attempts': 0}
         )
 
         try:
@@ -143,7 +143,7 @@ class QueryRecontextualizer(RecontextualizerPort):
                 "messages": converse_messages,
                 "system": self._build_system_config(),
                 "inferenceConfig": {
-                    "maxTokens": 1024,  # Sufficient for recontextualized queries
+                    "maxTokens": 256,  # Model returns only {"query":"..."}, 256 tokens is sufficient
                     "temperature": 0.0,  # Low temperature for consistent recontextualization
                     "topP": 0.1
                 }
@@ -152,7 +152,7 @@ class QueryRecontextualizer(RecontextualizerPort):
             # Use aioboto3 async client for truly non-blocking Bedrock calls
             logger.info(
                 f"♻️ Reusing session (id: {id(self.session)}) [Recontextualizer] | "
-                f"Request params: model={self.model_id}, max_tokens=1024, temp=0.0, top_p=0.1"
+                f"Request params: model={self.model_id}, max_tokens=256, temp=0.0, top_p=0.1"
             )
             async with self.session.client("bedrock-runtime", config=self.boto_config) as client:
                 response = await client.converse(**request_params)
@@ -161,12 +161,13 @@ class QueryRecontextualizer(RecontextualizerPort):
                 result = self._extract_result(response)
 
             if result:
+                rewritten = result['response']
+                was_rewritten = rewritten != user_query
                 logger.info(
                     f"Query recontextualized:\n"
-                    f"  Original: {user_query}\n"
-                    f"  Recontextualized: {result['response']}\n"
-                    f"  Needs context: {result['needs_context']}\n"
-                    f"  Summary intent: {result['summary_intent']}"
+                    f"  Original:    {user_query}\n"
+                    f"  Rewritten:   {rewritten}\n"
+                    f"  Was changed: {was_rewritten}"
                 )
                 return result
             else:
@@ -220,11 +221,13 @@ class QueryRecontextualizer(RecontextualizerPort):
         """
         Extract the recontextualized query from the Converse API response.
 
+        The model returns {"query": "FINAL_QUERY"}. The model config's extract_response
+        parses this and maps it to the port's expected structure.
+
         Args:
             response: The response from bedrock_client.converse()
 
         Returns:
             Dictionary with needs_context, response, and summary_intent, or None if extraction fails.
         """
-        # Delegate to the model config's extract_response method
         return self.model_config.extract_response(response)
