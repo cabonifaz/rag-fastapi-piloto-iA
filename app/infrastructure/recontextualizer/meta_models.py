@@ -52,6 +52,49 @@ Evaluate semantic completeness and global clarity.
 Do NOT evaluate by length.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
+ENTITY PRESERVATION MANDATE
+(STRICT — VIOLATION = FALLBACK)
+
+When anchoring to Turn -1/-2/-3:
+
+→ PRESERVE ALL SPECIFIC ENTITIES LEXICALLY PRESENT
+→ NEVER replace specific entities with parent/superordinate concepts
+→ NEVER collapse multiple entities into a single generic term
+→ NEVER substitute explicit entities with conceptual umbrellas
+
+Examples of VIOLATIONS:
+✗ "WIMPs vs axions" → "dark matter"          [ILLEGAL COLLAPSE]
+✗ "Python vs Java" → "programming languages" [ILLEGAL GENERALIZATION]
+✗ "iPhone 15 Pro" → "smartphone"             [ILLEGAL ABSTRACTION]
+
+If anchor turn contains ≥2 concrete entities:
+→ MUST include ALL explicitly mentioned entities
+→ Use minimal connector ("and", "y", "vs") ONLY if present in anchor turn
+→ NEVER merge into a single conceptual umbrella
+
+Violation consequence: return Turn 0 unchanged (fallback).
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+ANTI-CONCEPTUAL-INFERENCE RULE
+
+You MUST operate on LEXICAL CONTENT ONLY.
+
+→ NEVER use external domain knowledge to reframe entities
+→ NEVER assume taxonomic relationships not explicitly stated
+→ NEVER substitute terms based on "semantic similarity" or conceptual proximity
+→ NEVER infer that entity A "is a type of" entity B unless explicitly stated in the turns
+
+Examples:
+Turn -1: "PostgreSQL vs MySQL"
+Turn 0:  "mejor rendimiento"
+
+✗ ILLEGAL: "mejor rendimiento de bases de datos relacionales"
+(infers that PostgreSQL/MySQL → relational databases using external knowledge)
+
+✓ LEGAL:   "mejor rendimiento de PostgreSQL y MySQL"
+(uses ONLY lexical entities from Turn -1)
+
+Violation consequence: return Turn 0 unchanged (fallback).
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 ANCHOR PRIORITY RULES
 (STRICT ORDER — FIRST VALID MATCH WINS)
 
@@ -103,21 +146,62 @@ Apply Global Disambiguation Rule if necessary.
 
 Use Turn -3 ONLY if Turn 0 explicitly references earlier context.
 
-Allowed triggers:
-lo primero
-al inicio
-antes mencionaste
-como dije antes
-my first question
-remember when I asked
-earlier you said
+Allowed triggers: lo primero al inicio antes mencionaste como dije antes my first question remember when I asked earlier you said
 
-Action:
-→ extract most specific named entity from Turn -3
+Action: → extract most specific named entity from Turn -3
 
 NEVER use Turn -3 without explicit trigger.
 
+EXCEPTION — CONTINUITY CHAIN RULE
+
+If Turn -3 introduces a concrete named entity AND Turn -2 and Turn -1 are progressive topical refinements AND Turn 0 is a fragment (single noun or abstract follow-up) AND no competing entity appears in later turns
+
+→ assume conversational continuity → anchor to the original entity in Turn -3 → preserve that entity lexically
+
+This exception applies ONLY when all turns form a single uninterrupted topical chain. If ambiguity remains, fallback applies.
+
 Apply Global Disambiguation Rule if necessary.
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+INTERMEDIATE TURN ISOLATION RULE
+
+When anchoring through a chain (Turn -3 → -2 → -1 → 0):
+
+→ Extract ONLY the topic entity and its qualifiers from anchor turns
+→ NEVER include the QUESTION CONTENT or INTERROGATIVE FOCUS of intermediate turns
+→ Intermediate turns define the topic narrowing, NOT additional query dimensions
+
+Turn -1's question is a SEPARATE query — it is NOT part of Turn 0's rewrite.
+
+Example of VIOLATION:
+[Turn -3] "What is quantum computing?"
+[Turn -2] "IBM's approach"
+[Turn -1] "Key algorithms?"
+[Turn  0] "Future applications?"
+
+✗ ILLEGAL: "future applications of IBM quantum computing and key algorithms"
+  (merges Turn -1's question topic into Turn 0's rewrite)
+
+✓ LEGAL: "future applications of IBM quantum computing"
+  (injects ONLY the entity + qualifier, applies Turn 0's question alone)
+
+CONNECTOR CLARIFICATION:
+
+When Turn 0 begins with a connector ("y", "también", "and", "also", "what about"):
+→ The connector signals a NEW attribute about the topic entity
+→ It does NOT mean "extend" or "add to" Turn -1's specific question
+→ Strip the connector → rewrite Turn 0 against the topic entity alone
+
+Example:
+[Turn -3] "¿Qué es la fotosíntesis?"
+[Turn -2] "¿Fases principales?"
+[Turn -1] "¿Rendimiento energético?"
+[Turn  0] "¿y eficiencia?"
+
+✗ ILLEGAL: "eficiencia del rendimiento energético de la fotosíntesis"
+  (treats "y" as extending Turn -1's question topic)
+
+✓ LEGAL: "eficiencia de la fotosíntesis"
+  (treats "y" as introducing a new attribute of the topic entity)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 GLOBAL DISAMBIGUATION RULE
@@ -131,6 +215,10 @@ If the extracted entity:
 • risks unrelated web results
 
 → append the minimal higher-level domain qualifier required for uniqueness.
+
+SOURCE: The qualifier MUST come from text lexically present in Turn -1/-2/-3.
+This does NOT violate the Anti-Conceptual-Inference Rule because the qualifier
+is extracted from the conversation, not inferred from external knowledge.
 
 Do NOT over-expand.
 Do NOT summarize.
@@ -148,7 +236,10 @@ The output MUST:
 • NOT include question marks
 • NOT concatenate multiple questions
 • NOT introduce explanation
-• preserve original language of Turn 0
+• preserve original language of Turn 0 — STRICTLY
+• if Turn 0 contains ANY non-English character → output MUST be in that language
+• NEVER translate entities or attributes to English
+• EXCEPTION: proper nouns with canonical English spelling (e.g., "CERN") may retain English form
 • remove conversational markers (e.g., "¿y", "entonces", "también")
 
 Inject ONLY the minimal entity required for global clarity.
@@ -160,21 +251,19 @@ If:
 • no anchor applies
 • no safe entity can be extracted
 • ambiguity cannot be resolved safely
+• ANY rule violation would be required to produce a rewrite
 
 → return Turn 0 unchanged.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT — STRICT JSON
-
-Return ONLY:
-
-{"query":"FINAL_QUERY"}
+Return EXACTLY:
+QUERY::FINAL_QUERY
 
 Rules:
-• valid JSON only
+• no JSON
 • no extra keys
-• no text outside JSON
-
+• no text outside the line
+• stop immediately after the query
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 EXAMPLES
 
@@ -187,7 +276,7 @@ INPUT
 [Turn  0] "How tall is it?"
 
 OUTPUT
-{"query":"height of the Eiffel Tower"}
+QUERY::height of the Eiffel Tower
 
 
 Example 2 — Abstract Follow-up
@@ -199,7 +288,7 @@ INPUT
 [Turn  0] "And risks?"
 
 OUTPUT
-{"query":"risks of blockchain technology"}
+QUERY::risks of blockchain technology
 
 
 Example 3 — META Anchor to Turn -2
@@ -211,7 +300,7 @@ INPUT
 [Turn  0] "Energy source?"
 
 OUTPUT
-{"query":"energy source in photosynthesis in plants"}
+QUERY::energy source in photosynthesis in plants
 
 
 Example 4 — Polysemy Disambiguation
@@ -223,10 +312,10 @@ INPUT
 [Turn  0] "Composition?"
 
 OUTPUT
-{"query":"composition of the atmosphere of the planet Mercury"}
+QUERY::composition of the atmosphere of the planet Mercury
 
 
-Example 5 — Comparison Preservation
+Example 5 — Comparison Preservation (ENTITY PRESERVATION)
 
 INPUT
 [Turn -3] "What is Python?"
@@ -235,7 +324,7 @@ INPUT
 [Turn  0] "Performance?"
 
 OUTPUT
-{"query":"performance differences between Python and Java programming languages"}
+QUERY::performance differences between Python and Java programming languages
 
 
 Example 6 — No Rewrite Required
@@ -247,7 +336,7 @@ INPUT
 [Turn  0] "hyperinflation in Argentina 1989"
 
 OUTPUT
-{"query":"hyperinflation in Argentina 1989"}
+QUERY::hyperinflation in Argentina 1989
 
 
 Example 7 — Historical Anchor Explicit Trigger
@@ -259,10 +348,10 @@ INPUT
 [Turn  0] "Going back to the first question, duration?"
 
 OUTPUT
-{"query":"duration of World War I"}
+QUERY::duration of World War I
 
 
-Example 8 — Ambiguity Unsafe → No Rewrite
+Example 8 — Continuity Chain Rewrite
 
 INPUT
 [Turn -3] "Tell me about Jordan"
@@ -271,16 +360,43 @@ INPUT
 [Turn  0] "Population?"
 
 OUTPUT
-{"query":"Population?"}
+QUERY::population of Jordan
+
 
 Example 9 — Strict Primary Anchor (No Merge)
+
+INPUT
 [Turn -3] "What is machine learning?"
 [Turn -2] "Supervised vs unsupervised?"
 [Turn -1] "Neural networks vs decision trees?"
 [Turn  0] "Accuracy differences?"
 
 OUTPUT
-{"query":"accuracy differences between neural networks and decision trees"}
+QUERY::accuracy differences between neural networks and decision trees
+
+
+Example 10 — ENTITY PRESERVATION VIOLATION PREVENTION
+
+INPUT
+[Turn -3] "What is PostgreSQL?"
+[Turn -2] "Index types?"
+[Turn -1] "PostgreSQL vs MySQL?"
+[Turn 0] "¿mejor rendimiento?"
+
+OUTPUT
+QUERY::mejor rendimiento de PostgreSQL y MySQL
+
+
+Example 11 — ANTI-CONCEPTUAL-INFERENCE
+
+INPUT
+[Turn -3] "Mercury"
+[Turn -2] "Element"
+[Turn -1] "Hg symbol?"
+[Turn  0] "Atomic weight?"
+
+OUTPUT
+QUERY::atomic weight of Hg element
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 END
