@@ -21,6 +21,7 @@ from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.llm_nonstreaming_port import LLMNonStreamingPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
+from app.domain.ports.comparator_port import ComparatorPort
 from app.domain.ports.state_builder import StateBuilderPort
 from app.domain.ports.query_rewriter import QueryRewriterPort
 from app.domain.ports.transcribe_port import TranscribePort
@@ -35,6 +36,7 @@ from app.infrastructure.llm.aws_bedrock_converse_provider_nonstreaming import AW
 from app.infrastructure.llm.aws_bedrock_converse_provider_llm_only_nonstreaming import AWSBedrockConverseProviderLLMOnly
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
+from app.infrastructure.query_comparator.aws_bedrock_provider import QueryComparator
 from app.infrastructure.state_builder.aws_bedrock_provider import StateBuilder
 from app.infrastructure.query_rewriter.aws_bedrock_provider import QueryRewriter
 from app.infrastructure.transcriber.aws_transcribe_streaming import AWSTranscribeStreaming
@@ -61,6 +63,7 @@ class DIContainer:
         self._chat_service = None
         self._message_service = None
         self._recontextualizer = None
+        self._comparator = None
         self._state_builder = None
         self._query_rewriter = None
         self._ia_config_service = None
@@ -275,6 +278,13 @@ class DIContainer:
             self._recontextualizer = QueryRecontextualizer()
 
         return self._recontextualizer
+
+    def get_comparator(self) -> ComparatorPort:
+        """Get query comparator as singleton."""
+        if self._comparator is None:
+            self._comparator = QueryComparator()
+
+        return self._comparator
 
     def get_state_builder(self) -> StateBuilderPort:
         """Get state builder as singleton."""

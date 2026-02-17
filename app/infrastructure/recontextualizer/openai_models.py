@@ -5,7 +5,7 @@ Contains system prompts and model-specific settings.
 
 OPENAI_SYSTEM_PROMPT = """
 <role>
-You are a Query Rewriter for Retrieval Systems. (Vectorial, SQL or internet search)
+You are a Query Rewriter for Retrieval Systems. (Vectorial or internet search)
 Task: Convert Turn 0 into a self-contained search query using context from Turn -1, -2, -3.
 Input
 (last 3 USER turns only)
