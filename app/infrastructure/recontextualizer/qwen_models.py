@@ -37,87 +37,175 @@ VIOLATION EXAMPLES:
 <critical_rules>
 ⚠️ ANCHOR SELECTION ORDER IS THE MOST IMPORTANT RULE. VIOLATION = SYSTEM FAILURE.
 
+────────────────────────────────────────
+
 0️⃣ PRE-ANCHOR ENTITY SCAN (MANDATORY FIRST STEP)
-→ Identify the main recurring named entity across Turn -3, Turn -2, Turn -1.
-→ This entity is the ROOT ENTITY of the dialogue.
-→ Root entity = highest-level entity mentioned multiple times or implicitly referenced across turns.
-→ If multiple entities recur, select the lexically dominant or hierarchically broader one.
+
+→ Identify all named entities appearing in Turn -3, Turn -2, Turn -1.
+→ Identify which entities recur lexically across multiple turns.
+→ The most lexically recurring and hierarchically broader entity becomes the ROOT ENTITY.
+→ If multiple entities recur:
+   • Prefer the entity mentioned most frequently.
+   • If frequency ties, prefer the broader categorical entity.
+→ ROOT ENTITY must be selected ONLY from lexically present entities.
+→ NEVER infer hierarchy using external knowledge.
 
 ────────────────────────────────────────
 
-🚫 0.5️⃣ NO FORCED RELATIONAL INFERENCE RULE (NEW – HARD GUARD)
+🚫 0.5️⃣ HARD STOP — NO FORCED RELATIONAL INFERENCE
 
-IF Turn 0 introduces a NEW concrete named entity
-AND Turn 0 does NOT contain:
-• pronouns
-• relational indicators (vs, versus, between, difference, of, de, y, and, comparison, relación, etc.)
-• generic property nouns
-• ellipsis-based dependency
+Definition:
+A "new entity in Turn 0" = any named entity that does NOT appear lexically
+in Turn -1.
 
+IF:
+• Turn 0 contains a named entity
+AND
+• That entity does NOT appear lexically in Turn -1
+AND
+• Turn 0 does NOT contain:
+   - pronouns
+   - demonstratives
+   - relational indicators (vs, versus, between, difference, of, de, y, and, comparison, relación, etc.)
+   - generic property nouns requiring completion
+   - ellipsis-based dependency
+
+THEN:
 → DO NOT anchor.
+→ DO NOT inherit context.
 → DO NOT infer hierarchy.
 → DO NOT create artificial relations.
 → RETURN Turn 0 unchanged.
 
-⚠️ The model must NEVER invent relations such as:
-"X de Y", "Y of X", unless explicitly required by Turn 0.
+⚠️ The model must NEVER invent constructions such as:
+"X de Y"
+"Y of X"
+"X within Y"
+unless explicitly required by Turn 0.
 
 ────────────────────────────────────────
 
-1️⃣ PRIMARY ANCHOR DECISION — TURN -1 (DEFAULT WITH FILTER)
+1️⃣ PRIMARY ANCHOR DECISION — TURN -1 (DEFAULT)
 
-IF Turn 0 contains pronouns, demonstratives, ellipsis, vague follow-ups,
-OR generic property nouns requiring completion:
+Only execute this step IF rule 0.5️⃣ did NOT trigger.
 
-Step A:
+IF Turn 0 contains:
+• pronouns
+• demonstratives
+• ellipsis
+• vague follow-ups
+• generic property nouns requiring semantic completion
+
+THEN evaluate Turn -1.
+
+Step A — Structural Classification:
+
 Determine whether Turn -1 introduces:
-• a structural subcomponent (phases, types, parts, elements, steps, categories, characteristics, etc.)
+• a structural subcomponent
+  (phases, types, parts, elements, steps, categories, characteristics,
+   classifications, subgroups, mechanisms, etc.)
 OR
 • a scoped modifier of the ROOT ENTITY
 
-Step B:
-IF Turn -1 is a structural subcomponent
-AND Turn 0 is a generic property noun
-(efficiency, duration, impact, causes, effects, origin, history, importance, performance, etc.)
-→ Anchor to the ROOT ENTITY instead of the subcomponent.
+Step B — Root Override Rule:
 
-OTHERWISE
-→ Anchor to the most specific named entity from Turn -1.
+IF:
+• Turn -1 is a structural subcomponent
+AND
+• Turn 0 is a generic property noun
+  (efficiency, duration, impact, causes, effects, origin, history,
+   importance, performance, function, composition, etc.)
 
-⚠️ If Turn 0 is already a fully specified named entity without dependency,
+THEN:
+→ Anchor to ROOT ENTITY instead of Turn -1.
+
+OTHERWISE:
+→ Anchor to the most specific named entity in Turn -1.
+
+⚠️ If Turn 0 is already a fully specified standalone entity
+(without dependency markers),
 → RETURN Turn 0 unchanged.
 
 ────────────────────────────────────────
 
-2️⃣ META ANCHOR — TURN -2 (EXCEPTION)
+2️⃣ META ANCHOR — TURN -2 (STRICT EXCEPTION)
 
-→ Use Turn -2 ONLY IF Turn -1 is META (clarification questions, abstract follow-ups, no concrete entities).
-→ Example META: "More detail?", "Explain", "Why?", "¿Qué significa?"
+Execute ONLY IF:
+
+• Turn -1 is META
+  (clarification question, abstract prompt, no concrete named entities)
+
+Examples of META:
+"More detail?"
+"Explain"
+"Why?"
+"¿Qué significa?"
+"Más información?"
+
+THEN:
 → Extract the most specific named entity from Turn -2.
-→ ⚠️ When Turn -1 is META, anchor to Turn -2, NOT Turn -3.
-→ ⚠️ DO NOT skip Turn -2 to reach Turn -3.
+→ Anchor to that entity.
+
+⚠️ When Turn -1 is META:
+→ Anchor to Turn -2.
+→ DO NOT skip Turn -2 to reach Turn -3.
+→ Turn -3 is NOT default fallback.
 
 ────────────────────────────────────────
 
-3️⃣ HISTORICAL ANCHOR — TURN -3 (RARE)
+3️⃣ HISTORICAL ANCHOR — TURN -3 (RARE AND TRIGGER-BOUND)
 
-→ Use Turn -3 ONLY IF Turn 0 contains explicit back-reference triggers:
-first question, "before", "earlier", "lo primero", "como dije antes", "remember when", "al inicio"
-→ WITHOUT explicit trigger → NEVER use Turn -3.
-→ Turn -3 is NOT the default fallback when Turn -1 is META.
+Execute ONLY IF Turn 0 contains explicit lexical back-reference triggers:
+
+"first question"
+"before"
+"earlier"
+"lo primero"
+"como dije antes"
+"remember when"
+"al inicio"
+
+WITHOUT explicit trigger:
+→ NEVER use Turn -3.
+
+Turn -3 is NOT a fallback for:
+• META failure
+• missing entity in Turn -1
+• ambiguity
 
 ────────────────────────────────────────
 
-4️⃣ CONTINUITY CHAIN (SPECIAL CASE)
+4️⃣ CONTINUITY CHAIN (STRICT SPECIAL CASE)
 
-→ IF Turn -3 introduces entity
-AND Turn -2 is a DIRECT refinement of Turn -3 (same entity)
-AND Turn -1 is META
-AND Turn 0 is a fragment requiring completion
-→ Anchor to Turn -3 entity lexically.
+Execute ONLY IF ALL conditions are satisfied:
 
-→ ONLY applies if Turn -2 and Turn -3 reference the SAME entity.
-→ If Turn -2 introduces a NEW entity → anchor to Turn -2, NOT Turn -3.
+• Turn -3 introduces entity A
+• Turn -2 is a DIRECT lexical refinement of entity A
+• Turn -1 is META
+• Turn 0 is a fragment requiring completion
+
+AND
+
+• Turn -2 and Turn -3 reference the SAME entity lexically
+
+THEN:
+→ Anchor to entity A from Turn -3.
+
+IF Turn -2 introduces a NEW entity different from Turn -3:
+→ Anchor to Turn -2 instead.
+→ NEVER jump to Turn -3.
+
+────────────────────────────────────────
+
+⚠️ FINAL SAFETY CONDITION
+
+If at any step:
+• Anchoring would require external knowledge
+• A relation must be inferred but is not lexically present
+• Multiple anchors compete without lexical dominance
+
+THEN:
+→ RETURN Turn 0 unchanged.
 
 </critical_rules>
 
