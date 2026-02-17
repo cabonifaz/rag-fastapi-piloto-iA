@@ -106,8 +106,8 @@ class QueryRecontextualizer(RecontextualizerPort):
         Returns:
             The rewritten query string. Returns the original query if recontextualization fails.
         """
-        # Default response if no conversation history
-        if not conversation_history or len(conversation_history) < 4:
+        # Need at least 2 messages (one previous + current) to have something to recontextualize
+        if not conversation_history or len(conversation_history) < 2:
             logger.info("Insufficient conversation history provided, returning original query")
             return conversation_history[-1] if conversation_history else user_query
 

@@ -18,22 +18,22 @@ def create_select_history_for_prompt_node():
         conversation_history_for_prompt = []
         chat_id = state.get("chat_id")
         conversation_history = state.get("conversation_history", [])
-        query_rewriter_result = state.get("query_rewriter_result")
+        comparator_result = state.get("comparator_result")
 
-        if chat_id and conversation_history and query_rewriter_result:
-            needs_rewrite = query_rewriter_result.get("needs_rewrite", False)
-            summary_intent = query_rewriter_result.get("is_summary_request", False)
+        if chat_id and conversation_history and comparator_result:
+            same_info = comparator_result.get("same_info", True)
+            asks_for_summary = comparator_result.get("asks_for_summary", False)
 
             messages_to_use = 0
-            if needs_rewrite and summary_intent:
+            if asks_for_summary:
                 messages_to_use = 16
                 logger.info("Using 16 messages for LLM prompt")
-            elif needs_rewrite:
+            elif not same_info:
                 messages_to_use = 8
                 logger.info("Using 8 messages for LLM prompt")
-            elif summary_intent:
-                messages_to_use = 16
-                logger.info("Using 16 messages for LLM prompt")
+            else:
+                messages_to_use = 0
+                logger.info("Using 0 messages for LLM prompt")
 
             if messages_to_use > 0:
                 conversation_history_for_prompt = conversation_history[-messages_to_use:] if len(conversation_history) >= messages_to_use else conversation_history

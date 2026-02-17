@@ -11,8 +11,8 @@ from app.workflows.nodes import (
     create_validate_inputs_node,
     create_get_conversation_history_node,
     create_clean_message_node,
-    create_build_query_state_node,
-    create_rewrite_query_node,
+    create_recontextualize_query_node,
+    create_compare_query_node,
     create_load_rag_config_node,
     create_create_or_use_chat_node,
     create_save_user_message_node,
@@ -38,8 +38,8 @@ def create_rag_workflow(
     llm_provider: Any,
     message_service: Any,
     ia_config_service: Any,
-    state_builder: Any,
-    query_rewriter: Any
+    recontextualizer: Any,
+    comparator: Any
 ) -> StateGraph:
     """
     Create and configure the RAG workflow graph with dependencies.
@@ -51,8 +51,8 @@ def create_rag_workflow(
         llm_provider: LLM service
         message_service: Message service
         ia_config_service: IA config service
-        state_builder: State builder service
-        query_rewriter: Query rewriter service
+        recontextualizer: Query recontextualizer service
+        comparator: Query comparator service
 
     Returns:
         Compiled StateGraph ready to execute
@@ -61,8 +61,8 @@ def create_rag_workflow(
     validate_inputs = create_validate_inputs_node()
     get_conversation_history = create_get_conversation_history_node(message_service)
     clean_message = create_clean_message_node()
-    build_query_state = create_build_query_state_node(state_builder)
-    rewrite_query = create_rewrite_query_node(query_rewriter)
+    recontextualize_query = create_recontextualize_query_node(recontextualizer)
+    compare_query = create_compare_query_node(comparator)
     load_rag_config = create_load_rag_config_node(session_factory, ia_config_service)
     create_or_use_chat = create_create_or_use_chat_node(session_factory)
     save_user_message = create_save_user_message_node(message_service)
@@ -81,8 +81,8 @@ def create_rag_workflow(
     workflow.add_node("validate_inputs", validate_inputs)
     workflow.add_node("get_conversation_history", get_conversation_history)
     workflow.add_node("clean_message", clean_message)
-    workflow.add_node("build_query_state", build_query_state)
-    workflow.add_node("rewrite_query", rewrite_query)
+    workflow.add_node("recontextualize_query", recontextualize_query)
+    workflow.add_node("compare_query", compare_query)
     workflow.add_node("load_rag_config", load_rag_config)
     workflow.add_node("create_or_use_chat", create_or_use_chat)
     workflow.add_node("save_user_message", save_user_message)
@@ -108,9 +108,9 @@ def create_rag_workflow(
     )
 
     workflow.add_edge("get_conversation_history", "clean_message")
-    workflow.add_edge("clean_message", "build_query_state")
-    workflow.add_edge("build_query_state", "rewrite_query")
-    workflow.add_edge("rewrite_query", "load_rag_config")
+    workflow.add_edge("clean_message", "recontextualize_query")
+    workflow.add_edge("recontextualize_query", "compare_query")
+    workflow.add_edge("compare_query", "load_rag_config")
     workflow.add_edge("load_rag_config", "create_or_use_chat")
 
     workflow.add_conditional_edges(
@@ -149,8 +149,8 @@ def initialize_rag_workflow(
     llm_provider: Any,
     message_service: Any,
     ia_config_service: Any,
-    state_builder: Any,
-    query_rewriter: Any
+    recontextualizer: Any,
+    comparator: Any
 ) -> None:
     """
     Initialize and compile the global RAG workflow.
@@ -163,8 +163,8 @@ def initialize_rag_workflow(
         llm_provider: LLM service
         message_service: Message service
         ia_config_service: IA config service
-        state_builder: State builder service
-        query_rewriter: Query rewriter service
+        recontextualizer: Query recontextualizer service
+        comparator: Query comparator service
     """
     global _compiled_rag_workflow
 
@@ -176,8 +176,8 @@ def initialize_rag_workflow(
         llm_provider=llm_provider,
         message_service=message_service,
         ia_config_service=ia_config_service,
-        state_builder=state_builder,
-        query_rewriter=query_rewriter
+        recontextualizer=recontextualizer,
+        comparator=comparator
     )
     _compiled_rag_workflow = workflow.compile()
     logger.info("RAG workflow compiled successfully")

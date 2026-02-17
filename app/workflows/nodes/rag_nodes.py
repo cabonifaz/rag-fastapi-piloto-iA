@@ -13,20 +13,7 @@ def create_determine_query_for_search_node():
     """Factory function to create determine_query_for_search node"""
     async def determine_query_for_search(state: RAGState) -> RAGState:
         """Determine which query to use for embedding and search"""
-        query_for_search = state["cleaned_message"]
-        query_rewriter_result = state.get("query_rewriter_result")
-
-        if query_rewriter_result and query_rewriter_result.get("needs_rewrite", False):
-            rewritten_query = query_rewriter_result.get("rewritten_query", "").strip()
-            if rewritten_query:
-                query_for_search = rewritten_query
-                logger.info(f"Using rewritten query for search: {query_for_search}")
-            else:
-                logger.warning("Rewritten query is empty, using original")
-        else:
-            logger.info("Using original query for search")
-
-        state["query_for_search"] = query_for_search
+        state["query_for_search"] = state["recontextualized_query"]
         return state
 
     return determine_query_for_search

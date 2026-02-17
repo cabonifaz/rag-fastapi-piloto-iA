@@ -4,7 +4,7 @@ Defines the contract for comparing an original query against its recontextualize
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict
+from typing import Dict
 
 
 class ComparatorPort(ABC):
@@ -21,7 +21,7 @@ class ComparatorPort(ABC):
         self,
         original_query: str,
         recontextualized_query: str,
-    ) -> Optional[Dict]:
+    ) -> Dict:
         """
         Compare the original query against its recontextualized version.
 

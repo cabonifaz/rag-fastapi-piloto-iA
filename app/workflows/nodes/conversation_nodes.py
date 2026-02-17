@@ -1,6 +1,6 @@
 """
 Conversation-related nodes for workflows.
-Handles conversation history, state building, and query rewriting.
+Handles conversation history, recontextualization, and comparison.
 """
 import logging
 from app.workflows.states import RAGState
@@ -70,56 +70,61 @@ def create_get_conversation_history_node(message_service, max_ctx: int = 16):
     return get_conversation_history
 
 
-def create_build_query_state_node(state_builder):
-    """Factory function to create build_query_state node"""
-    async def build_query_state(state: RAGState) -> RAGState:
-        """Build query state for recontextualization"""
+def create_recontextualize_query_node(recontextualizer):
+    """Factory function to create recontextualize_query node"""
+    async def recontextualize_query(state: RAGState) -> RAGState:
+        """Recontextualize the user query using conversation history"""
+        recontextualized_query = None
         chat_id = state.get("chat_id")
         conversation_history = state.get("conversation_history", [])
 
-        state_builder_result = None
-
-        if chat_id is not None and conversation_history:
+        if chat_id is not None and len(conversation_history) >= 2:
             try:
-                conversation_for_state_building = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
-                # Replace assistant messages content with placeholder
-                conversation_for_state_building = [
-                    {**msg, "content": "assistant message"} if msg["role"] == "assistant" else msg
-                    for msg in conversation_for_state_building
-                ]
+                # Keep only user messages as strings, last 3 at most
+                user_messages = [m["content"] for m in conversation_history if m["role"] == "user"][-3:]
 
-                state_builder_result = await state_builder.build_query_state(
+                result = await recontextualizer.recontextualize_query(
                     user_query=state["cleaned_message"],
-                    conversation_history=conversation_for_state_building
+                    conversation_history=user_messages
                 )
-                logger.info(f"State builder result: {state_builder_result}")
-            except Exception as e:
-                logger.warning(f"Failed to build query state: {e}")
 
-        state["state_builder_result"] = state_builder_result
+                if result and isinstance(result, str):
+                    recontextualized_query = result
+                    logger.info(
+                        f"Query recontextualized:\n"
+                        f"  Original:  {state['cleaned_message']}\n"
+                        f"  Rewritten: {recontextualized_query}"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to recontextualize query: {e}")
+
+        # Fall back to the cleaned message if recontextualization didn't produce a result
+        state["recontextualized_query"] = recontextualized_query or state["cleaned_message"]
         return state
 
-    return build_query_state
+    return recontextualize_query
 
 
-def create_rewrite_query_node(query_rewriter):
-    """Factory function to create rewrite_query node"""
-    async def rewrite_query(state: RAGState) -> RAGState:
-        """Rewrite query based on state"""
-        query_rewriter_result = None
-        state_builder_result = state.get("state_builder_result")
+def create_compare_query_node(comparator):
+    """Factory function to create compare_query node"""
+    async def compare_query(state: RAGState) -> RAGState:
+        """Compare original and recontextualized queries"""
+        comparator_result = None
+        recontextualized_query = state.get("recontextualized_query")
 
-        if state_builder_result:
-            try:
-                query_rewriter_result = await query_rewriter.rewrite_query(
-                    user_query=state["cleaned_message"],
-                    state=state_builder_result
-                )
-                logger.info(f"Query rewriter result: {query_rewriter_result}")
-            except Exception as e:
-                logger.warning(f"Failed to rewrite query: {e}")
+        try:
+            comparator_result = await comparator.comparate_query(
+                original_query=state["cleaned_message"],
+                recontextualized_query=recontextualized_query
+            )
+            logger.info(
+                f"Comparator result: same_info={comparator_result.get('same_info')}, "
+                f"asks_for_summary={comparator_result.get('asks_for_summary')}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to compare queries: {e}")
 
-        state["query_rewriter_result"] = query_rewriter_result
+        state["comparator_result"] = comparator_result
         return state
 
-    return rewrite_query
+    return compare_query

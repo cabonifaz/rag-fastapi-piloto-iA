@@ -202,22 +202,20 @@ class QwenRecontextualizerConfig:
     @staticmethod
     def build_user_prompt(user_query: str, conversation_history: list) -> str:
         """
-        Build the user prompt with the last 4 user messages as turns.
+        Build the user prompt with 1-3 previous messages plus the current query.
 
         Args:
-            user_query: The user's current query (unused, kept for interface compatibility).
-            conversation_history: List of 4 user message strings ordered oldest to newest.
-                                 [0]=Turn -3, [1]=Turn -2, [2]=Turn -1, [3]=Turn 0.
+            user_query: The user's current query — always [Turn  0].
+            conversation_history: 1-3 strings ordered oldest to newest,
+                                  labeled [Turn -3] to [Turn -1] relative to Turn 0.
 
         Returns:
             Formatted prompt string with turns.
         """
-        return (
-            f'[Turn -3] "{conversation_history[0]}"\n'
-            f'[Turn -2] "{conversation_history[1]}"\n'
-            f'[Turn -1] "{conversation_history[2]}"\n'
-            f'[Turn  0] "{conversation_history[3]}"'
-        )
+        n = len(conversation_history)
+        lines = [f'[Turn {i - n:>2}] "{conversation_history[i]}"' for i in range(n)]
+        lines.append(f'[Turn  0] "{user_query}"')
+        return "\n".join(lines)
 
     @staticmethod
     def extract_response(response):

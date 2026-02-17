@@ -92,7 +92,7 @@ class QueryComparator(ComparatorPort):
         self,
         original_query: str,
         recontextualized_query: str,
-    ) -> Optional[Dict]:
+    ) -> Dict:
         """
         Asynchronously compares two queries using AWS Bedrock.
 
@@ -104,7 +104,7 @@ class QueryComparator(ComparatorPort):
             Dict with keys:
                 - same_info: bool — True if original query is sufficient for vector search.
                 - asks_for_summary: bool — True if user is asking for a conversation recap.
-            Returns None if the comparison fails.
+            Returns {"same_info": True, "asks_for_summary": False} if the comparison fails.
         """
         try:
             prompt = self.model_config.build_user_prompt(original_query, recontextualized_query)
@@ -138,31 +138,31 @@ class QueryComparator(ComparatorPort):
                     f"Query comparison result: same_info={result['same_info']}, "
                     f"asks_for_summary={result['asks_for_summary']}"
                 )
-            else:
-                logger.warning("Failed to extract comparison result")
+                return result
 
-            return result
+            logger.warning("Failed to extract comparison result, using default")
+            return {"same_info": True, "asks_for_summary": False}
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
             logger.error(f"AWS ClientError in QueryComparator: {error_code} - {e}")
-            return None
+            return {"same_info": True, "asks_for_summary": False}
 
         except NoCredentialsError as e:
             logger.error(f"AWS credentials error in QueryComparator: {e}")
-            return None
+            return {"same_info": True, "asks_for_summary": False}
 
         except EndpointConnectionError as e:
             logger.error(f"AWS endpoint connection error in QueryComparator: {e}")
-            return None
+            return {"same_info": True, "asks_for_summary": False}
 
         except asyncio.TimeoutError:
             logger.error("Timeout in QueryComparator")
-            return None
+            return {"same_info": True, "asks_for_summary": False}
 
         except Exception as e:
             logger.error(f"Unexpected error in QueryComparator: {e}")
-            return None
+            return {"same_info": True, "asks_for_summary": False}
 
     def _extract_result(self, response) -> Optional[Dict]:
         """

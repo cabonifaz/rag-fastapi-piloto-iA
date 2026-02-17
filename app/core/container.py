@@ -436,8 +436,8 @@ class DIContainer:
             llm_provider=self.get_llm_provider(),
             message_service=self.get_message_service(),
             ia_config_service=self.get_ia_config_service(),
-            state_builder=self.get_state_builder(),
-            query_rewriter=self.get_query_rewriter()
+            recontextualizer=self.get_recontextualizer(),
+            comparator=self.get_comparator()
         )
 
     def initialize_llm_only_workflow(self) -> None:
@@ -469,8 +469,8 @@ class DIContainer:
             llm_provider=self.get_llm_provider(),
             message_service=self.get_message_service(),
             ia_config_service=self.get_ia_config_service(),
-            state_builder=self.get_state_builder(),
-            query_rewriter=self.get_query_rewriter()
+            recontextualizer=self.get_recontextualizer(),
+            comparator=self.get_comparator()
         )
 
     def initialize_llm_only_anonymous_workflow(self) -> None:
