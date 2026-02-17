@@ -108,7 +108,7 @@ class AWSBedrockConverseProviderLLMOnly(LLMNonStreamingPort):
         # Configure boto3 with connection and read timeouts
         # IMPORTANT: Disable retries - we handle retries via fallback logic
         self.boto_config = Config(
-            connect_timeout=5,
+            connect_timeout=10,
             read_timeout=30,
             retries={'max_attempts': 0}
         )

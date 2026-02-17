@@ -1,9 +1,9 @@
 """
-Meta (Llama) model configuration for query recontextualizer.
+Qwen model configuration for query recontextualizer.
 Contains system prompts and model-specific settings.
 """
 
-META_SYSTEM_PROMPT = """
+QWEN_SYSTEM_PROMPT = """
 <role>
 You are a Query Rewriter for Retrieval Systems. (Vectorial, SQL or internet search)
 Task: Convert Turn 0 into a self-contained search query using context from Turn -1, -2, -3.
@@ -191,13 +191,13 @@ Analyze Turn 0 against Turn -1/-2/-3. Apply LANGUAGE, ANCHOR PRIORITY and GLOBAL
 """
 
 
-class MetaRecontextualizerConfig:
-    """Configuration for Meta (Llama) models in query recontextualization."""
+class QwenRecontextualizerConfig:
+    """Configuration for Qwen models in query recontextualization."""
 
     @staticmethod
     def get_system_prompt():
-        """Return the system prompt for Meta/Llama recontextualizer."""
-        return META_SYSTEM_PROMPT
+        """Return the system prompt for Qwen recontextualizer."""
+        return QWEN_SYSTEM_PROMPT
 
     @staticmethod
     def build_user_prompt(user_query: str, conversation_history: list) -> str:

@@ -63,7 +63,7 @@ class QueryRecontextualizer(RecontextualizerPort):
 
         # Configure botocore with connection and read timeouts
         self.boto_config = Config(
-            connect_timeout=5,
+            connect_timeout=10,
             read_timeout=30,
             retries={'max_attempts': 0}
         )
@@ -93,49 +93,33 @@ class QueryRecontextualizer(RecontextualizerPort):
     async def recontextualize_query(
         self,
         user_query: str,
-        conversation_history: Optional[List[Dict[str, str]]] = None
-    ) -> Dict[str, any]:
+        conversation_history: Optional[List[str]] = None
+    ) -> str:
         """
         Asynchronously recontextualizes the user query using conversation history with aioboto3 (truly async).
 
         Args:
-            user_query: The user's query text.
-            conversation_history: Optional list of recent message dicts with 'role' and 'content'.
+            user_query: The user's current query text (unused, kept for interface compatibility).
+            conversation_history: List of 4 user message strings ordered oldest to newest.
+                                 [0]=Turn -3, [1]=Turn -2, [2]=Turn -1, [3]=Turn 0.
 
         Returns:
-            Dictionary with:
-                - needs_context: bool (whether the query needed context)
-                - response: str (the recontextualized query)
-                - summary_intent: bool (whether user is asking for a summary)
-            Returns a default dict with the original query if recontextualization fails.
+            The rewritten query string. Returns the original query if recontextualization fails.
         """
         # Default response if no conversation history
-        if not conversation_history or len(conversation_history) == 0:
-            logger.info("No conversation history provided, returning original query")
-            return {
-                "needs_context": False,
-                "response": user_query,
-                "summary_intent": False
-            }
+        if not conversation_history or len(conversation_history) < 4:
+            logger.info("Insufficient conversation history provided, returning original query")
+            return conversation_history[-1] if conversation_history else user_query
 
         try:
-            # Build messages array using proper Converse API format
-            # Convert conversation history to Converse messages format
-            converse_messages = []
-            for msg in conversation_history:
-                converse_messages.append({
-                    "role": msg["role"],
-                    "content": [{"text": msg["content"]}]
-                })
-
-            # Build the current query prompt with any model-specific instructions
+            # Build the user prompt with turn format
             prompt = self.model_config.build_user_prompt(user_query, conversation_history)
 
-            # Append current query as the latest user message
-            converse_messages.append({
+            # Single user message with the turn-formatted prompt
+            converse_messages = [{
                 "role": "user",
                 "content": [{"text": prompt}]
-            })
+            }]
 
             # Build request parameters
             request_params = {
@@ -143,16 +127,16 @@ class QueryRecontextualizer(RecontextualizerPort):
                 "messages": converse_messages,
                 "system": self._build_system_config(),
                 "inferenceConfig": {
-                    "maxTokens": 256,  # Model returns only {"query":"..."}, 256 tokens is sufficient
-                    "temperature": 0.0,  # Low temperature for consistent recontextualization
-                    "topP": 0.1
+                    "maxTokens": 2048,
+                    "temperature": 0.1,
+                    "topP": 1
                 }
             }
 
             # Use aioboto3 async client for truly non-blocking Bedrock calls
             logger.info(
                 f"♻️ Reusing session (id: {id(self.session)}) [Recontextualizer] | "
-                f"Request params: model={self.model_id}, max_tokens=256, temp=0.0, top_p=0.1"
+                f"Request params: model={self.model_id}, max_tokens=2048, temp=0.1, top_p=1"
             )
             async with self.session.client("bedrock-runtime", config=self.boto_config) as client:
                 response = await client.converse(**request_params)
@@ -161,22 +145,17 @@ class QueryRecontextualizer(RecontextualizerPort):
                 result = self._extract_result(response)
 
             if result:
-                rewritten = result['response']
-                was_rewritten = rewritten != user_query
+                was_rewritten = result != conversation_history[3]
                 logger.info(
                     f"Query recontextualized:\n"
-                    f"  Original:    {user_query}\n"
-                    f"  Rewritten:   {rewritten}\n"
+                    f"  Original:    {conversation_history[3]}\n"
+                    f"  Rewritten:   {result}\n"
                     f"  Was changed: {was_rewritten}"
                 )
                 return result
             else:
                 logger.warning("Failed to extract recontextualized query, returning original")
-                return {
-                    "needs_context": False,
-                    "response": user_query,
-                    "summary_intent": False
-                }
+                return conversation_history[3]
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
@@ -193,19 +172,19 @@ class QueryRecontextualizer(RecontextualizerPort):
             elif error_code == 'ResourceNotFoundException':
                 logger.error(f"Model {self.model_id} not found or not accessible")
 
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return conversation_history[3]
 
         except NoCredentialsError as e:
             logger.error(f"AWS credentials error in QueryRecontextualizer: {e}")
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return conversation_history[3]
 
         except EndpointConnectionError as e:
             logger.error(f"AWS endpoint connection error in QueryRecontextualizer: {e}")
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return conversation_history[3]
 
         except asyncio.TimeoutError as e:
             logger.error(f"Timeout error in QueryRecontextualizer: {e}")
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return conversation_history[3]
 
         except Exception as e:
             # Check if it's a timeout exception
@@ -215,19 +194,19 @@ class QueryRecontextualizer(RecontextualizerPort):
             else:
                 logger.error(f"Unexpected error in QueryRecontextualizer: {e}")
 
-            return {"needs_context": False, "response": user_query, "summary_intent": False}
+            return conversation_history[3]
 
-    def _extract_result(self, response) -> Optional[Dict[str, any]]:
+    def _extract_result(self, response) -> Optional[str]:
         """
         Extract the recontextualized query from the Converse API response.
 
-        The model returns {"query": "FINAL_QUERY"}. The model config's extract_response
-        parses this and maps it to the port's expected structure.
+        The model returns QUERY::[rewritten_query]. The model config's extract_response
+        parses this format and returns the query string.
 
         Args:
             response: The response from bedrock_client.converse()
 
         Returns:
-            Dictionary with needs_context, response, and summary_intent, or None if extraction fails.
+            The rewritten query string, or None if extraction fails.
         """
         return self.model_config.extract_response(response)
