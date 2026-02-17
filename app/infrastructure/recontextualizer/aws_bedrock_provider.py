@@ -143,12 +143,13 @@ class QueryRecontextualizer(RecontextualizerPort):
 
                 # Extract the recontextualized query result
                 result = self._extract_result(response)
+                print(result)
 
             if result:
-                was_rewritten = result != conversation_history[3]
+                was_rewritten = result != user_query
                 logger.info(
                     f"Query recontextualized:\n"
-                    f"  Original:    {conversation_history[3]}\n"
+                    f"  Original:    {user_query}\n"
                     f"  Rewritten:   {result}\n"
                     f"  Was changed: {was_rewritten}"
                 )

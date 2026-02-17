@@ -41,10 +41,33 @@ VIOLATION EXAMPLES:
 → Identify the main recurring named entity across Turn -3, Turn -2, Turn -1.
 → This entity is the ROOT ENTITY of the dialogue.
 → Root entity = highest-level entity mentioned multiple times or implicitly referenced across turns.
+→ If multiple entities recur, select the lexically dominant or hierarchically broader one.
+
+────────────────────────────────────────
+
+🚫 0.5️⃣ NO FORCED RELATIONAL INFERENCE RULE (NEW – HARD GUARD)
+
+IF Turn 0 introduces a NEW concrete named entity
+AND Turn 0 does NOT contain:
+• pronouns
+• relational indicators (vs, versus, between, difference, of, de, y, and, comparison, relación, etc.)
+• generic property nouns
+• ellipsis-based dependency
+
+→ DO NOT anchor.
+→ DO NOT infer hierarchy.
+→ DO NOT create artificial relations.
+→ RETURN Turn 0 unchanged.
+
+⚠️ The model must NEVER invent relations such as:
+"X de Y", "Y of X", unless explicitly required by Turn 0.
+
+────────────────────────────────────────
 
 1️⃣ PRIMARY ANCHOR DECISION — TURN -1 (DEFAULT WITH FILTER)
 
-IF Turn 0 contains pronouns, demonstratives, ellipsis, or vague follow-ups:
+IF Turn 0 contains pronouns, demonstratives, ellipsis, vague follow-ups,
+OR generic property nouns requiring completion:
 
 Step A:
 Determine whether Turn -1 introduces:
@@ -61,6 +84,11 @@ AND Turn 0 is a generic property noun
 OTHERWISE
 → Anchor to the most specific named entity from Turn -1.
 
+⚠️ If Turn 0 is already a fully specified named entity without dependency,
+→ RETURN Turn 0 unchanged.
+
+────────────────────────────────────────
+
 2️⃣ META ANCHOR — TURN -2 (EXCEPTION)
 
 → Use Turn -2 ONLY IF Turn -1 is META (clarification questions, abstract follow-ups, no concrete entities).
@@ -69,6 +97,8 @@ OTHERWISE
 → ⚠️ When Turn -1 is META, anchor to Turn -2, NOT Turn -3.
 → ⚠️ DO NOT skip Turn -2 to reach Turn -3.
 
+────────────────────────────────────────
+
 3️⃣ HISTORICAL ANCHOR — TURN -3 (RARE)
 
 → Use Turn -3 ONLY IF Turn 0 contains explicit back-reference triggers:
@@ -76,16 +106,19 @@ first question, "before", "earlier", "lo primero", "como dije antes", "remember 
 → WITHOUT explicit trigger → NEVER use Turn -3.
 → Turn -3 is NOT the default fallback when Turn -1 is META.
 
+────────────────────────────────────────
+
 4️⃣ CONTINUITY CHAIN (SPECIAL CASE)
 
 → IF Turn -3 introduces entity
 AND Turn -2 is a DIRECT refinement of Turn -3 (same entity)
 AND Turn -1 is META
-AND Turn 0 is a fragment
+AND Turn 0 is a fragment requiring completion
 → Anchor to Turn -3 entity lexically.
 
 → ONLY applies if Turn -2 and Turn -3 reference the SAME entity.
 → If Turn -2 introduces a NEW entity → anchor to Turn -2, NOT Turn -3.
+
 </critical_rules>
 
 <global_disambiguation>
@@ -215,6 +248,7 @@ class QwenRecontextualizerConfig:
         n = len(conversation_history)
         lines = [f'[Turn {i - n:>2}] "{conversation_history[i]}"' for i in range(n)]
         lines.append(f'[Turn  0] "{user_query}"')
+        print("\n".join(lines))
         return "\n".join(lines)
 
     @staticmethod
