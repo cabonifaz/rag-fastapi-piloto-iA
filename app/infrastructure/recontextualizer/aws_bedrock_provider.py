@@ -107,9 +107,9 @@ class QueryRecontextualizer(RecontextualizerPort):
             The rewritten query string. Returns the original query if recontextualization fails.
         """
         # Need at least 2 messages (one previous + current) to have something to recontextualize
-        if not conversation_history or len(conversation_history) < 2:
-            logger.info("Insufficient conversation history provided, returning original query")
-            return conversation_history[-1] if conversation_history else user_query
+        if not conversation_history:
+            logger.info("No previous messages available, returning original query")
+            return user_query
 
         try:
             # Build the user prompt with turn format
@@ -127,8 +127,8 @@ class QueryRecontextualizer(RecontextualizerPort):
                 "messages": converse_messages,
                 "system": self._build_system_config(),
                 "inferenceConfig": {
-                    "maxTokens": 2048,
-                    "temperature": 0.1,
+                    "maxTokens": 1024,
+                    "temperature": 0,
                     "topP": 1
                 }
             }
@@ -146,12 +146,10 @@ class QueryRecontextualizer(RecontextualizerPort):
                 print(result)
 
             if result:
-                was_rewritten = result != user_query
                 logger.info(
                     f"Query recontextualized:\n"
                     f"  Original:    {user_query}\n"
                     f"  Rewritten:   {result}\n"
-                    f"  Was changed: {was_rewritten}"
                 )
                 return result
             else:
