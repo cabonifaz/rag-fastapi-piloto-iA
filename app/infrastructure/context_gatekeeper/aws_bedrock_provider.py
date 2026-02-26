@@ -6,14 +6,14 @@ from typing import Optional, Dict, List
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
 from botocore.config import Config
 from app.core.config import settings
-from app.domain.ports.comparator_port import ComparatorPort
+from app.domain.ports.context_gatekeeper_port import ContextGatekeeperPort
 from app.infrastructure.query_comparator.model_factory import ModelFactory
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class QueryComparator(ComparatorPort):
+class ContextGatekeeper(ContextGatekeeperPort):
     """
     Comparates user queries: the original and the recontextualized ones:
     1. Checks if both are the same for the vectorial search
@@ -43,7 +43,7 @@ class QueryComparator(ComparatorPort):
             aws_secret_access_key: AWS secret access key
         """
         self.region = region or settings.aws_region
-        self.model_id = model_id or settings.query_comparator_model_id
+        self.model_id = model_id or settings.context_gatekeeper_model_id
 
         session_params = {"region_name": self.region}
 
@@ -73,14 +73,14 @@ class QueryComparator(ComparatorPort):
             # Log session creation
             session_info = {k: '***' if 'key' in k.lower() or 'secret' in k.lower() else v
                            for k, v in session_params.items()}
-            logger.info(f"✨ Created NEW aioboto3.Session (id: {id(self.session)}) [QueryComparator] | Config: {session_info}")
+            logger.info(f"✨ Created NEW aioboto3.Session (id: {id(self.session)}) [ContextGatekeeper] | Config: {session_info}")
 
             # Get model-specific configuration based on model_id
             self.model_config = ModelFactory.get_model_config(self.model_id)
 
-            logger.info(f"QueryComparator initialized with model: {self.model_id}")
+            logger.info(f"ContextGatekeeper initialized with model: {self.model_id}")
         except Exception as e:
-            logger.error(f"Failed to initialize QueryComparator: {e}")
+            logger.error(f"Failed to initialize ContextGatekeeper: {e}")
             raise RuntimeError(f"Could not connect to AWS Bedrock: {str(e)}")
 
     def _build_system_config(self) -> list:
@@ -102,7 +102,7 @@ class QueryComparator(ComparatorPort):
             Dict with keys:
                 - needs_context: bool — True if the query requires prior context.
                 - is_summary: bool — True if user is asking for a conversation recap.
-            Returns {"needs_context": False, "is_summary": False} if the classification fails.
+            Returns {"needs_context": True, "is_summary": False} if the classification fails.
         """
         try:
             prompt = self.model_config.build_user_prompt(original_query)
@@ -124,7 +124,7 @@ class QueryComparator(ComparatorPort):
             }
 
             logger.info(
-                f"QueryComparator | session={id(self.session)} | model={self.model_id}"
+                f"ContextGatekeeper | session={id(self.session)} | model={self.model_id}"
             )
             async with self.session.client("bedrock-runtime", config=self.boto_config) as client:
                 response = await client.converse(**request_params)
@@ -139,28 +139,28 @@ class QueryComparator(ComparatorPort):
                 return result
 
             logger.warning("Failed to extract gatekeeper result, using default")
-            return {"needs_context": False, "is_summary": False}
+            return {"needs_context": True, "is_summary": False}
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
-            logger.error(f"AWS ClientError in QueryComparator: {error_code} - {e}")
-            return {"needs_context": False, "is_summary": False}
+            logger.error(f"AWS ClientError in ContextGatekeeper: {error_code} - {e}")
+            return {"needs_context": True, "is_summary": False}
 
         except NoCredentialsError as e:
-            logger.error(f"AWS credentials error in QueryComparator: {e}")
-            return {"needs_context": False, "is_summary": False}
+            logger.error(f"AWS credentials error in ContextGatekeeper: {e}")
+            return {"needs_context": True, "is_summary": False}
 
         except EndpointConnectionError as e:
-            logger.error(f"AWS endpoint connection error in QueryComparator: {e}")
-            return {"needs_context": False, "is_summary": False}
+            logger.error(f"AWS endpoint connection error in ContextGatekeeper: {e}")
+            return {"needs_context": True, "is_summary": False}
 
         except asyncio.TimeoutError:
-            logger.error("Timeout in QueryComparator")
-            return {"needs_context": False, "is_summary": False}
+            logger.error("Timeout in ContextGatekeeper")
+            return {"needs_context": True, "is_summary": False}
 
         except Exception as e:
-            logger.error(f"Unexpected error in QueryComparator: {e}")
-            return {"needs_context": False, "is_summary": False}
+            logger.error(f"Unexpected error in ContextGatekeeper: {e}")
+            return {"needs_context": True, "is_summary": False}
 
     def _extract_result(self, response) -> Optional[Dict]:
         """

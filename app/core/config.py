@@ -38,6 +38,7 @@ class Settings(BaseSettings):
 
     recontextualizer_model_id: str
     query_comparator_model_id: str
+    context_gatekeeper_model_id: str
 
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
@@ -115,6 +116,13 @@ class Settings(BaseSettings):
     def validate_query_comparator_model_id(cls, v):
         if not v:
             raise ValueError("Query comparator model ID is required")
+        return v
+
+    @field_validator('context_gatekeeper_model_id')
+    @classmethod
+    def validate_context_gatekeeper_model_id(cls, v):
+        if not v:
+            raise ValueError("Context gatekeeper model ID is required")
         return v
 
     @field_validator('jwt_secret_key')

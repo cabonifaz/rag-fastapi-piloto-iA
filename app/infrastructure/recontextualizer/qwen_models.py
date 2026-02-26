@@ -75,9 +75,8 @@ class QwenRecontextualizerConfig:
             Formatted prompt string with turns.
         """
         n = len(conversation_history)
-        lines = [f'[Turn {i - n:>2}] "{conversation_history[i]}"' for i in range(n)]
-        lines.append(f'[Turn  0] "{user_query}"')
-        print("\n".join(lines))
+        lines = [f'[Turn  0] "{user_query}"']
+        lines += [f'[Turn {i - n:>2}] "{conversation_history[i]}"' for i in range(n - 1, -1, -1)]
         return "\n".join(lines)
 
     @staticmethod
