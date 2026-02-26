@@ -76,8 +76,8 @@ class QwenRecontextualizerConfig:
             match = re.search(r"\|+([^|]+)\|+", text)
 
             if not match:
-                logger.error(f"Missing pipe delimiters in response: {text}")
-                return None
+                logger.warning(f"Missing pipe delimiters in response, using raw text: {text}")
+                return text
 
             query = match.group(1).strip()
 
