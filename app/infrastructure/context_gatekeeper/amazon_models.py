@@ -9,8 +9,8 @@ AMAZON_SYSTEM_PROMPT = """
 
 **Instructions:**
 1. **needs_context**: 
-   - `false`: The query is a complete concept, a technical term, a proper noun (name of a person, place, brand, entity), an acronym, a topic phrase, or a noun phrase with independent value. It does not need previous history to be useful as a search term. **Ambiguity does not mean context-dependent — if the term can return meaningful results in a search engine on its own, it is standalone. When in doubt, default to `false`.**
-   - `true`: The query is a dependent fragment, a single attribute, or a question about a "hidden" subject. It cannot be searched effectively on its own because it lacks the core entity.
+   - `false`: The query is a specific entity or concept that can be searched independently. This includes but is not limited to: names, places, brands, technical terms, acronyms, scientific designations, alphanumeric codes, topic phrases, or any noun phrase with independent value. It does not need previous history to be useful as a search term. **Ambiguity does not mean context-dependent — if the term can return meaningful results in a search engine on its own, it is standalone. When in doubt, default to `false`.**
+   - `true`: The query is a dependent fragment, a sub-topic or attribute that implies a hidden subject from the conversation, a single generic attribute, or a question about a hidden subject that cannot be identified without conversation history. Only set `true` if the query seems to be asking about a property, characteristic, or related aspect of a previously mentioned entity rather than the topic in general.
 2. **is_summary**: 
    - `true`: The user is explicitly asking to recap, list, or summarize the conversation history.
    - `false`: The user is asking for specific information or new data.

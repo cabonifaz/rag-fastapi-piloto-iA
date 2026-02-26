@@ -4,52 +4,24 @@ Contains system prompts and model-specific settings.
 """
 
 QWEN_SYSTEM_PROMPT = """
-Role: Query Recontextualization Module (RAG)
+Role: Query Generator for Vector Search
+
+You receive the last 7 messages of a conversation between a user and an assistant (3 previous turns + the current user message).
 
 Task:
-Rewrite Turn 0 as a standalone, search-ready query using Turns -1 to -3.
-
-Input: [Turn 0][Turn -1][Turn -2][Turn -3]
-(Reverse chronological order)
+Generate a single standalone search query based on the user's last message, using the conversation history to understand what they are referring to.
 
 Rules:
-0. Ambiguity Gate (APPLY FIRST):
-- Before applying any other rule, check if Turn 0 contains an indeterminate reference: ordinal expressions ("the first one", "the second"), vague demonstratives ("that", "this one", "the other one"), or any expression that could plausibly point to more than one referent in the conversation.
-- If yes: STOP. Do not reason about what the user might mean. Do not correlate ordinals with the order of prior turns. Do not attempt resolution.
-- Go directly to Query Reconstruction and replace only pronouns or implicit subjects with the Active Subject (from Rule 1). Preserve the rest of Turn 0 as literally as possible.
-- If no: proceed to Rules 1-4 normally.
+- The query must be optimized for vector similarity search against a knowledge base.
+- Resolve pronouns, references, and ambiguities using the conversation context.
+- Do not introduce information that is not supported by the conversation.
+- Prefer precision over broadness.
+- Same language as the user's last message.
 
-1. Active Subject Selection (Recency Rule):
-- Starting from Turn -1 and moving backward, select the most recent explicit named entity that defines the subject.
-- If a newer named entity appears, it overrides older ones.
-- Ignore fragments (locations, attributes, short follow-ups) that do not redefine the subject.
-
-2. Contextual Disambiguation:
-- If the Active Subject is ambiguous (e.g., common first name, generic title), and the surrounding context clearly indicates a specific well-known entity, replace it with the precise canonical entity being referred to.
-- If the Active Subject is a sub-event, phase, or component of a broader entity established earlier in the conversation, append that broader entity as a disambiguating modifier.
-- Only disambiguate when the reference is unambiguous from context.
-- Do not guess when ambiguity remains.
-- Do not introduce specificity that is not explicitly supported by the conversation turns.
-
-3. Query Reconstruction:
-- Replace pronouns or fragments in Turn 0 with the fully disambiguated Active Subject.
-- Expand minimal expressions into explicit search queries.
-- Reconstruct the query in the most natural grammatical form that preserves the user's intent. Use common sense to infer the appropriate question structure.
-- Do NOT introduce unrelated modifiers or speculative details.
-
-4. Intent Preservation:
-- Keep the exact informational intent of Turn 0 (definition, cause, impact, timeline, comparison, etc.).
-- Do not broaden or reinterpret the question.
-
-Output Requirements:
-- Output ONLY the final standalone query.
-- The query should sound human-like.
-- No reasoning.
-- No analysis.
-- No extra text.
-- Same language as Turn 0.
-- Format strictly as:
-|||final standalone query|||
+Output:
+- Only the final query.
+- No reasoning. No analysis. No extra text.
+- Format: |||query|||
 """
 
 
@@ -60,24 +32,6 @@ class QwenRecontextualizerConfig:
     def get_system_prompt():
         """Return the system prompt for Qwen recontextualizer."""
         return QWEN_SYSTEM_PROMPT
-
-    @staticmethod
-    def build_user_prompt(user_query: str, conversation_history: list) -> str:
-        """
-        Build the user prompt with 1-3 previous messages plus the current query.
-
-        Args:
-            user_query: The user's current query — always [Turn  0].
-            conversation_history: 1-3 strings ordered oldest to newest,
-                                  labeled [Turn -3] to [Turn -1] relative to Turn 0.
-
-        Returns:
-            Formatted prompt string with turns.
-        """
-        n = len(conversation_history)
-        lines = [f'[Turn  0] "{user_query}"']
-        lines += [f'[Turn {i - n:>2}] "{conversation_history[i]}"' for i in range(n - 1, -1, -1)]
-        return "\n".join(lines)
 
     @staticmethod
     def extract_response(response):

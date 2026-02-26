@@ -22,18 +22,16 @@ class RecontextualizerPort(ABC):
         self,
         user_query: str,
         conversation_history: Optional[List[Dict[str, str]]] = None
-    ) -> Dict[str, any]:
+    ) -> str:
         """
         Recontextualize the user query using conversation history.
 
         Args:
-            user_query: The user's query text
-            conversation_history: Optional list of recent message dicts with 'role' and 'content'
+            user_query: The user's current query.
+            conversation_history: Optional list of recent message dicts with 'role' and 'content',
+                                  ordered oldest to newest.
 
         Returns:
-            Dictionary with:
-                - needs_context: bool (whether the query needed context)
-                - response: str (the recontextualized query)
-                - summary_intent: bool (whether user is asking for a summary)
+            The recontextualized standalone query string.
         """
         pass

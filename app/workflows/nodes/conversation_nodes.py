@@ -103,12 +103,16 @@ def create_recontextualize_query_node(recontextualizer):
 
         if chat_id is not None and len(conversation_history) >= 2:
             try:
-                # Keep only user messages as strings, last 3 at most
-                user_messages = [m["content"] for m in conversation_history if m["role"] == "user"][-3:]
+                # Send last 6 messages (user + assistant) for full context
+                # Trim assistant messages to 250 characters to reduce token usage
+                last_messages = [
+                    {**m, "content": m["content"][:250] + "..."} if m["role"] == "assistant" else m
+                    for m in conversation_history[-6:]
+                ]
 
                 result = await recontextualizer.recontextualize_query(
                     user_query=state["cleaned_message"],
-                    conversation_history=user_messages
+                    conversation_history=last_messages
                 )
 
                 if result and isinstance(result, str):

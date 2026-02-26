@@ -62,10 +62,9 @@ class QueryRecontextualizer(RecontextualizerPort):
                 session_params["aws_secret_access_key"] = secret_key
 
         # Configure botocore with connection and read timeouts
-        # read_timeout is higher to account for reasoning/thinking time
         self.boto_config = Config(
             connect_timeout=10,
-            read_timeout=120,
+            read_timeout=30,
             retries={'max_attempts': 0}
         )
 
@@ -94,33 +93,34 @@ class QueryRecontextualizer(RecontextualizerPort):
     async def recontextualize_query(
         self,
         user_query: str,
-        conversation_history: Optional[List[str]] = None
+        conversation_history: Optional[List[Dict]] = None
     ) -> str:
         """
         Asynchronously recontextualizes the user query using conversation history with aioboto3 (truly async).
 
         Args:
-            user_query: The user's current query text (unused, kept for interface compatibility).
-            conversation_history: List of 4 user message strings ordered oldest to newest.
-                                 [0]=Turn -3, [1]=Turn -2, [2]=Turn -1, [3]=Turn 0.
+            user_query: The user's current query.
+            conversation_history: List of up to 6 message dicts {"role": str, "content": str},
+                                  ordered oldest to newest (user + assistant turns).
 
         Returns:
             The rewritten query string. Returns the original query if recontextualization fails.
         """
-        # Need at least 2 messages (one previous + current) to have something to recontextualize
         if not conversation_history:
             logger.info("No previous messages available, returning original query")
             return user_query
 
         try:
-            # Build the user prompt with turn format
-            prompt = self.model_config.build_user_prompt(user_query, conversation_history)
-
-            # Single user message with the turn-formatted prompt
-            converse_messages = [{
+            # Build multi-turn converse messages from history
+            converse_messages = [
+                {"role": m["role"], "content": [{"text": m["content"]}]}
+                for m in conversation_history
+            ]
+            # Append current user query as the final turn
+            converse_messages.append({
                 "role": "user",
-                "content": [{"text": prompt}]
-            }]
+                "content": [{"text": user_query}]
+            })
 
             # Build request parameters
             request_params = {
@@ -128,14 +128,9 @@ class QueryRecontextualizer(RecontextualizerPort):
                 "messages": converse_messages,
                 "system": self._build_system_config(),
                 "inferenceConfig": {
-                    "maxTokens": 16000,
-                    "temperature": 1,
-                },
-                "additionalModelRequestFields": {
-                    "thinking": {
-                        "type": "enabled",
-                        "budget_tokens": 10000
-                    }
+                    "maxTokens": 2048,
+                    "temperature": 0.1,
+                    "topP": 1,
                 }
             }
 
