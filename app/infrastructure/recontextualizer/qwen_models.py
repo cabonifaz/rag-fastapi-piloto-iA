@@ -1,9 +1,9 @@
 """
-Meta (Llama) model configuration for query recontextualizer.
+Qwen model configuration for query recontextualizer.
 Contains system prompts and model-specific settings.
 """
 
-META_SYSTEM_PROMPT = """
+QWEN_SYSTEM_PROMPT = """
 Role: Query Generator for Vector Search
 
 You receive the last 7 messages of a conversation between a user and an assistant (3 previous turns + the current user message).
@@ -25,13 +25,13 @@ Output:
 """
 
 
-class MetaRecontextualizerConfig:
-    """Configuration for Meta (Llama) models in query recontextualization."""
+class QwenRecontextualizerConfig:
+    """Configuration for Qwen models in query recontextualization."""
 
     @staticmethod
     def get_system_prompt():
-        """Return the system prompt for Meta/Llama recontextualizer."""
-        return META_SYSTEM_PROMPT
+        """Return the system prompt for Qwen recontextualizer."""
+        return QWEN_SYSTEM_PROMPT
 
     @staticmethod
     def extract_response(response):
@@ -40,7 +40,6 @@ class MetaRecontextualizerConfig:
 
         The prompt instructs the model to return: |||final standalone query|||
         This method parses that format and returns the rewritten query string.
-        Falls back to returning raw text if no pipe delimiters are found.
 
         Args:
             response: The response from bedrock_client.converse()
@@ -49,7 +48,6 @@ class MetaRecontextualizerConfig:
             The rewritten query string, or None if extraction fails.
         """
         import logging
-        import re
 
         logger = logging.getLogger(__name__)
 
@@ -73,7 +71,8 @@ class MetaRecontextualizerConfig:
                 logger.warning("Empty text in recontextualizer response")
                 return None
 
-            # Parse |||query||| format (model may output |, ||, or |||)
+            # Parse |+query|+ format (model may output |, ||, or |||)
+            import re
             match = re.search(r"\|+([^|]+)\|+", text)
 
             if not match:

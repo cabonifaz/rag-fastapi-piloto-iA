@@ -9,8 +9,8 @@ from app.domain.ports.vectorstore_port import VectorStorePort
 from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.llm_nonstreaming_port import LLMNonStreamingPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
-from app.domain.ports.state_builder import StateBuilderPort
-from app.domain.ports.query_rewriter import QueryRewriterPort
+from app.domain.ports.recontextualizer_port import RecontextualizerPort
+from app.domain.ports.context_gatekeeper_port import ContextGatekeeperPort
 
 # Services (for dependency injection in __init__)
 from app.services.message_service import MessageService
@@ -71,8 +71,8 @@ class RagService:
         llm_provider: LLMPort,
         message_service: MessageService,
         ia_config_service: IaConfigService,
-        state_builder: StateBuilderPort,
-        query_rewriter: QueryRewriterPort,
+        recontextualizer: RecontextualizerPort,
+        context_gatekeeper: ContextGatekeeperPort,
         orchestrator: Optional[QueryAnalysisPort] = None,
         llm_nonstreaming_provider: LLMNonStreamingPort = None,
         llm_only_provider: LLMNonStreamingPort = None,
@@ -87,8 +87,6 @@ class RagService:
             llm_provider: Port for LLM operations (streaming)
             message_service: Service for managing chat messages in DynamoDB
             ia_config_service: Service for loading IA area configuration
-            state_builder: Service for building query state from conversation history
-            query_rewriter: Service for rewriting queries based on state
             orchestrator: Optional port for query analysis and task decomposition
             llm_nonstreaming_provider: Optional port for non-streaming LLM operations (for n8n RAG mode)
             llm_only_provider: Optional port for non-streaming LLM operations in LLM-only mode (no RAG)
@@ -99,8 +97,8 @@ class RagService:
         self.llm_provider = llm_provider
         self.message_service = message_service
         self.ia_config_service = ia_config_service
-        self.state_builder = state_builder
-        self.query_rewriter = query_rewriter
+        self.recontextualizer = recontextualizer
+        self.context_gatekeeper = context_gatekeeper
         self.orchestrator = orchestrator
         self.llm_nonstreaming_provider = llm_nonstreaming_provider
         self.llm_only_provider = llm_only_provider

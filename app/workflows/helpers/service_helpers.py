@@ -28,8 +28,6 @@ def build_initial_state(
         # Processing state (will be populated by workflow)
         "cleaned_message": None,
         "conversation_history": [],
-        "state_builder_result": None,
-        "query_rewriter_result": None,
         "rag_config": None,
         "new_chat_created": False,
         "new_chat_titulo": None,
@@ -74,8 +72,6 @@ def build_initial_state_anonymous(
         # Processing state (will be populated by workflow)
         "cleaned_message": None,
         "conversation_history": [],
-        "state_builder_result": None,
-        "query_rewriter_result": None,
         "rag_config": None,
         "new_chat_created": False,
         "new_chat_titulo": None,

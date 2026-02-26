@@ -4,38 +4,24 @@ Contains system prompts and model-specific settings.
 """
 
 ANTHROPIC_SYSTEM_PROMPT = """
-You are a Recontextualization Agent for RAG systems.
+Role: Query Generator for Vector Search
 
-Your task: Analyze the user's latest query and output a JSON object for vector search.
+You receive the last 7 messages of a conversation between a user and an assistant (3 previous turns + the current user message).
+
+Task:
+Generate a single standalone search query based on the user's last message, using the conversation history to understand what they are referring to.
 
 Rules:
+- The query must be optimized for vector similarity search against a knowledge base.
+- Resolve pronouns, references, and ambiguities using the conversation context.
+- Do not introduce information that is not supported by the conversation.
+- Prefer precision over broadness.
+- Same language as the user's last message.
 
-1. Last Message Priority
-   - The latest user query is ALWAYS the main topic.
-   - Previous messages are ONLY relevant if the latest query is grammatically incomplete or contains pronouns.
-   - A single complete word or phrase (noun, concept, or question) does NOT need context from history.
-
-2. Dependency Check
-   - Set needs_context: false if the query is a complete and understandable concept on its own.
-   - Set needs_context: true ONLY if the query contains pronouns, conjunctions starting the sentence, or is grammatically incomplete.
-   - If needs_context: false, return the query EXACTLY as written without any additions.
-   - If needs_context: true, merge the query with minimal necessary context to form a coherent phrase.
-
-3. Summary Intent
-   - Set summary_intent: true ONLY if the user explicitly requests a summary, overview, or general explanation.
-   - Otherwise, set summary_intent: false.
-
-4. Output
-   - Output ONLY the JSON object.
-   - No extra text, code blocks, or markdown.
-   - The "response" field is a search query for a vector database, NOT an answer.
-
-Output Schema:
-{
-  "needs_context": true | false,
-  "response": "search query string",
-  "summary_intent": true | false
-}
+Output:
+- Only the final query.
+- No reasoning. No analysis. No extra text.
+- Format: |||query|||
 """
 
 
@@ -48,42 +34,22 @@ class AnthropicRecontextualizerConfig:
         return ANTHROPIC_SYSTEM_PROMPT
 
     @staticmethod
-    def build_user_prompt(user_query: str, conversation_history: list) -> str:
-        """
-        Build the user prompt with query and conversation history.
-
-        Args:
-            user_query: The user's current query.
-            conversation_history: List of message dicts with 'role' and 'content'.
-                                 Recent messages will be used for context.
-
-        Returns:
-            Formatted prompt string with query and context.
-        """
-        # Build the complete prompt (conversation history sent separately via Converse API)
-        prompt = f"""**Current query:** {user_query}
-
-**Instruction:** Analyze whether the query requires recontextualization and respond accordingly."""
-
-        return prompt
-
-    @staticmethod
     def extract_response(response):
         """
         Extract the recontextualized query from the Converse API response.
+
+        The prompt instructs the model to return: |||final standalone query|||
+        This method parses that format and returns the rewritten query string.
+        Falls back to returning raw text if no pipe delimiters are found.
 
         Args:
             response: The response from bedrock_client.converse()
 
         Returns:
-            Dictionary with keys:
-                - needs_context: bool (whether the query needed context)
-                - response: str (the recontextualized query)
-                - summary_intent: bool (whether user is asking for a summary)
-            Returns None if extraction fails.
+            The rewritten query string, or None if extraction fails.
         """
-        import json
         import logging
+        import re
 
         logger = logging.getLogger(__name__)
 
@@ -97,55 +63,30 @@ class AnthropicRecontextualizerConfig:
                 logger.warning("Empty content in recontextualizer response")
                 return None
 
-            # Get the text from the first content block
-            text = content[0].get("text", "").strip()
+            # Find the text block — skip thinking/reasoning blocks (reasoningContent key)
+            text = next(
+                (block.get("text", "").strip() for block in content if "text" in block),
+                ""
+            )
 
             if not text:
                 logger.warning("Empty text in recontextualizer response")
                 return None
 
-            # Parse JSON response
-            try:
-                # Strip markdown code blocks if present (```json ... ```)
-                text_stripped = text.strip()
-                if text_stripped.startswith('```'):
-                    # Find the first newline after opening ```
-                    start_idx = text_stripped.find('\n')
-                    # Find the closing ```
-                    end_idx = text_stripped.rfind('```')
-                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                        text_stripped = text_stripped[start_idx + 1:end_idx].strip()
+            # Parse |||query||| format (model may output |, ||, or |||)
+            match = re.search(r"\|+([^|]+)\|+", text)
 
-                result = json.loads(text_stripped)
+            if not match:
+                logger.warning(f"Missing pipe delimiters in response, using raw text: {text}")
+                return text
 
-                # Validate required fields
-                if not isinstance(result, dict):
-                    logger.error(f"Response is not a dictionary: {type(result)}")
-                    return None
+            query = match.group(1).strip()
 
-                if "needs_context" not in result or "response" not in result or "summary_intent" not in result:
-                    logger.error(f"Missing required fields in response: {result.keys()}")
-                    return None
-
-                # Validate field types
-                if not isinstance(result["needs_context"], bool):
-                    logger.warning(f"needs_context is not bool: {type(result['needs_context'])}, converting")
-                    result["needs_context"] = bool(result["needs_context"])
-
-                if not isinstance(result["response"], str):
-                    logger.warning(f"response is not str: {type(result['response'])}, converting")
-                    result["response"] = str(result["response"])
-
-                if not isinstance(result["summary_intent"], bool):
-                    logger.warning(f"summary_intent is not bool: {type(result['summary_intent'])}, converting")
-                    result["summary_intent"] = bool(result["summary_intent"])
-
-                return result
-
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON from recontextualizer: {e}")
-                logger.debug(f"Raw response text: {text}")
+            if not query:
+                logger.warning("Empty query between pipe delimiters")
                 return None
+
+            return query
 
         except Exception as e:
             logger.error(f"Error extracting recontextualizer response: {e}")

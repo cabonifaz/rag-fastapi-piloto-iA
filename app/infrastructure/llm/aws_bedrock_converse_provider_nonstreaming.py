@@ -107,8 +107,8 @@ class AWSBedrockConverseNonStreamingProvider(LLMNonStreamingPort):
         # Configure boto3 with connection and read timeouts
         # IMPORTANT: Disable retries - we handle retries via fallback logic
         self.boto_config = Config(
-            connect_timeout=30,
-            read_timeout=120,
+            connect_timeout=10,
+            read_timeout=30,
             retries={'max_attempts': 0}
         )
 
@@ -157,6 +157,7 @@ Temporal rules:
 - If time context is insufficient, ask for clarification.
 
 Response rules:
+- Use the conversation history to interpret the user's question in context. If the question references or continues a previous topic, infer the full meaning from the history.
 - Answer directly and concisely, but do not remove essential information required for accuracy.
 - Do not reveal internal reasoning.
 - Match the user's language. If unclear or mixed, default to Spanish.
