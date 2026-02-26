@@ -19,8 +19,9 @@ class RAGState(TypedDict):
     # Processing state
     cleaned_message: Optional[str]
     conversation_history: List[Dict[str, str]]
-    state_builder_result: Optional[Dict[str, Any]]
-    query_rewriter_result: Optional[Dict[str, Any]]
+    gatekeeper_result: Dict[str, bool]
+    recontextualized_query: Optional[str]
+    comparator_result: Optional[Dict[str, Any]]
     rag_config: Optional[Dict[str, Any]]
     new_chat_created: bool
     new_chat_titulo: Optional[str]
@@ -56,8 +57,9 @@ class RAGAnonymousState(TypedDict):
     # Processing state
     cleaned_message: Optional[str]
     conversation_history: List[Dict[str, str]]
-    state_builder_result: Optional[Dict[str, Any]]
-    query_rewriter_result: Optional[Dict[str, Any]]
+    gatekeeper_result: Dict[str, bool]
+    recontextualized_query: Optional[str]
+    comparator_result: Optional[Dict[str, Any]]
     rag_config: Optional[Dict[str, Any]]
     new_chat_created: bool
     new_chat_titulo: Optional[str]

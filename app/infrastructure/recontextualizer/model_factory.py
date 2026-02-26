@@ -3,12 +3,13 @@ from app.infrastructure.recontextualizer.amazon_models import AmazonRecontextual
 from app.infrastructure.recontextualizer.anthropic_models import AnthropicRecontextualizerConfig
 from app.infrastructure.recontextualizer.openai_models import OpenAIRecontextualizerConfig
 from app.infrastructure.recontextualizer.meta_models import MetaRecontextualizerConfig
+from app.infrastructure.recontextualizer.qwen_models import QwenRecontextualizerConfig
 
 class ModelFactory:
     """Factory to get the appropriate model-specific configuration for query recontextualization."""
 
     @staticmethod
-    def get_model_config(model_id: str) -> Union[AmazonRecontextualizerConfig, AnthropicRecontextualizerConfig, OpenAIRecontextualizerConfig, MetaRecontextualizerConfig]:
+    def get_model_config(model_id: str) -> Union[AmazonRecontextualizerConfig, AnthropicRecontextualizerConfig, OpenAIRecontextualizerConfig, MetaRecontextualizerConfig, QwenRecontextualizerConfig]:
         """
         Returns the appropriate configuration class based on the model ID.
 
@@ -23,6 +24,9 @@ class ModelFactory:
         # Check for Anthropic models (Claude)
         if "anthropic" in model_id_lower or "claude" in model_id_lower:
             return AnthropicRecontextualizerConfig
+        # Check for Qwen models
+        elif "qwen" in model_id_lower:
+            return QwenRecontextualizerConfig
         # Check for Meta Llama models
         elif "llama" in model_id_lower or "meta." in model_id:
             return MetaRecontextualizerConfig
