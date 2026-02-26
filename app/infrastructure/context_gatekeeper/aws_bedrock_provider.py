@@ -130,6 +130,7 @@ class ContextGatekeeper(ContextGatekeeperPort):
                 response = await client.converse(**request_params)
 
             result = self._extract_result(response)
+            print(result)
 
             if result:
                 logger.info(

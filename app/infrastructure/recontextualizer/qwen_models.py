@@ -107,8 +107,11 @@ class QwenRecontextualizerConfig:
                 logger.warning("Empty content in recontextualizer response")
                 return None
 
-            # Get the text from the first content block
-            text = content[0].get("text", "").strip()
+            # Find the text block — skip thinking/reasoning blocks (reasoningContent key)
+            text = next(
+                (block.get("text", "").strip() for block in content if "text" in block),
+                ""
+            )
 
             if not text:
                 logger.warning("Empty text in recontextualizer response")

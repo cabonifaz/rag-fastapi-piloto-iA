@@ -13,7 +13,7 @@ def create_determine_query_for_search_node():
     """Factory function to create determine_query_for_search node"""
     async def determine_query_for_search(state: RAGState) -> RAGState:
         """Determine which query to use for embedding and search"""
-        state["query_for_search"] = state["recontextualized_query"]
+        state["query_for_search"] = state.get("recontextualized_query") or state["cleaned_message"]
         return state
 
     return determine_query_for_search

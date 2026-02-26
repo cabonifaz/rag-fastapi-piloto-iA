@@ -106,7 +106,14 @@ def create_rag_anonymous_workflow(
 
     workflow.add_edge("get_conversation_history_anonymous", "clean_rag_query")
     workflow.add_edge("clean_rag_query", "context_gatekeeper")
-    workflow.add_edge("context_gatekeeper", "recontextualize_query")
+    workflow.add_conditional_edges(
+        "context_gatekeeper",
+        lambda state: "recontextualize" if state.get("gatekeeper_result", {}).get("needs_context") else "skip",
+        {
+            "recontextualize": "recontextualize_query",
+            "skip": "load_rag_config"
+        }
+    )
     workflow.add_edge("recontextualize_query", "load_rag_config")
     workflow.add_edge("load_rag_config", "save_original_message_anonymous")
 

@@ -62,9 +62,10 @@ class QueryRecontextualizer(RecontextualizerPort):
                 session_params["aws_secret_access_key"] = secret_key
 
         # Configure botocore with connection and read timeouts
+        # read_timeout is higher to account for reasoning/thinking time
         self.boto_config = Config(
             connect_timeout=10,
-            read_timeout=30,
+            read_timeout=120,
             retries={'max_attempts': 0}
         )
 
@@ -127,9 +128,14 @@ class QueryRecontextualizer(RecontextualizerPort):
                 "messages": converse_messages,
                 "system": self._build_system_config(),
                 "inferenceConfig": {
-                    "maxTokens": 1024,
-                    "temperature": 0,
-                    "topP": 1
+                    "maxTokens": 16000,
+                    "temperature": 1,
+                },
+                "additionalModelRequestFields": {
+                    "thinking": {
+                        "type": "enabled",
+                        "budget_tokens": 10000
+                    }
                 }
             }
 
@@ -154,7 +160,7 @@ class QueryRecontextualizer(RecontextualizerPort):
                 return result
             else:
                 logger.warning("Failed to extract recontextualized query, returning original")
-                return conversation_history[3]
+                return user_query
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
@@ -171,19 +177,19 @@ class QueryRecontextualizer(RecontextualizerPort):
             elif error_code == 'ResourceNotFoundException':
                 logger.error(f"Model {self.model_id} not found or not accessible")
 
-            return conversation_history[3]
+            return user_query
 
         except NoCredentialsError as e:
             logger.error(f"AWS credentials error in QueryRecontextualizer: {e}")
-            return conversation_history[3]
+            return user_query
 
         except EndpointConnectionError as e:
             logger.error(f"AWS endpoint connection error in QueryRecontextualizer: {e}")
-            return conversation_history[3]
+            return user_query
 
         except asyncio.TimeoutError as e:
             logger.error(f"Timeout error in QueryRecontextualizer: {e}")
-            return conversation_history[3]
+            return user_query
 
         except Exception as e:
             # Check if it's a timeout exception
@@ -193,7 +199,7 @@ class QueryRecontextualizer(RecontextualizerPort):
             else:
                 logger.error(f"Unexpected error in QueryRecontextualizer: {e}")
 
-            return conversation_history[3]
+            return user_query
 
     def _extract_result(self, response) -> Optional[str]:
         """
