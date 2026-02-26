@@ -10,7 +10,7 @@ from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.llm_nonstreaming_port import LLMNonStreamingPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
-from app.domain.ports.comparator_port import ComparatorPort
+from app.domain.ports.context_gatekeeper_port import ContextGatekeeperPort
 
 # Services (for dependency injection in __init__)
 from app.services.message_service import MessageService
@@ -72,7 +72,7 @@ class RagService:
         message_service: MessageService,
         ia_config_service: IaConfigService,
         recontextualizer: RecontextualizerPort,
-        comparator: ComparatorPort,
+        context_gatekeeper: ContextGatekeeperPort,
         orchestrator: Optional[QueryAnalysisPort] = None,
         llm_nonstreaming_provider: LLMNonStreamingPort = None,
         llm_only_provider: LLMNonStreamingPort = None,
@@ -98,7 +98,7 @@ class RagService:
         self.message_service = message_service
         self.ia_config_service = ia_config_service
         self.recontextualizer = recontextualizer
-        self.comparator = comparator
+        self.context_gatekeeper = context_gatekeeper
         self.orchestrator = orchestrator
         self.llm_nonstreaming_provider = llm_nonstreaming_provider
         self.llm_only_provider = llm_only_provider

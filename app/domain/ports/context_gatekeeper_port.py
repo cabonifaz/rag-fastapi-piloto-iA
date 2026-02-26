@@ -17,7 +17,7 @@ class ContextGatekeeperPort(ABC):
     """
 
     @abstractmethod
-    async def comparate_query(
+    async def gatekeep_query(
         self,
         original_query: str,
     ) -> Dict:

@@ -19,6 +19,7 @@ class RAGState(TypedDict):
     # Processing state
     cleaned_message: Optional[str]
     conversation_history: List[Dict[str, str]]
+    gatekeeper_result: Dict[str, bool]
     recontextualized_query: Optional[str]
     comparator_result: Optional[Dict[str, Any]]
     rag_config: Optional[Dict[str, Any]]
@@ -56,6 +57,7 @@ class RAGAnonymousState(TypedDict):
     # Processing state
     cleaned_message: Optional[str]
     conversation_history: List[Dict[str, str]]
+    gatekeeper_result: Dict[str, bool]
     recontextualized_query: Optional[str]
     comparator_result: Optional[Dict[str, Any]]
     rag_config: Optional[Dict[str, Any]]

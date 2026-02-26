@@ -1,12 +1,12 @@
 from typing import Union
-from app.infrastructure.query_comparator.amazon_models import AmazonComparatorConfig
+from app.infrastructure.context_gatekeeper.amazon_models import AmazonGatekeeperConfig
 
 
 class ModelFactory:
     """Factory to get the appropriate model-specific configuration for query comparison."""
 
     @staticmethod
-    def get_model_config(model_id: str) -> Union[AmazonComparatorConfig]:
+    def get_model_config(model_id: str) -> Union[AmazonGatekeeperConfig]:
         """
         Returns the appropriate configuration class based on the model ID.
 
@@ -19,7 +19,7 @@ class ModelFactory:
         model_id_lower = model_id.lower()
 
         if "nova" in model_id_lower or "amazon." in model_id:
-            return AmazonComparatorConfig
+            return AmazonGatekeeperConfig
         else:
             # Default to Amazon Nova as a fallback
-            return AmazonComparatorConfig
+            return AmazonGatekeeperConfig

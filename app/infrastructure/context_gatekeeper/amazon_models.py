@@ -20,7 +20,7 @@ AMAZON_SYSTEM_PROMPT = """
 """
 
 
-class AmazonComparatorConfig:
+class AmazonGatekeeperConfig:
     """Configuration for Amazon Nova models in query comparison."""
 
     @staticmethod

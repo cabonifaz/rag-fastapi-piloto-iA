@@ -7,7 +7,7 @@ from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnect
 from botocore.config import Config
 from app.core.config import settings
 from app.domain.ports.context_gatekeeper_port import ContextGatekeeperPort
-from app.infrastructure.query_comparator.model_factory import ModelFactory
+from app.infrastructure.context_gatekeeper.model_factory import ModelFactory
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -88,7 +88,7 @@ class ContextGatekeeper(ContextGatekeeperPort):
         system_prompt = self.model_config.get_system_prompt()
         return [{"text": system_prompt}]
 
-    async def comparate_query(
+    async def gatekeep_query(
         self,
         original_query: str,
     ) -> Dict:

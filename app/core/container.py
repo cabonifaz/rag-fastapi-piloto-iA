@@ -21,7 +21,7 @@ from app.domain.ports.llm_port import LLMPort
 from app.domain.ports.llm_nonstreaming_port import LLMNonStreamingPort
 from app.domain.ports.task_decomposition_port import QueryAnalysisPort
 from app.domain.ports.recontextualizer_port import RecontextualizerPort
-from app.domain.ports.comparator_port import ComparatorPort
+from app.domain.ports.context_gatekeeper_port import ContextGatekeeperPort
 from app.domain.ports.transcribe_port import TranscribePort
 from app.domain.ports.file_transcribe_port import FileTranscribePort
 from app.domain.ports.blob_storage_port import BlobStoragePort
@@ -34,7 +34,7 @@ from app.infrastructure.llm.aws_bedrock_converse_provider_nonstreaming import AW
 from app.infrastructure.llm.aws_bedrock_converse_provider_llm_only_nonstreaming import AWSBedrockConverseProviderLLMOnly
 from app.infrastructure.task_decomposition.aws_bedrock_provider import OrchestratorQueryAnalyzer
 from app.infrastructure.recontextualizer.aws_bedrock_provider import QueryRecontextualizer
-from app.infrastructure.query_comparator.aws_bedrock_provider import QueryComparator
+from app.infrastructure.context_gatekeeper.aws_bedrock_provider import ContextGatekeeper
 from app.infrastructure.transcriber.aws_transcribe_streaming import AWSTranscribeStreaming
 from app.infrastructure.transcriber.openai_transcribe import OpenAITranscribe
 from app.infrastructure.blob_storages.s3_storage import S3BlobStorage
@@ -59,7 +59,7 @@ class DIContainer:
         self._chat_service = None
         self._message_service = None
         self._recontextualizer = None
-        self._comparator = None
+        self._context_gatekeeper = None
         self._ia_config_service = None
         self._ia_models_service = None
         self._company_service = None
@@ -211,7 +211,7 @@ class DIContainer:
             message_service = self.get_message_service()
             ia_config_service = self.get_ia_config_service()
             recontextualizer = self.get_recontextualizer()
-            comparator = self.get_comparator()
+            context_gatekeeper = self.get_context_gatekeeper()
             orchestrator = self.get_orchestrator_analyzer()
 
             # Create ONCE - singleton with all dependencies injected
@@ -222,7 +222,7 @@ class DIContainer:
                 message_service=message_service,
                 ia_config_service=ia_config_service,
                 recontextualizer=recontextualizer,
-                comparator=comparator,
+                context_gatekeeper=context_gatekeeper,
                 orchestrator=orchestrator,
                 llm_nonstreaming_provider=llm_nonstreaming_provider,
                 llm_only_provider=llm_only_provider
@@ -273,12 +273,12 @@ class DIContainer:
 
         return self._recontextualizer
 
-    def get_comparator(self) -> ComparatorPort:
-        """Get query comparator as singleton."""
-        if self._comparator is None:
-            self._comparator = QueryComparator()
+    def get_context_gatekeeper(self) -> ContextGatekeeperPort:
+        """Get context gatekeeper as singleton."""
+        if self._context_gatekeeper is None:
+            self._context_gatekeeper = ContextGatekeeper()
 
-        return self._comparator
+        return self._context_gatekeeper
 
     def get_ia_config_service(self) -> IaConfigService:
         """Get IA config service as singleton (stateless, no db parameter)."""
@@ -412,8 +412,8 @@ class DIContainer:
             llm_provider=self.get_llm_provider(),
             message_service=self.get_message_service(),
             ia_config_service=self.get_ia_config_service(),
+            context_gatekeeper=self.get_context_gatekeeper(),
             recontextualizer=self.get_recontextualizer(),
-            comparator=self.get_comparator()
         )
 
     def initialize_llm_only_workflow(self) -> None:
@@ -445,8 +445,8 @@ class DIContainer:
             llm_provider=self.get_llm_provider(),
             message_service=self.get_message_service(),
             ia_config_service=self.get_ia_config_service(),
+            context_gatekeeper=self.get_context_gatekeeper(),
             recontextualizer=self.get_recontextualizer(),
-            comparator=self.get_comparator()
         )
 
     def initialize_llm_only_anonymous_workflow(self) -> None:

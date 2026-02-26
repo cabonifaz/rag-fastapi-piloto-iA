@@ -37,7 +37,6 @@ class Settings(BaseSettings):
     orchestrator_top_p: float
 
     recontextualizer_model_id: str
-    query_comparator_model_id: str
     context_gatekeeper_model_id: str
 
     openai_api_key: Optional[str] = None
@@ -109,13 +108,6 @@ class Settings(BaseSettings):
     def validate_recontextualizer_model_id(cls, v):
         if not v:
             raise ValueError("Recontextualizer model ID is required")
-        return v
-
-    @field_validator('query_comparator_model_id')
-    @classmethod
-    def validate_query_comparator_model_id(cls, v):
-        if not v:
-            raise ValueError("Query comparator model ID is required")
         return v
 
     @field_validator('context_gatekeeper_model_id')

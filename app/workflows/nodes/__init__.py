@@ -5,6 +5,7 @@ Exports all node factory functions for workflow assembly.
 from app.workflows.nodes.validation_nodes import create_validate_inputs_node, create_validate_inputs_node_anonymous
 from app.workflows.nodes.conversation_nodes import (
     create_get_conversation_history_node,
+    create_context_gatekeeper_node,
     create_recontextualize_query_node,
     create_compare_query_node
 )
@@ -42,6 +43,7 @@ __all__ = [
     'create_validate_inputs_node_anonymous',
     # Conversation
     'create_get_conversation_history_node',
+    'create_context_gatekeeper_node',
     'create_recontextualize_query_node',
     'create_compare_query_node',
     # RAG

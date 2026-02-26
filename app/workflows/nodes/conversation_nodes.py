@@ -70,6 +70,29 @@ def create_get_conversation_history_node(message_service, max_ctx: int = 16):
     return get_conversation_history
 
 
+def create_context_gatekeeper_node(context_gatekeeper):
+    """Factory function to create context_gatekeeper node"""
+    async def context_gatekeeper_node(state: RAGState) -> RAGState:
+        """Classify the original query to determine if it needs prior context"""
+        gatekeeper_result = None
+
+        try:
+            gatekeeper_result = await context_gatekeeper.gatekeep_query(
+                original_query=state["cleaned_message"]
+            )
+            logger.info(
+                f"Gatekeeper result: needs_context={gatekeeper_result.get('needs_context')}, "
+                f"is_summary={gatekeeper_result.get('is_summary')}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to classify query in context gatekeeper: {e}")
+
+        state["gatekeeper_result"] = gatekeeper_result
+        return state
+
+    return context_gatekeeper_node
+
+
 def create_recontextualize_query_node(recontextualizer):
     """Factory function to create recontextualize_query node"""
     async def recontextualize_query(state: RAGState) -> RAGState:
