@@ -187,6 +187,7 @@ class KnowledgeService:
             as_attachment=download,
             filename=ruta_documento.split("/")[-1]
         )
+        
     async def batch_update_knowledge_state(
         self,
         id_usuario: int,
