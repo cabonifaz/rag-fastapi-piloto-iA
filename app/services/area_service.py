@@ -204,7 +204,9 @@ class AreaService:
     async def get_areas(
         self,
         db: Session,
-        id_empresa: int
+        id_empresa: int,
+        id_usuario: int,
+        id_tipo_rol: int
     ) -> List[Dict[str, Any]]:
         """
         Get all areas for a company using stored procedure.
@@ -212,6 +214,8 @@ class AreaService:
         Args:
             db: Database session
             id_empresa: Company ID
+            id_usuario: User ID
+            id_tipo_rol: User role type ID
 
         Returns:
             List of dictionaries containing area information:
@@ -232,7 +236,7 @@ class AreaService:
                 return []
 
             # Use repository to get areas with SP_AREAS_LST
-            results = repository.get_areas(id_empresa=id_empresa)
+            results = repository.get_areas(id_empresa=id_empresa, id_usuario=id_usuario, id_tipo_rol=id_tipo_rol)
 
             if results:
                 logger.info(f"Areas retrieved successfully: Company={id_empresa}, Count={len(results)}")
