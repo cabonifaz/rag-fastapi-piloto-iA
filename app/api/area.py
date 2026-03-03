@@ -354,7 +354,7 @@ async def get_areas_endpoint(
             )
 
         # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
-        if role_id not in [1, 2]:
+        if role_id not in [1, 2, 5]:
             raise HTTPException(
                 status_code=403,
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
@@ -371,7 +371,9 @@ async def get_areas_endpoint(
         # Get areas using service
         areas = await area_service.get_areas(
             db=db,
-            id_empresa=id_empresa
+            id_empresa=id_empresa,
+            id_usuario=user_id,
+            id_tipo_rol=role_id
         )
 
         if areas is None:

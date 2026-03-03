@@ -75,19 +75,21 @@ def create_context_gatekeeper_node(context_gatekeeper):
     async def context_gatekeeper_node(state: RAGState) -> RAGState:
         """Classify the original query to determine if it needs prior context"""
         gatekeeper_result = None
+        chat_id = state.get("chat_id")
 
-        try:
-            gatekeeper_result = await context_gatekeeper.gatekeep_query(
-                original_query=state["cleaned_message"]
-            )
-            logger.info(
-                f"Gatekeeper result: needs_context={gatekeeper_result.get('needs_context')}, "
-                f"is_summary={gatekeeper_result.get('is_summary')}"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to classify query in context gatekeeper: {e}")
+        if chat_id is not None:
+            try:
+                gatekeeper_result = await context_gatekeeper.gatekeep_query(
+                    original_query=state["cleaned_message"]
+                )
+                logger.info(
+                    f"Gatekeeper result: needs_context={gatekeeper_result.get('needs_context')}, "
+                    f"is_summary={gatekeeper_result.get('is_summary')}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to classify query in context gatekeeper: {e}")
 
-        state["gatekeeper_result"] = gatekeeper_result
+        state["gatekeeper_result"] = gatekeeper_result or {"needs_context": False, "is_summary": False}
         return state
 
     return context_gatekeeper_node
