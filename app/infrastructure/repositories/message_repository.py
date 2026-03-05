@@ -71,6 +71,51 @@ class MessageRepository:
             logger.error(f"Error saving message for chat_id {chat_id}: {e}")
             raise
 
+    async def create_message_with_attachments(
+        self,
+        chat_id: int,
+        created_at: str,
+        sender: int,
+        message: str,
+        attachment_keys: List[str],
+        id_estado_registro: int = 1
+    ) -> None:
+        """
+        Save a message with attachment S3 keys to DynamoDB (async).
+
+        Args:
+            chat_id: Chat identifier
+            created_at: Timestamp as string (milliseconds since epoch)
+            sender: 0 = user, 1 = assistant
+            message: Message content
+            attachment_keys: List of S3 object keys for attached files
+            id_estado_registro: Status (default: 1 = active)
+
+        Raises:
+            Exception: If message save fails
+        """
+        try:
+            chat_id_str = f"chat-{chat_id}"
+            chat_id_estado = f"{chat_id_str}#{id_estado_registro}"
+
+            item = {
+                'chat_id': chat_id_str,
+                'created_at': created_at,
+                'id_estado_registro': id_estado_registro,
+                'chat_id#id_estado_registro': chat_id_estado,
+                'sender': sender,
+                'message': message,
+                'attachment_keys': attachment_keys,
+            }
+
+            async with get_dynamodb_resource() as dynamodb:
+                table = await dynamodb.Table(self.table_name)
+                await table.put_item(Item=item)
+
+        except Exception as e:
+            logger.error(f"Error saving message with attachments for chat_id {chat_id}: {e}")
+            raise
+
     async def create_message_anonymous(
         self,
         chat_anonymous_id: int,

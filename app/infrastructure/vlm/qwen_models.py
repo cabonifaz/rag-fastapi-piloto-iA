@@ -2,7 +2,6 @@
 Alibaba Qwen model configurations for AWS Bedrock VLM provider.
 """
 
-import json
 from typing import Dict, Any
 
 
@@ -23,7 +22,6 @@ class QwenModelConfig:
 
     def extract_response(self, response_body: Dict[str, Any]) -> str:
         """Extract text from Qwen response."""
-        # Qwen uses standard Bedrock response format
         content = response_body.get("content", [])
         if content and len(content) > 0:
             return content[0].get("text", "").strip()
@@ -31,101 +29,29 @@ class QwenModelConfig:
 
     def extract_stream_chunk(self, chunk_data: Dict[str, Any]) -> str:
         """Extract text from Qwen streaming chunk."""
-        # Qwen streaming format uses standard Bedrock delta
         if "delta" in chunk_data:
             return chunk_data["delta"].get("text", "")
         elif "text" in chunk_data:
             return chunk_data["text"]
         return ""
 
-    def build_rag_prompt(self, message: str, context_text: str) -> str:
-        """Build RAG prompt optimized for Qwen models."""
-        return f"""Answer the user's question based on the following:
 
-- If the question is about a specific context provided, answer only using that context.
-- If the user asks for a summary or review, use the conversation history to generate the summary.
-- Do not search online or make assumptions beyond what is provided in the context or conversation history.
-
-# Output rules
-- Give a **clear and informative answer**, focused directly on the question.
-- Include the **main details or explanations** from the context, but avoid unnecessary length.
-- Keep a **balanced tone**: neither too short nor overly elaborate.
-- If the context includes document excerpts, **cite titles or page numbers briefly** when relevant.
-- Do **not invent** or add information not present in the context.
-
-Question:
-{message}
-
-Context:
-{context_text}
-
-Return only the final answer that addresses the question clearly and completely."""
-
-
-class QwenPlusConfig(QwenModelConfig):
-    """Specific configuration for Qwen Plus."""
+class Qwen3VLConfig(QwenModelConfig):
+    """Specific configuration for Qwen 3 VL 235B (vision-language)."""
 
     def __init__(self):
-        super().__init__("alibaba.qwen1-5-plus-v1:0")
+        super().__init__("qwen.qwen3-vl-235b-a22b")
 
-
-class QwenTurboConfig(QwenModelConfig):
-    """Specific configuration for Qwen Turbo."""
-
-    def __init__(self):
-        super().__init__("alibaba.qwen1-5-turbo-v1:0")
-
-
-class QwenMaxConfig(QwenModelConfig):
-    """Specific configuration for Qwen Max."""
-
-    def __init__(self):
-        super().__init__("alibaba.qwen2-72b-instruct-v1:0")
-
-
-class QwenLongConfig(QwenModelConfig):
-    """Specific configuration for Qwen Long Context."""
-
-    def __init__(self):
-        super().__init__("alibaba.qwen2-1b-instruct-v1:0")
-
-
-class Qwen3Config(QwenModelConfig):
-    """Specific configuration for Qwen 3 32B."""
-
-    def __init__(self):
-        super().__init__("qwen.qwen3-32b-v1:0")
-
-
-class Qwen3CoderConfig(QwenModelConfig):
-    """Specific configuration for Qwen 3 Coder 30B."""
-
-    def __init__(self):
-        super().__init__("qwen.qwen3-coder-30b-a3b-v1:0")
+    def get_converse_additional_fields(self) -> Dict[str, Any]:
+        return {"enable_thinking": False}
 
 
 def get_qwen_config(model_id: str) -> QwenModelConfig:
     """Factory function to get the appropriate Qwen model configuration."""
     model_id_lower = model_id.lower()
 
-    # Qwen 3 models
-    if "qwen3-32b" in model_id_lower or "qwen3-32b-v1" in model_id_lower:
-        return Qwen3Config()
-    elif "qwen3-coder-30b" in model_id_lower or "qwen3-coder-30b-a3b-v1" in model_id_lower:
-        return Qwen3CoderConfig()
-
-    # Qwen 2 models
-    elif "qwen2-72b" in model_id_lower or "qwen-max" in model_id_lower:
-        return QwenMaxConfig()
-    elif "qwen2-1b" in model_id_lower or "qwen-long" in model_id_lower:
-        return QwenLongConfig()
-
-    # Qwen 1.5 models
-    elif "qwen1-5-plus" in model_id_lower or "qwen-plus" in model_id_lower:
-        return QwenPlusConfig()
-    elif "qwen1-5-turbo" in model_id_lower or "qwen-turbo" in model_id_lower:
-        return QwenTurboConfig()
+    if "qwen3-vl-235b" in model_id_lower:
+        return Qwen3VLConfig()
 
     else:
-        # Default to generic Qwen config for unknown models
-        return QwenModelConfig(model_id)
+        raise ValueError(f"Unsupported VLM model: {model_id}. Supported models: qwen.qwen3-vl-235b-a22b")

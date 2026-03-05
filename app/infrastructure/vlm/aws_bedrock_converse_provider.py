@@ -149,9 +149,9 @@ Formatting rules:
         model_id: str,
         message: str,
         attachment_keys: List[str],
-        max_tokens: int = 2048,
-        temperature: float = 0.3,
-        top_p: float = 0.9,
+        max_tokens: int = 10000,
+        temperature: float = 0.1,
+        top_p: float = 1,
         role_behavior: str = "",
         messages: Optional[List[Dict[str, Any]]] = None,
         fallback_models: Optional[List[str]] = None,
@@ -257,9 +257,9 @@ Formatting rules:
         model_id: str,
         message: str,
         attachment_keys: List[str],
-        max_tokens: int = 2048,
-        temperature: float = 0.3,
-        top_p: float = 0.9,
+        max_tokens: int = 10000,
+        temperature: float = 0.1,
+        top_p: float = 1,
         role_behavior: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
         request_timezone: Optional[str] = None,
@@ -288,12 +288,10 @@ Formatting rules:
             model_config = ModelConfigFactory.get_model_config(model_id)
 
             inference_config = {
-                "maxTokens": max_tokens,
-                "temperature": temperature,
-                "topP": top_p,
+                "maxTokens": 10000,
+                "temperature": 0.1,
+                "topP": 1,
             }
-            if hasattr(model_config, "supports_both_temp_and_top_p") and not model_config.supports_both_temp_and_top_p:
-                del inference_config["topP"]
 
             request_params = {
                 "modelId": model_config.model_id,

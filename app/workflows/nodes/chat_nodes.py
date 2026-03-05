@@ -85,3 +85,28 @@ def create_save_user_message_node(message_service):
         return state
 
     return save_user_message
+
+
+def create_save_vlm_user_message_node(message_service):
+    """Factory function to create save_user_message node for VLM workflow"""
+    async def save_vlm_user_message(state) -> dict:
+        """Save user message with attachment keys to DynamoDB"""
+        chat_id = state.get("chat_id")
+
+        if chat_id:
+            try:
+                await message_service.create_message_with_attachments(
+                    chat_id=chat_id,
+                    created_at=state["created_at"],
+                    sender=0,
+                    message=state["cleaned_message"],
+                    attachment_keys=state["attachment_keys"] or [],
+                )
+            except Exception as e:
+                logger.error(f"Failed to save VLM user message: {e}")
+                state["error"] = "Failed to save user message"
+                state["should_stop"] = True
+
+        return state
+
+    return save_vlm_user_message

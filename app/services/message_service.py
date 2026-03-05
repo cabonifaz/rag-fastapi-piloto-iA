@@ -119,6 +119,45 @@ class MessageService:
             logger.error(f"Error in create_message service: {e}")
             return False
 
+    async def create_message_with_attachments(
+        self,
+        chat_id: int,
+        created_at: str,
+        sender: int,
+        message: str,
+        attachment_keys: List[str],
+        id_estado_registro: int = 1
+    ) -> bool:
+        """
+        Create a new message with attachment S3 keys in DynamoDB.
+
+        Args:
+            chat_id: Chat identifier (integer)
+            created_at: Timestamp as string (milliseconds since epoch)
+            sender: 0 = user, 1 = assistant
+            message: Message content
+            attachment_keys: List of S3 object keys for attached files
+            id_estado_registro: Status (default: 1 = active)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            await self.repository.create_message_with_attachments(
+                chat_id=chat_id,
+                created_at=created_at,
+                sender=sender,
+                message=message,
+                attachment_keys=attachment_keys,
+                id_estado_registro=id_estado_registro
+            )
+            logger.info(f"Message with attachments created successfully for chat_id: {chat_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error in create_message_with_attachments service: {e}")
+            return False
+
     async def get_last_n_messages(
         self,
         chat_id: str,

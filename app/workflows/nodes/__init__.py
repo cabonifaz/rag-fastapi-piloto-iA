@@ -18,11 +18,14 @@ from app.workflows.nodes.rag_nodes import (
 from app.workflows.nodes.prompt_nodes import (
     create_select_history_for_prompt_node,
     create_build_rag_prompt_node,
+    create_build_vlm_prompt_node,
+    create_build_attachment_keys_node,
     create_prepare_timestamps_node
 )
 from app.workflows.nodes.chat_nodes import (
     create_create_or_use_chat_node,
-    create_save_user_message_node
+    create_save_user_message_node,
+    create_save_vlm_user_message_node,
 )
 from app.workflows.nodes.preprocessing_nodes import (
     create_clean_message_node,
@@ -54,10 +57,13 @@ __all__ = [
     # Prompts
     'create_select_history_for_prompt_node',
     'create_build_rag_prompt_node',
+    'create_build_vlm_prompt_node',
+    'create_build_attachment_keys_node',
     'create_prepare_timestamps_node',
     # Chat
     'create_create_or_use_chat_node',
     'create_save_user_message_node',
+    'create_save_vlm_user_message_node',
     # Preprocessing
     'create_clean_message_node',
     'create_clean_rag_query_node',
