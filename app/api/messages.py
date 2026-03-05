@@ -6,13 +6,15 @@ from typing import Optional, Dict, Any
 import logging
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.container import container
 
 from app.services.message_service import MessageService
 from app.models.message_models import (
     MessageCreate,
     MessageResponse,
     MessageListResponse,
-    GetMessagesByChat
+    GetMessagesByChat,
+    GenerateAttachmentPresignedUrlsRequest,
 )
 from app.models.response_models import create_success_response, create_error_response
 from app.utils.jwt_auth import get_current_user_with_company_area_validation
@@ -83,6 +85,45 @@ async def get_messages_by_chat_endpoint(
 
     except Exception as e:
         logger.error(f"Unexpected error in get_messages_by_chat endpoint: {e}")
+        error_response = create_error_response("Error interno del servidor")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"result": error_response.model_dump()}
+        )
+
+
+@router.post("/attachment-upload-urls")
+async def generate_attachment_presigned_urls_endpoint(
+    request: GenerateAttachmentPresignedUrlsRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation),
+    message_service: MessageService = Depends(get_message_service),
+):
+    """
+    Generate presigned PUT URLs for direct S3 upload of chat attachments.
+
+    Request Body Parameters:
+        - filenames: List of filenames to upload
+        - timestamp: Timestamp string used as folder prefix in S3 key
+
+    Returns:
+        List of objects with presigned_url, s3_key, and filename
+    """
+    try:
+        user_id = str(current_user["user_id"])
+        blob_storage = container.get_blob_storage()
+
+        uploads = await message_service.generate_attachment_presigned_urls(
+            blob_storage=blob_storage,
+            user_id=user_id,
+            timestamp=request.timestamp,
+            filenames=request.filenames,
+        )
+
+        success_response = create_success_response({"uploads": uploads})
+        return {"result": success_response.model_dump()}
+
+    except Exception as e:
+        logger.error(f"Unexpected error in generate_attachment_presigned_urls endpoint: {e}")
         error_response = create_error_response("Error interno del servidor")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

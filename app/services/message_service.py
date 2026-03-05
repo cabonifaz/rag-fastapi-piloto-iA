@@ -230,26 +230,26 @@ class MessageService:
     async def generate_attachment_presigned_urls(
         self,
         blob_storage: BlobStoragePort,
-        chat_id: str,
+        user_id: str,
         timestamp: str,
         filenames: List[str],
     ) -> List[Dict[str, Any]]:
         """
         Generate presigned PUT URLs for chat attachment uploads.
 
-        S3 path: chats/{chat_id}/{timestamp}/{filename}
-        Bucket: S3_PDFS_BUCKET
+        S3 path: chats/{user_id}/{timestamp}/{filename}
+        Bucket: S3_CHAT_FILES
 
         Args:
             blob_storage: Blob storage port instance
-            chat_id: Chat identifier
+            user_id: Chat identifier
             timestamp: Timestamp string (used as folder prefix)
             filenames: List of filenames to upload
 
         Returns:
             List of objects with presigned_url, s3_key, and filename
         """
-        bucket = settings.s3_pdfs_bucket
+        bucket = settings.s3_chat_files
         results = []
 
         for filename in filenames:

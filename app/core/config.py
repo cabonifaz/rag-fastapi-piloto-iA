@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     # S3 Configuration
     s3_pdfs_bucket: str
     s3_ingest_results_bucket: str
+    s3_chat_files: str
 
     # VLM Configuration
     vlm_model_id: str
@@ -125,6 +126,13 @@ class Settings(BaseSettings):
     def validate_vlm_model_id(cls, v):
         if not v:
             raise ValueError("VLM model ID is required")
+        return v
+
+    @field_validator('s3_chat_files')
+    @classmethod
+    def validate_s3_chat_files(cls, v):
+        if not v:
+            raise ValueError("S3 chat files bucket is required")
         return v
 
     @field_validator('jwt_secret_key')
