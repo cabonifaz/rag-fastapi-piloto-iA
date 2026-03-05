@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     s3_pdfs_bucket: str
     s3_ingest_results_bucket: str
 
+    # VLM Configuration
+    vlm_model_id: str
+
     # n8n Webhook Configuration
     n8n_cc_webhook_url: Optional[str] = None
     n8n_cc_jwt_secret: Optional[str] = None
@@ -115,6 +118,13 @@ class Settings(BaseSettings):
     def validate_context_gatekeeper_model_id(cls, v):
         if not v:
             raise ValueError("Context gatekeeper model ID is required")
+        return v
+
+    @field_validator('vlm_model_id')
+    @classmethod
+    def validate_vlm_model_id(cls, v):
+        if not v:
+            raise ValueError("VLM model ID is required")
         return v
 
     @field_validator('jwt_secret_key')

@@ -9,6 +9,8 @@ from app.models.message_models import (
     MessageListResponse
 )
 from app.infrastructure.repositories.message_repository import MessageRepository
+from app.domain.ports.blob_storage_port import BlobStoragePort
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +226,46 @@ class MessageService:
             logger.error(f"Error in get_last_n_messages_anonymous service: {e}")
             return []
 
+
+    async def generate_attachment_presigned_urls(
+        self,
+        blob_storage: BlobStoragePort,
+        chat_id: str,
+        timestamp: str,
+        filenames: List[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate presigned PUT URLs for chat attachment uploads.
+
+        S3 path: chats/{chat_id}/{timestamp}/{filename}
+        Bucket: S3_PDFS_BUCKET
+
+        Args:
+            blob_storage: Blob storage port instance
+            chat_id: Chat identifier
+            timestamp: Timestamp string (used as folder prefix)
+            filenames: List of filenames to upload
+
+        Returns:
+            List of objects with presigned_url, s3_key, and filename
+        """
+        bucket = settings.s3_pdfs_bucket
+        results = []
+
+        for filename in filenames:
+            s3_key = f"chats/{user_id}/{timestamp}/{filename}"
+            presigned_url = await blob_storage.generate_presigned_upload_url(
+                bucket_name=bucket,
+                object_key=s3_key,
+                expiration_seconds=300,
+            )
+            results.append({
+                "presigned_url": presigned_url,
+                "s3_key": s3_key,
+                "filename": filename,
+            })
+
+        return results
 
     # =============================================
     # Helper Methods
