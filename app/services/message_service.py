@@ -242,7 +242,7 @@ class MessageService:
 
         Args:
             blob_storage: Blob storage port instance
-            user_id: Chat identifier
+            user_id: User identifier
             timestamp: Timestamp string (used as folder prefix)
             filenames: List of filenames to upload
 

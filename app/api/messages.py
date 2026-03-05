@@ -109,7 +109,7 @@ async def generate_attachment_presigned_urls_endpoint(
         List of objects with presigned_url, s3_key, and filename
     """
     try:
-        user_id = str(current_user["user_id"])
+        user_id = current_user.get('ID_USUARIO')
         blob_storage = container.get_blob_storage()
 
         uploads = await message_service.generate_attachment_presigned_urls(
@@ -119,8 +119,7 @@ async def generate_attachment_presigned_urls_endpoint(
             filenames=request.filenames,
         )
 
-        success_response = create_success_response({"uploads": uploads})
-        return {"result": success_response.model_dump()}
+        return {"uploads": uploads}
 
     except Exception as e:
         logger.error(f"Unexpected error in generate_attachment_presigned_urls endpoint: {e}")
