@@ -2,8 +2,8 @@
 Service layer helper functions.
 Utilities for building state, validation, and event generation.
 """
-from typing import Optional
-from app.workflows.states import RAGState, RAGAnonymousState, LLMOnlyState, LLMOnlyAnonymousState
+from typing import Optional, List
+from app.workflows.states import RAGState, RAGAnonymousState, LLMOnlyState, LLMOnlyAnonymousState, VLMState
 
 
 def build_initial_state(
@@ -273,6 +273,65 @@ def build_llm_only_initial_state_anonymous(
         "error": None,
         "should_stop": False
     }
+
+
+def build_vlm_initial_state(
+    user_id: int,
+    message: str,
+    company_id: int,
+    area_id: int,
+    created_at: str,
+    filenames: List[str],
+    chat_id: Optional[str] = None,
+    request_timezone: Optional[str] = None,
+) -> VLMState:
+    """Build initial state for VLM workflow execution"""
+    return {
+        # Input parameters
+        "user_id": user_id,
+        "message": message,
+        "company_id": company_id,
+        "area_id": area_id,
+        "created_at": created_at,
+        "chat_id": chat_id,
+        "request_timezone": request_timezone,
+        "attachment_keys": filenames,  # filenames — converted to S3 keys by build_attachment_keys node
+        "attachment_urls": [],
+        # Processing state (will be populated by workflow)
+        "cleaned_message": None,
+        "rag_config": None,
+        "new_chat_created": False,
+        "new_chat_titulo": None,
+        "new_chat_timestamp": None,
+        "vlm_prompt": None,
+        "assistant_timestamp": None,
+        "assistant_timestamp_ms": None,
+        "utc_formatted": None,
+        "local_formatted": None,
+        # Error handling
+        "error": None,
+        "should_stop": False,
+    }
+
+
+def validate_vlm_workflow_state(state: Optional[VLMState]) -> VLMState:
+    """
+    Validate that VLM workflow completed successfully.
+    Raises ValueError if state is invalid.
+    """
+    if state is None or state.get("should_stop", False):
+        error_msg = state.get("error", "Unknown error") if state else "Workflow did not complete"
+        raise ValueError(error_msg)
+
+    if not state.get("chat_id") or not state.get("vlm_prompt"):
+        missing_fields = []
+        if not state.get("chat_id"):
+            missing_fields.append("chat_id")
+        if not state.get("vlm_prompt"):
+            missing_fields.append("vlm_prompt")
+        raise ValueError(f"VLM workflow incomplete: missing {', '.join(missing_fields)}")
+
+    return state
 
 
 def validate_llm_only_workflow_state_anonymous(state: Optional[LLMOnlyAnonymousState]) -> LLMOnlyAnonymousState:

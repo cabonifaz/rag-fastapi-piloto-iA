@@ -38,6 +38,7 @@ from app.infrastructure.context_gatekeeper.aws_bedrock_provider import ContextGa
 from app.infrastructure.transcriber.aws_transcribe_streaming import AWSTranscribeStreaming
 from app.infrastructure.transcriber.openai_transcribe import OpenAITranscribe
 from app.infrastructure.blob_storages.s3_storage import S3BlobStorage
+from app.infrastructure.vlm.aws_bedrock_converse_provider import AWSBedrockVLMProvider
 
 
 class DIContainer:
@@ -68,6 +69,7 @@ class DIContainer:
         self._agents_service = None
         self._menu_items_service = None
         self._parametros_service = None
+        self._vlm_provider = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -208,6 +210,7 @@ class DIContainer:
             llm_provider = self.get_llm_provider()
             llm_nonstreaming_provider = self.get_llm_nonstreaming_provider()
             llm_only_provider = self.get_llm_only_provider()
+            vlm_provider = self.get_vlm_provider()
             message_service = self.get_message_service()
             ia_config_service = self.get_ia_config_service()
             recontextualizer = self.get_recontextualizer()
@@ -225,7 +228,8 @@ class DIContainer:
                 context_gatekeeper=context_gatekeeper,
                 orchestrator=orchestrator,
                 llm_nonstreaming_provider=llm_nonstreaming_provider,
-                llm_only_provider=llm_only_provider
+                llm_only_provider=llm_only_provider,
+                vlm_provider=vlm_provider,
             )
 
         return self._rag_service
@@ -335,6 +339,21 @@ class DIContainer:
             self._menu_items_service = MenuItemsService()
 
         return self._menu_items_service
+
+    def get_vlm_provider(self) -> AWSBedrockVLMProvider:
+        """Get VLM provider instance (singleton)."""
+        if self._vlm_provider is None:
+            try:
+                self._vlm_provider = AWSBedrockVLMProvider(
+                    region=settings.aws_region,
+                    model_id=settings.vlm_model_id,
+                    profile_name=settings.aws_profile,
+                    aws_access_key_id=settings.aws_access_key_id,
+                    aws_secret_access_key=settings.aws_secret_access_key,
+                )
+            except Exception as e:
+                raise ConnectionError(f"Failed to initialize VLM provider: {str(e)}")
+        return self._vlm_provider
 
     def get_parametros_service(self) -> ParametrosService:
         """Get parametros service as singleton (stateless, no db parameter)."""
@@ -447,6 +466,19 @@ class DIContainer:
             ia_config_service=self.get_ia_config_service(),
             context_gatekeeper=self.get_context_gatekeeper(),
             recontextualizer=self.get_recontextualizer(),
+        )
+
+    def initialize_vlm_workflow(self) -> None:
+        """
+        Initialize and compile the VLM workflow graph.
+        Should be called once at application startup.
+        """
+        from app.workflows.vlm_workflow import initialize_vlm_workflow
+
+        initialize_vlm_workflow(
+            session_factory=SessionLocal,
+            vlm_provider=self.get_vlm_provider(),
+            message_service=self.get_message_service(),
         )
 
     def initialize_llm_only_anonymous_workflow(self) -> None:

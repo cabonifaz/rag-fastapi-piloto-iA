@@ -131,18 +131,22 @@ Formatting rules:
 
         return [{"text": system_text}] if system_text else None
 
-    def _build_image_block(self, s3_key: str) -> Dict[str, Any]:
-        """Build a Bedrock Converse image content block from an S3 key."""
+    def _build_image_block(self, s3_key: str, image_bytes: bytes) -> Dict[str, Any]:
+        """Build a Bedrock Converse image content block from raw bytes."""
         return {
             "image": {
                 "format": _get_image_format(s3_key),
                 "source": {
-                    "s3Location": {
-                        "uri": f"s3://{settings.s3_images_bucket}/{s3_key}"
-                    }
+                    "bytes": image_bytes
                 },
             }
         }
+
+    async def _fetch_image_bytes(self, s3_key: str) -> bytes:
+        """Download image bytes from S3."""
+        async with self.session.client("s3") as s3:
+            response = await s3.get_object(Bucket=settings.s3_chat_files, Key=s3_key)
+            return await response["Body"].read()
 
     async def generate_stream(
         self,
@@ -267,9 +271,11 @@ Formatting rules:
         local_formatted: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         try:
-            # Build multimodal content for the current user turn:
-            # images first (s3Location blocks), text message last
-            user_content = [self._build_image_block(key) for key in attachment_keys]
+            # Fetch image bytes from S3 and build multimodal content for the user turn
+            user_content = []
+            for key in attachment_keys:
+                image_bytes = await self._fetch_image_bytes(key)
+                user_content.append(self._build_image_block(key, image_bytes))
             user_content.append({"text": message})
 
             converse_messages: List[Dict[str, Any]] = []
