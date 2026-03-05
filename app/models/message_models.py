@@ -42,3 +42,9 @@ class GetMessagesByChat(BaseModel):
     chat_id: str
     company_id: int
     area_id: int
+
+
+class GenerateAttachmentPresignedUrlsRequest(BaseModel):
+    """Request to generate presigned PUT URLs for chat attachment uploads"""
+    filenames: List[str]
+    timestamp: str
