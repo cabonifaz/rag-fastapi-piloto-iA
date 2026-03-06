@@ -95,14 +95,10 @@ class VLMState(TypedDict):
 
     # Processing state
     cleaned_message: Optional[str]
-    conversation_history: List[Dict[str, str]]
-    gatekeeper_result: Dict[str, bool]
-    recontextualized_query: Optional[str]
     rag_config: Optional[Dict[str, Any]]
     new_chat_created: bool
     new_chat_titulo: Optional[str]
     new_chat_timestamp: Optional[str]
-    conversation_history_for_prompt: List[Dict[str, str]]
     vlm_prompt: Optional[Any]
     assistant_timestamp: Optional[str]
     assistant_timestamp_ms: Optional[int]

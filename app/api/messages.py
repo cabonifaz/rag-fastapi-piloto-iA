@@ -1,6 +1,6 @@
 """API endpoints for message management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 import json
 from typing import Optional, Dict, Any
 import logging
@@ -32,7 +32,6 @@ def get_message_service() -> MessageService:
 @router.post("/chat", response_model=MessageListResponse)
 async def get_messages_by_chat_endpoint(
     request: GetMessagesByChat,
-    limit: Optional[int] = Query(None, ge=1, le=100, description="Maximum messages to return (if omitted, loaded from DB parameter)") ,
     last_evaluated_key: Optional[str] = Query(None, description="Pagination key (JSON string)"),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation),
@@ -49,7 +48,6 @@ async def get_messages_by_chat_endpoint(
         - area_id: Area identifier
 
     Query Parameters:
-        - limit: Maximum messages to return (default: 50, min: 1, max: 100)
         - last_evaluated_key: For pagination, pass the last_evaluated_key from previous response
 
     Returns:
@@ -59,7 +57,6 @@ async def get_messages_by_chat_endpoint(
         HTTPException: 400 for invalid parameters, 500 for server errors
     """
     try:
-        # Parse last_evaluated_key if provided
         last_key = None
         if last_evaluated_key:
             try:
@@ -71,11 +68,12 @@ async def get_messages_by_chat_endpoint(
                     detail={"result": error_response.model_dump()}
                 )
 
+        blob_storage = container.get_blob_storage()
         message_list = await message_service.get_messages_by_chat(
             chat_id=request.chat_id,
-            limit=limit,
             last_evaluated_key=last_key,
-            db=db
+            db=db,
+            blob_storage=blob_storage
         )
 
         return message_list
@@ -109,7 +107,7 @@ async def generate_attachment_presigned_urls_endpoint(
         List of objects with presigned_url, s3_key, and filename
     """
     try:
-        user_id = str(current_user["user_id"])
+        user_id = current_user.get('ID_USUARIO')
         blob_storage = container.get_blob_storage()
 
         uploads = await message_service.generate_attachment_presigned_urls(
@@ -119,8 +117,7 @@ async def generate_attachment_presigned_urls_endpoint(
             filenames=request.filenames,
         )
 
-        success_response = create_success_response({"uploads": uploads})
-        return {"result": success_response.model_dump()}
+        return {"uploads": uploads}
 
     except Exception as e:
         logger.error(f"Unexpected error in generate_attachment_presigned_urls endpoint: {e}")

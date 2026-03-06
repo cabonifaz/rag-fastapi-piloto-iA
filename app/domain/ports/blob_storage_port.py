@@ -35,6 +35,55 @@ class BlobStoragePort(ABC):
         """
         pass
     @abstractmethod
+    async def generate_presigned_upload_urls_batch(
+        self,
+        bucket_name: str,
+        object_keys: List[str],
+        expiration_seconds: int = 300
+    ) -> List[str]:
+        """
+        Generate presigned PUT URLs for multiple objects using a single client session.
+
+        Args:
+            bucket_name: Name of the storage bucket/container
+            object_keys: List of object keys to generate URLs for
+            expiration_seconds: URL expiration time in seconds (default: 300 = 5 minutes)
+
+        Returns:
+            List of presigned upload URLs in the same order as object_keys
+
+        Raises:
+            ConnectionError: If unable to connect to storage service
+            ValueError: If parameters are invalid
+        """
+        pass
+
+    @abstractmethod
+    async def generate_presigned_download_urls_batch(
+        self,
+        bucket_name: str,
+        object_keys: List[str],
+        expiration_seconds: int = 300,
+        as_attachment: bool = False
+    ) -> List[str]:
+        """
+        Generate presigned GET URLs for multiple objects using a single client session.
+
+        Args:
+            bucket_name: Name of the storage bucket/container
+            object_keys: List of object keys to generate URLs for
+            expiration_seconds: URL expiration time in seconds (default: 300 = 5 minutes)
+            as_attachment: Force download if True
+
+        Returns:
+            List of presigned download URLs in the same order as object_keys
+
+        Raises:
+            ConnectionError: If unable to connect to storage service
+        """
+        pass
+
+    @abstractmethod
     async def generate_presigned_download_url(
         self,
         bucket_name: str,

@@ -162,3 +162,60 @@ async def stream_llm_response(
 
     except Exception as e:
         await handle_llm_error(e, "LLM generation")
+
+
+async def stream_vlm_response(
+    state: Any,
+    vlm_provider: Any,
+    message_service: Any,
+    db: Any,
+) -> AsyncGenerator[dict, None]:
+    """
+    Stream VLM response and handle assistant message saving.
+
+    Yields:
+        Dictionary events with type "chunk" and content
+    """
+    vlm_prompt = state["vlm_prompt"]
+    chat_id = state["chat_id"]
+    assistant_response = ""
+    first_chunk_sent = False
+
+    try:
+        has_content = False
+
+        async for chunk in vlm_provider.generate_stream(
+            model_id=vlm_provider.model_id,
+            message=vlm_prompt["message"],
+            attachment_keys=vlm_prompt["attachment_keys"],
+        ):
+            if chunk.startswith("__STOP_REASON__:"):
+                stop_reason = chunk.split(":")[1]
+                if stop_reason == "max_tokens":
+                    error_msg = "⚠️ El modelo agotó los tokens disponibles durante el análisis. Por favor, intenta con una consulta más específica."
+                    assistant_response += error_msg
+                    has_content = True
+                    yield {"type": "chunk", "content": error_msg}
+                continue
+
+            has_content = True
+            assistant_response += chunk
+
+            if not first_chunk_sent and chunk.strip():
+                await update_chat_last_message_date(db, chat_id)
+                first_chunk_sent = True
+
+            yield {"type": "chunk", "content": chunk}
+
+        if not has_content:
+            raise ValueError("El modelo no generó una respuesta. Por favor, intenta reformular tu consulta.")
+
+        await save_assistant_message(
+            message_service=message_service,
+            chat_id=chat_id,
+            assistant_timestamp=state["assistant_timestamp"],
+            assistant_response=assistant_response,
+        )
+
+    except Exception as e:
+        await handle_llm_error(e, "VLM generation")

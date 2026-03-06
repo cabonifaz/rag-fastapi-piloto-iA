@@ -58,6 +58,37 @@ def create_build_rag_prompt_node():
     return build_rag_prompt
 
 
+def create_build_attachment_keys_node():
+    """Factory function to create build_attachment_keys node"""
+    async def build_attachment_keys(state):
+        """Build S3 keys from filenames, user_id and created_at"""
+        user_id = state["user_id"]
+        created_at = state["created_at"]
+        filenames = state.get("attachment_keys") or []
+
+        state["attachment_keys"] = [
+            f"chats/{user_id}/{created_at}/{filename}"
+            for filename in filenames
+        ]
+        return state
+
+    return build_attachment_keys
+
+
+def create_build_vlm_prompt_node():
+    """Factory function to create build_vlm_prompt node"""
+    async def build_vlm_prompt(state):
+        """Build VLM prompt with message and attachment keys"""
+        state["vlm_prompt"] = {
+            "message": state["cleaned_message"],
+            "attachment_keys": state["attachment_keys"] or [],
+            "role_behavior": "You are a global OCR and structured data extraction system",
+        }
+        return state
+
+    return build_vlm_prompt
+
+
 def create_prepare_timestamps_node():
     """Factory function to create prepare_timestamps node"""
     async def prepare_timestamps(state: RAGState) -> RAGState:

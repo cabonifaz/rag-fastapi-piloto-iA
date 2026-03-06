@@ -131,27 +131,31 @@ Formatting rules:
 
         return [{"text": system_text}] if system_text else None
 
-    def _build_image_block(self, s3_key: str) -> Dict[str, Any]:
-        """Build a Bedrock Converse image content block from an S3 key."""
+    def _build_image_block(self, s3_key: str, image_bytes: bytes) -> Dict[str, Any]:
+        """Build a Bedrock Converse image content block from raw bytes."""
         return {
             "image": {
                 "format": _get_image_format(s3_key),
                 "source": {
-                    "s3Location": {
-                        "uri": f"s3://{settings.s3_images_bucket}/{s3_key}"
-                    }
+                    "bytes": image_bytes
                 },
             }
         }
+
+    async def _fetch_image_bytes(self, s3_key: str) -> bytes:
+        """Download image bytes from S3."""
+        async with self.session.client("s3") as s3:
+            response = await s3.get_object(Bucket=settings.s3_chat_files, Key=s3_key)
+            return await response["Body"].read()
 
     async def generate_stream(
         self,
         model_id: str,
         message: str,
         attachment_keys: List[str],
-        max_tokens: int = 2048,
-        temperature: float = 0.3,
-        top_p: float = 0.9,
+        max_tokens: int = 10000,
+        temperature: float = 0.1,
+        top_p: float = 1,
         role_behavior: str = "",
         messages: Optional[List[Dict[str, Any]]] = None,
         fallback_models: Optional[List[str]] = None,
@@ -257,9 +261,9 @@ Formatting rules:
         model_id: str,
         message: str,
         attachment_keys: List[str],
-        max_tokens: int = 2048,
-        temperature: float = 0.3,
-        top_p: float = 0.9,
+        max_tokens: int = 10000,
+        temperature: float = 0.1,
+        top_p: float = 1,
         role_behavior: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
         request_timezone: Optional[str] = None,
@@ -267,9 +271,11 @@ Formatting rules:
         local_formatted: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         try:
-            # Build multimodal content for the current user turn:
-            # images first (s3Location blocks), text message last
-            user_content = [self._build_image_block(key) for key in attachment_keys]
+            # Fetch image bytes from S3 and build multimodal content for the user turn
+            user_content = []
+            for key in attachment_keys:
+                image_bytes = await self._fetch_image_bytes(key)
+                user_content.append(self._build_image_block(key, image_bytes))
             user_content.append({"text": message})
 
             converse_messages: List[Dict[str, Any]] = []
@@ -288,12 +294,10 @@ Formatting rules:
             model_config = ModelConfigFactory.get_model_config(model_id)
 
             inference_config = {
-                "maxTokens": max_tokens,
-                "temperature": temperature,
-                "topP": top_p,
+                "maxTokens": 10000,
+                "temperature": 0.1,
+                "topP": 1,
             }
-            if hasattr(model_config, "supports_both_temp_and_top_p") and not model_config.supports_both_temp_and_top_p:
-                del inference_config["topP"]
 
             request_params = {
                 "modelId": model_config.model_id,
