@@ -276,12 +276,14 @@ class AreaRepository:
             return []
 
     @retry_on_db_error(max_retries=3, delay=1)
-    def get_areas(self, id_empresa: int) -> List[Dict[str, Any]]:
+    def get_areas(self, id_empresa: int, id_usuario: int, id_tipo_rol: int) -> List[Dict[str, Any]]:
         """
         Get all areas for a company using stored procedure SP_AREAS_LST
 
         Args:
             id_empresa: Company ID
+            id_usuario: User ID
+            id_tipo_rol: User role type ID
 
         Returns:
             List of dictionaries containing area information
@@ -294,8 +296,10 @@ class AreaRepository:
 
             try:
                 cursor.execute(
-                    "EXEC SP_AREAS_LST @ID_EMPRESA = ?",
-                    id_empresa
+                    "EXEC SP_AREAS_LST @ID_EMPRESA = ?, @ID_USUARIO = ?, @ID_TIPO_ROL = ?",
+                    id_empresa,
+                    id_usuario,
+                    id_tipo_rol
                 )
 
                 results = []

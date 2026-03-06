@@ -172,8 +172,8 @@ class JWTAuth:
             if role_id == 2:
                 return any(ca.get('ID_EMPRESA') == company_id for ca in company_areas)
 
-            # User (role_id = 3): Validate company_id exists in any company_areas row
-            if role_id == 3:
+            # Supervisor or User (role_id = 3 or 5): Validate company_id exists in any company_areas row
+            if role_id in [3, 5]:
                 return any(ca.get('ID_EMPRESA') == company_id for ca in company_areas)
 
             # Unknown role: Deny access
@@ -217,8 +217,8 @@ class JWTAuth:
             if role_id == 2:
                 return any(ca.get('ID_EMPRESA') == company_id for ca in company_areas)
 
-            # User (role_id = 3 or 4): Validate both company_id and area_id exist in the same row
-            if role_id in [3, 4]:
+            # Supervisor or User (role_id = 3 or 5): Validate both company_id and area_id exist in the same row
+            if role_id in [3, 5]:
                 if area_id is None:
                     return False
                 return any(

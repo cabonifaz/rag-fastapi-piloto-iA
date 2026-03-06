@@ -149,8 +149,8 @@ async def batch_upload_knowledge_endpoint(
                 detail={"result": error_response.model_dump()}
             )
 
-        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
-        if role_id not in [1, 2]:
+        # Check if user is SuperAdmin (role_id = 1), Admin (role_id = 2) or Supervisor(role_id = 5)
+        if role_id not in [1, 2, 5]:
             raise HTTPException(
                 status_code=403,
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
@@ -334,8 +334,8 @@ async def batch_update_knowledge_state_endpoint(
                 detail={"result": error_response.model_dump()}
             )
 
-        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
-        if role_id not in [1, 2]:
+        # Check if user is SuperAdmin (role_id = 1), Admin (role_id = 2) or Supervisor(role_id = 5)
+        if role_id not in [1, 2, 5]:
             raise HTTPException(
                 status_code=403,
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
@@ -455,8 +455,8 @@ async def batch_delete_knowledge_endpoint(
                 detail={"result": error_response.model_dump()}
             )
 
-        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
-        if role_id not in [1, 2]:
+        # Check if user is SuperAdmin (role_id = 1), Admin (role_id = 2) or Supervisor(role_id = 5)
+        if role_id not in [1, 2, 5]:
             raise HTTPException(
                 status_code=403,
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes para eliminar documentos"}}
@@ -595,8 +595,8 @@ async def get_knowledge_paginated_endpoint(
                 detail={"result": error_response.model_dump()}
             )
 
-        # Check if user is SuperAdmin (role_id = 1) or Admin (role_id = 2)
-        if role_id not in [1, 2]:
+        # Check if user is SuperAdmin (role_id = 1), Admin (role_id = 2) or Supervisor(role_id = 5)
+        if role_id not in [1, 2, 5]:
             raise HTTPException(
                 status_code=403,
                 detail={"result": {"idTipoMensaje": 1, "mensaje": "Permisos insuficientes"}}
