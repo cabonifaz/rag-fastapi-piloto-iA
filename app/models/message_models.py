@@ -23,6 +23,7 @@ class MessageResponse(BaseModel):
     created_at: str
     sender: int
     message: str
+    attachment_keys: Optional[List[str]] = None
 
 
 class MessageListResponse(BaseModel):

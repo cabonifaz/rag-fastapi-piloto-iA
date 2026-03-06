@@ -30,7 +30,6 @@ class MessageService:
     async def get_messages_by_chat(
         self,
         chat_id: str,
-        limit: int | None = None,
         last_evaluated_key: Optional[Dict[str, Any]] = None,
         db: object = None
     ) -> MessageListResponse:
@@ -39,7 +38,6 @@ class MessageService:
 
         Args:
             chat_id: Chat identifier
-            limit: Maximum number of messages to return. If None, it will be loaded from DB param (NUM1=11).
             last_evaluated_key: For pagination.
             db: Optional SQLAlchemy Session used to read parameters
 
@@ -47,16 +45,13 @@ class MessageService:
             MessageListResponse with a list of messages and pagination info.
         """
         try:
-            # If limit not provided, load from DB parameter NUM1=11 (expected to be 15)
-            if limit is None:
-                try:
-                    params = await self.parametros_service.get_param_by_id_maestro(db, "11")
-                    row = next((p for p in params if p.get('ID_MAESTRO') == 11), None)
-                    limit = row['NUM1'] if row else 15
-                except Exception:
-                    limit = 15
+            try:
+                params = await self.parametros_service.get_param_by_id_maestro(db, "11")
+                row = next((p for p in params if p.get('ID_MAESTRO') == 11), None)
+                limit = row['NUM1'] if row else 15
+            except Exception:
+                limit = 15
 
-            # Delegate the database call to the repository (now awaited)
             response_data = await self.repository.get_messages_by_chat(
                 chat_id=chat_id,
                 limit=limit,
@@ -161,30 +156,19 @@ class MessageService:
     async def get_last_n_messages(
         self,
         chat_id: str,
-        n: int | None = None,
-        db: object = None
+        n: int
     ) -> List[MessageResponse]:
         """
         Get the last N messages for a chat (most recent)
 
         Args:
             chat_id: Chat identifier
-            n: Number of recent messages to retrieve. If None, it will be loaded from DB param (NUM1=11).
-            db: Optional SQLAlchemy Session used to read parameters
+            n: Number of recent messages to retrieve
 
         Returns:
             List of MessageResponse (ordered from oldest to newest)
         """
         try:
-            if n is None:
-                try:
-                    params = await self.parametros_service.get_param_by_id_maestro(db, "11")
-                    row = next((p for p in params if p.get('ID_MAESTRO') == 11), None)
-                    n = row['NUM1'] if row else 15
-                except Exception:
-                    n = 15
-
-            # Use get_last_n_messages_by_chat instead of get_last_n_messages (now awaited)
             response_data = await self.repository.get_last_n_messages_by_chat(
                 chat_id=chat_id,
                 limit=n
@@ -238,7 +222,7 @@ class MessageService:
     async def get_last_n_messages_anonymous(
         self,
         chat_anonymous_id: str,
-        n: int = 10
+        n: int
     ) -> List[MessageResponse]:
         """
         Get the last N messages for an anonymous chat (most recent)
@@ -266,6 +250,37 @@ class MessageService:
             return []
 
 
+    async def get_attachment_urls(
+        self,
+        blob_storage: BlobStoragePort,
+        attachment_keys: List[str],
+        download: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate presigned GET URLs for chat attachment keys stored in a message.
+
+        Args:
+            blob_storage: Blob storage port instance
+            attachment_keys: List of S3 keys (e.g. ["chats/2/1234/file.jpeg"])
+            download: If True, forces file download instead of inline view
+
+        Returns:
+            List of objects with presigned_url, s3_key, and filename
+        """
+        bucket = settings.s3_chat_files
+
+        presigned_urls = await blob_storage.generate_presigned_download_urls_batch(
+            bucket_name=bucket,
+            object_keys=attachment_keys,
+            expiration_seconds=300,
+            as_attachment=download,
+        )
+
+        return [
+            {"presigned_url": url, "s3_key": key, "filename": key.split("/")[-1]}
+            for url, key in zip(presigned_urls, attachment_keys)
+        ]
+
     async def generate_attachment_presigned_urls(
         self,
         blob_storage: BlobStoragePort,
@@ -289,22 +304,18 @@ class MessageService:
             List of objects with presigned_url, s3_key, and filename
         """
         bucket = settings.s3_chat_files
-        results = []
+        s3_keys = [f"chats/{user_id}/{timestamp}/{filename}" for filename in filenames]
 
-        for filename in filenames:
-            s3_key = f"chats/{user_id}/{timestamp}/{filename}"
-            presigned_url = await blob_storage.generate_presigned_upload_url(
-                bucket_name=bucket,
-                object_key=s3_key,
-                expiration_seconds=300,
-            )
-            results.append({
-                "presigned_url": presigned_url,
-                "s3_key": s3_key,
-                "filename": filename,
-            })
+        presigned_urls = await blob_storage.generate_presigned_upload_urls_batch(
+            bucket_name=bucket,
+            object_keys=s3_keys,
+            expiration_seconds=300,
+        )
 
-        return results
+        return [
+            {"presigned_url": url, "s3_key": key, "filename": filename}
+            for url, key, filename in zip(presigned_urls, s3_keys, filenames)
+        ]
 
     # =============================================
     # Helper Methods
@@ -317,5 +328,6 @@ class MessageService:
             chat_id=message_data['chat_id'],
             created_at=message_data['created_at'],
             sender=int(message_data['sender']),  # Ensure sender is an int
-            message=message_data['message']
+            message=message_data['message'],
+            attachment_keys=message_data.get('attachment_keys')
         )

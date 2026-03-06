@@ -1,6 +1,6 @@
 """API endpoints for message management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 import json
 from typing import Optional, Dict, Any
 import logging
@@ -32,7 +32,6 @@ def get_message_service() -> MessageService:
 @router.post("/chat", response_model=MessageListResponse)
 async def get_messages_by_chat_endpoint(
     request: GetMessagesByChat,
-    limit: Optional[int] = Query(None, ge=1, le=100, description="Maximum messages to return (if omitted, loaded from DB parameter)") ,
     last_evaluated_key: Optional[str] = Query(None, description="Pagination key (JSON string)"),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation),
@@ -49,7 +48,6 @@ async def get_messages_by_chat_endpoint(
         - area_id: Area identifier
 
     Query Parameters:
-        - limit: Maximum messages to return (default: 50, min: 1, max: 100)
         - last_evaluated_key: For pagination, pass the last_evaluated_key from previous response
 
     Returns:
@@ -59,7 +57,6 @@ async def get_messages_by_chat_endpoint(
         HTTPException: 400 for invalid parameters, 500 for server errors
     """
     try:
-        # Parse last_evaluated_key if provided
         last_key = None
         if last_evaluated_key:
             try:
@@ -73,7 +70,6 @@ async def get_messages_by_chat_endpoint(
 
         message_list = await message_service.get_messages_by_chat(
             chat_id=request.chat_id,
-            limit=limit,
             last_evaluated_key=last_key,
             db=db
         )
