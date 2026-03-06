@@ -24,12 +24,12 @@ class MessageResponse(BaseModel):
     sender: int
     message: str
     attachment_keys: Optional[List[str]] = None
+    attachment_urls: Optional[List[str]] = None
 
 
 class MessageListResponse(BaseModel):
     """Response for listing messages"""
     messages: List[MessageResponse]
-    total_count: int
     last_evaluated_key: Optional[dict] = None  # For pagination
 
 

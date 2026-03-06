@@ -31,7 +31,8 @@ class MessageService:
         self,
         chat_id: str,
         last_evaluated_key: Optional[Dict[str, Any]] = None,
-        db: object = None
+        db: object = None,
+        blob_storage: BlobStoragePort = None
     ) -> MessageListResponse:
         """
         Get messages for a specific chat with pagination.
@@ -40,6 +41,7 @@ class MessageService:
             chat_id: Chat identifier
             last_evaluated_key: For pagination.
             db: Optional SQLAlchemy Session used to read parameters
+            blob_storage: Optional blob storage port to resolve attachment presigned URLs
 
         Returns:
             MessageListResponse with a list of messages and pagination info.
@@ -58,24 +60,33 @@ class MessageService:
                 last_evaluated_key=last_evaluated_key
             )
 
-            # Map the raw data to Pydantic models
             messages = [
                 self._map_to_message_response(msg)
                 for msg in response_data.get('messages', [])
             ]
 
-            # Get the total count of messages for the entire chat for accurate pagination
-            total_count = await self.repository.count_messages(chat_id=chat_id, id_estado_registro=1)
+            # Resolve presigned GET URLs for all attachments in one batch call
+            if blob_storage:
+                all_keys = [
+                    key
+                    for msg in messages
+                    if msg.attachment_keys
+                    for key in msg.attachment_keys
+                ]
+                if all_keys:
+                    url_entries = await self.get_attachment_urls(blob_storage, all_keys)
+                    url_map = {entry["s3_key"]: entry["presigned_url"] for entry in url_entries}
+                    for msg in messages:
+                        if msg.attachment_keys:
+                            msg.attachment_urls = [url_map[k] for k in msg.attachment_keys]
 
             return MessageListResponse(
                 messages=messages,
-                total_count=total_count,
                 last_evaluated_key=response_data.get('last_evaluated_key')
             )
 
         except Exception as e:
             logger.error(f"Error getting messages for chat_id {chat_id}: {e}")
-            # Return a properly structured empty response on error
             return MessageListResponse(messages=[], total_count=0, last_evaluated_key=None)
 
     async def create_message(

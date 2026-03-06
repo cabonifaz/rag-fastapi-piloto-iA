@@ -68,10 +68,12 @@ async def get_messages_by_chat_endpoint(
                     detail={"result": error_response.model_dump()}
                 )
 
+        blob_storage = container.get_blob_storage()
         message_list = await message_service.get_messages_by_chat(
             chat_id=request.chat_id,
             last_evaluated_key=last_key,
-            db=db
+            db=db,
+            blob_storage=blob_storage
         )
 
         return message_list

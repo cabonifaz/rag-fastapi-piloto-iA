@@ -1,6 +1,6 @@
 """Repository for DynamoDB message operations."""
 
-from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.conditions import Key
 from typing import Optional, List, Dict, Any
 import logging
 from app.core.config import settings
@@ -307,32 +307,3 @@ class MessageRepository:
             logger.error(f"Error getting messages for chat_anonymous_id {chat_anonymous_id}: {e}")
             return {'messages': [], 'count': 0, 'last_evaluated_key': None}
 
-    async def count_messages(
-        self,
-        chat_id: str,
-        id_estado_registro: int = 1
-    ) -> int:
-        """
-        Count total messages for a chat (async).
-
-        Args:
-            chat_id: Chat identifier
-            id_estado_registro: Filter by status (default: 1 = active)
-
-        Returns:
-            Total count of messages
-        """
-        try:
-            async with get_dynamodb_resource() as dynamodb:
-                table = await dynamodb.Table(self.table_name)
-                response = await table.query(
-                    KeyConditionExpression=Key('chat_id').eq(chat_id),
-                    FilterExpression=Attr('id_estado_registro').eq(id_estado_registro),
-                    Select='COUNT'
-                )
-
-            return response.get('Count', 0)
-
-        except Exception as e:
-            logger.error(f"Error counting messages for chat_id {chat_id}: {e}")
-            return 0
