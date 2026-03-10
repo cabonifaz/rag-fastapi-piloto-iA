@@ -43,7 +43,13 @@ class Qwen3VLConfig(QwenModelConfig):
         super().__init__("qwen.qwen3-vl-235b-a22b")
 
     def get_converse_additional_fields(self) -> Dict[str, Any]:
-        return {"enable_thinking": False}
+        return {
+            "enable_thinking": False,
+            "stop": [
+                "[ILEGIBLE][ILEGIBLE][ILEGIBLE]",
+                "0000000000000000000000000",
+            ],
+        }
 
 
 def get_qwen_config(model_id: str) -> QwenModelConfig:
