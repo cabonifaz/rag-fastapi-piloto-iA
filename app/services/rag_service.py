@@ -499,7 +499,8 @@ class RagService:
                 vlm_mode=vlm_mode,
             )
 
-            # Execute workflow (no progress events needed for VLM)
+            yield {"type": "progress", "message": "Analizando imágenes..."}
+
             result_state = None
             async for state in app.astream(initial_state, stream_mode="values"):
                 result_state = state
