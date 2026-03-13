@@ -284,6 +284,7 @@ def build_vlm_initial_state(
     filenames: List[str],
     chat_id: Optional[str] = None,
     request_timezone: Optional[str] = None,
+    vlm_mode: Optional[str] = None,
 ) -> VLMState:
     """Build initial state for VLM workflow execution"""
     return {
@@ -295,6 +296,7 @@ def build_vlm_initial_state(
         "created_at": created_at,
         "chat_id": chat_id,
         "request_timezone": request_timezone,
+        "vlm_mode": vlm_mode,
         "attachment_keys": filenames,  # filenames — converted to S3 keys by build_attachment_keys node
         "attachment_urls": [],
         # Processing state (will be populated by workflow)

@@ -632,6 +632,7 @@ async def vlm_streaming_endpoint(
                     filenames=request.filenames,
                     chat_id=str(request.chat_id) if request.chat_id else None,
                     request_timezone=request.request_timezone,
+                    vlm_mode=request.vlm_mode,
                 ):
                     if chunk_data["type"] == "chunk":
                         answer += chunk_data["content"]

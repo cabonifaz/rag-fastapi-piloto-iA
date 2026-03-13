@@ -181,6 +181,14 @@ async def stream_vlm_response(
     assistant_response = ""
     first_chunk_sent = False
 
+    _VLM_MODE_ROLE_BEHAVIOR = {
+        "vlm_qa_over_text": "Answer the user's question based solely on the content visible in the provided images.",
+        "vlm_extract_fields": "Extract and return all structured fields found in the document. Present them as key-value pairs or a table.",
+        "vlm_summarize_doc": "Summarize the document content clearly and concisely, capturing the main points.",
+        "vlm_ocr_clean": "Extract all text and information present in the document, preserving the original structure as much as possible.",
+    }
+    role_behavior = _VLM_MODE_ROLE_BEHAVIOR.get(state.get("vlm_mode") or "", "")
+
     try:
         has_content = False
 
@@ -188,6 +196,7 @@ async def stream_vlm_response(
             model_id=vlm_provider.model_id,
             message=vlm_prompt["message"],
             attachment_keys=vlm_prompt["attachment_keys"],
+            role_behavior=role_behavior,
         ):
             if chunk.startswith("__STOP_REASON__:"):
                 stop_reason = chunk.split(":")[1]

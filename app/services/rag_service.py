@@ -478,6 +478,7 @@ class RagService:
         filenames: list,
         chat_id: str = None,
         request_timezone: str = None,
+        vlm_mode: str = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         VLM streaming: build attachment keys → save message → call VLM → stream response
@@ -495,6 +496,7 @@ class RagService:
                 filenames=filenames,
                 chat_id=chat_id,
                 request_timezone=request_timezone,
+                vlm_mode=vlm_mode,
             )
 
             # Execute workflow (no progress events needed for VLM)
