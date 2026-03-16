@@ -90,6 +90,7 @@ class VLMState(TypedDict):
     created_at: str
     chat_id: Optional[str]
     request_timezone: Optional[str]
+    vlm_mode: Optional[str]
     attachment_keys: List[str]   # S3 keys — stored permanently in DynamoDB
     attachment_urls: List[str]   # presigned GET URLs (60s TTL) — used only in the LLM prompt
 

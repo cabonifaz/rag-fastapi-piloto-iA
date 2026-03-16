@@ -83,3 +83,4 @@ class VLMRequest(BaseModel):
     filenames: List[str]
     chat_id: Optional[int] = None
     request_timezone: Optional[str] = None
+    vlm_mode: Optional[str] = None
