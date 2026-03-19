@@ -20,7 +20,7 @@ from app.models.response_models import (
     create_error_response,
     create_warning_response
 )
-from app.models.rag_models import UnifiedRequest, N8NRequest, N8NAnonymousRequest, N8NLLMOnlyRequest, N8NLLMOnlyAnonymousRequest, AgentStreamingRequest
+from app.models.rag_models import UnifiedRequest, N8NRequest, N8NAnonymousRequest, N8NLLMOnlyRequest, N8NLLMOnlyAnonymousRequest, AgentStreamingRequest, VLMRequest
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -606,113 +606,88 @@ async def chat_n8n_llm_only_anonymous_endpoint(
         raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
 
 
-# @router.post("/agent-streaming")
-# async def agent_streaming_endpoint(
-#     request: AgentStreamingRequest,
-#     rag_service: RagService = Depends(get_rag_service),
-#     llm_provider: LLMPort = Depends(get_llm_provider),
-#     db: Session = Depends(get_db),
-#     current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation)
-# ):
-#     """
-#     Agent-powered streaming rag endpoint with orchestrator analysis and RAG.
-#     Uses agent orchestrator to analyze queries and determine workflow requirements
-#     before processing with RAG-powered answer generation.
-#     Requires external system authentication token for enhanced capabilities.
-#     Returns Server-Sent Events (SSE) format for real-time streaming.
+@router.post("/vlm-streaming")
+async def vlm_streaming_endpoint(
+    request: VLMRequest,
+    rag_service: RagService = Depends(get_rag_service),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user_with_company_area_validation)
+):
+    """
+    VLM streaming endpoint — multimodal (images + text) with direct Bedrock inference.
 
-#     Response format:
-#     - agent_analysis: Agent orchestrator's task breakdown and workflow analysis
-#     - metadata: Initial context information including agent analysis
-#     - chunk: Individual text chunks as they're generated
-#     - complete: Final completion signal
-#     """
-#     try:
+    Returns Server-Sent Events (SSE) format for real-time streaming.
+    """
+    try:
+        async def generate_stream():
+            try:
+                answer = ""
+                async for chunk_data in rag_service.process_vlm_query_stream(
+                    user_id=request.user_id,
+                    message=request.message,
+                    company_id=request.company_id,
+                    area_id=request.area_id,
+                    db=db,
+                    created_at=request.created_at,
+                    filenames=request.filenames,
+                    chat_id=str(request.chat_id) if request.chat_id else None,
+                    request_timezone=request.request_timezone,
+                    vlm_mode=request.vlm_mode,
+                ):
+                    if chunk_data["type"] == "chunk":
+                        answer += chunk_data["content"]
+                        output = f"data: {json.dumps({'type': 'text_chunk', 'content': answer})}\n\n"
+                        yield output
+                    else:
+                        output = f"data: {json.dumps(chunk_data)}\n\n"
+                        yield output
 
-#         # Validate external token
-#         if not request.external_token or not request.external_token.strip():
-#             raise ValueError("External token is required for agent streaming")
+                    await asyncio.sleep(0)
 
-#         async def generate_stream():
-#             try:
-#                 answer = ""
-#                 async for chunk_data in rag_service.agent_orchestrator_stream(
-#                     user_id=request.user_id,
-#                     user=request.user,
-#                     message=request.message,
-#                     company_id=request.company_id,
-#                     company=request.company,
-#                     area_id=request.area_id,
-#                     area=request.area,
-#                     id_ia_area=request.id_ia_area,
-#                     db=db,
-#                     top_k=request.top_k,
-#                     similarity_threshold=request.similarity_threshold,
-#                     alpha=request.alpha,
-#                     temperature=request.temperature,
-#                     max_tokens=request.max_tokens,
-#                     external_token=request.external_token
-#                 ):
-#                     if chunk_data["type"] == "chunk":
-#                         # Concatenate content
-#                         answer += chunk_data["content"]
-#                         # Send concatenated answer
-#                         yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
-#                     else:
-#                         # Send metadata and complete as-is
-#                         yield f"data: {json.dumps(chunk_data)}\n\n"
+            except ClientError as e:
+                error_code = e.response['Error']['Code']
+                logger.error(f"AWS Client error in VLM streaming: {error_code} - {e}")
+                error_msg = "Error del servicio de modelo de lenguaje"
+                if error_code == 'ValidationException':
+                    error_msg = "Parámetros inválidos para el modelo VLM"
+                elif error_code == 'ThrottlingException':
+                    error_msg = "Límite de tasa excedido. Por favor, inténtelo de nuevo más tarde"
+                error_response = create_error_response(error_msg)
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'result': error_response.model_dump()})}\n\n"
 
-#                     # Force flush by yielding control back to event loop
-#                     await asyncio.sleep(0)
+            except (NoCredentialsError, EndpointConnectionError, ConnectionError) as e:
+                logger.error(f"Connection error in VLM streaming: {e}")
+                error_response = create_error_response("Error de conexión del servicio")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Error de conexión del servicio', 'result': error_response.model_dump()})}\n\n"
 
-#             except ClientError as e:
-#                 error_code = e.response['Error']['Code']
-#                 logger.error(f"AWS Client error in agent streaming: {error_code} - {e}")
-#                 error_msg = "Error del servicio de modelo de lenguaje"
-#                 if error_code == 'ValidationException':
-#                     error_msg = "Parámetros inválidos para el modelo de lenguaje"
-#                 elif error_code == 'ThrottlingException':
-#                     error_msg = "Límite de tasa excedido. Por favor, inténtelo de nuevo más tarde"
-#                 error_response = create_error_response(error_msg)
-#                 yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'result': error_response.model_dump()})}\n\n"
+            except TimeoutError as e:
+                logger.error(f"Timeout error in VLM streaming: {e}")
+                error_response = create_error_response("Tiempo de espera de la solicitud agotado")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Tiempo de espera de la solicitud agotado', 'result': error_response.model_dump()})}\n\n"
 
-#             except (NoCredentialsError, EndpointConnectionError, ConnectionError) as e:
-#                 logger.error(f"Connection error in agent streaming: {e}")
-#                 error_response = create_error_response("Error de conexión del servicio")
-#                 yield f"data: {json.dumps({'type': 'error', 'message': 'Error de conexión del servicio', 'result': error_response.model_dump()})}\n\n"
+            except ValueError as e:
+                logger.error(f"Invalid input for VLM: {e}")
+                error_msg = str(e)
+                error_response = create_error_response(error_msg)
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'result': error_response.model_dump()})}\n\n"
 
-#             except TimeoutError as e:
-#                 logger.error(f"Timeout error in agent streaming: {e}")
-#                 error_response = create_error_response("Tiempo de espera de la solicitud agotado")
-#                 yield f"data: {json.dumps({'type': 'error', 'message': 'Tiempo de espera de la solicitud agotado', 'result': error_response.model_dump()})}\n\n"
+            except Exception as e:
+                logger.error(f"Unexpected error in VLM streaming: {e}")
+                error_response = create_error_response("Error interno del servidor")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Error interno del servidor', 'result': error_response.model_dump()})}\n\n"
 
-#             except Exception as e:
-#                 logger.error(f"Unexpected error in agent streaming: {e}")
-#                 error_response = create_error_response("Error interno del servidor")
-#                 yield f"data: {json.dumps({'type': 'error', 'message': 'Error interno del servidor', 'result': error_response.model_dump()})}\n\n"
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "X-Accel-Buffering": "no",
+            }
+        )
 
-#         return StreamingResponse(
-#             generate_stream(),
-#             media_type="text/event-stream",
-#             headers={
-#                 "Cache-Control": "no-cache",
-#                 "Connection": "keep-alive",
-#                 "Access-Control-Allow-Origin": "*",
-#                 "X-Accel-Buffering": "no",  # Disable nginx buffering
-#             }
-#         )
-
-#     except ValidationError as e:
-#         logger.error(f"Validation error in agent streaming endpoint: {e}")
-#         error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
-#         raise HTTPException(status_code=422, detail={"result": error_response.model_dump()})
-
-#     except ValueError as e:
-#         logger.error(f"Value error in agent streaming endpoint: {e}")
-#         error_response = create_error_response(str(e))
-#         raise HTTPException(status_code=400, detail={"result": error_response.dict()})
-
-#     except Exception as e:
-#         logger.error(f"Unexpected error in agent streaming endpoint: {e}")
-#         error_response = create_error_response("Error interno del servidor")
-#         raise HTTPException(status_code=500, detail={"result": error_response.model_dump()})
+    except ValidationError as e:
+        logger.error(f"Validation error in VLM streaming endpoint: {e}")
+        error_response = create_error_response(f"Datos de solicitud inválidos: {str(e)}")
+        raise HTTPException(status_code=422, detail={"result": error_response.model_dump()})

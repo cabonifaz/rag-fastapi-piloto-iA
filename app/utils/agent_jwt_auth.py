@@ -1,4 +1,5 @@
 from typing import Dict, Any, Optional
+from decimal import Decimal
 import jwt
 from datetime import datetime, timezone, timedelta
 import logging
@@ -34,7 +35,6 @@ class AgentJWTAuth:
         try:
             # Helper function to convert Decimal objects to int/float
             def convert_decimal(obj):
-                from decimal import Decimal
                 if isinstance(obj, Decimal):
                     return float(obj) if obj % 1 else int(obj)
                 elif isinstance(obj, dict):
@@ -94,8 +94,6 @@ class AgentJWTAuth:
         Raises:
             HTTPException if token is invalid or expired
         """
-        from fastapi import HTTPException
-
         try:
             payload = jwt.decode(
                 token,

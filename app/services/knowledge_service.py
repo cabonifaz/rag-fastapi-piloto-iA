@@ -164,8 +164,6 @@ class KnowledgeService:
             'results': db_results
         }
 
-    # knowledge_service.py
-
     async def get_document_url(
         self,
         ruta_documento: str,

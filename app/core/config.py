@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # S3 Configuration
     s3_pdfs_bucket: str
     s3_ingest_results_bucket: str
+    s3_chat_files: str
+
+    # VLM Configuration
+    vlm_model_id: str
 
     # n8n Webhook Configuration
     n8n_cc_webhook_url: Optional[str] = None
@@ -115,6 +119,20 @@ class Settings(BaseSettings):
     def validate_context_gatekeeper_model_id(cls, v):
         if not v:
             raise ValueError("Context gatekeeper model ID is required")
+        return v
+
+    @field_validator('vlm_model_id')
+    @classmethod
+    def validate_vlm_model_id(cls, v):
+        if not v:
+            raise ValueError("VLM model ID is required")
+        return v
+
+    @field_validator('s3_chat_files')
+    @classmethod
+    def validate_s3_chat_files(cls, v):
+        if not v:
+            raise ValueError("S3 chat files bucket is required")
         return v
 
     @field_validator('jwt_secret_key')

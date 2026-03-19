@@ -110,6 +110,103 @@ class S3BlobStorage(BlobStoragePort):
             logger.error(f"Unexpected error generating presigned URL: {e}")
             raise ConnectionError(f"S3 presigned URL generation error: {str(e)}")
 
+    async def generate_presigned_upload_urls_batch(
+        self,
+        bucket_name: str,
+        object_keys: List[str],
+        expiration_seconds: int = 300
+    ) -> List[str]:
+        """
+        Generate presigned PUT URLs for multiple objects using a single client session.
+        More efficient than calling generate_presigned_upload_url N times.
+        """
+        try:
+            if not bucket_name or not bucket_name.strip():
+                raise ValueError("Bucket name cannot be empty")
+            if expiration_seconds <= 0:
+                raise ValueError("Expiration seconds must be positive")
+
+            urls = []
+            async with self.session.client('s3', config=self.s3_config) as s3_client:
+                for object_key in object_keys:
+                    if not object_key or not object_key.strip():
+                        raise ValueError(f"Object key cannot be empty")
+                    url = await s3_client.generate_presigned_url(
+                        'put_object',
+                        Params={'Bucket': bucket_name, 'Key': object_key},
+                        ExpiresIn=expiration_seconds,
+                        HttpMethod='PUT'
+                    )
+                    urls.append(url)
+
+            logger.debug(f"Generated {len(urls)} presigned upload URLs for bucket {bucket_name}")
+            return urls
+
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            logger.error(f"AWS ClientError generating batch presigned URLs: {error_code} - {e}")
+            raise ConnectionError(f"S3 error generating presigned URLs: {error_code}")
+
+        except NoCredentialsError as e:
+            logger.error(f"AWS credentials error: {e}")
+            raise ConnectionError("AWS credentials not configured or invalid")
+
+        except EndpointConnectionError as e:
+            logger.error(f"AWS endpoint connection error: {e}")
+            raise ConnectionError("Unable to connect to AWS S3 service")
+
+        except ValueError:
+            raise
+
+        except Exception as e:
+            logger.error(f"Unexpected error generating batch presigned URLs: {e}")
+            raise ConnectionError(f"S3 presigned URL generation error: {str(e)}")
+
+    async def generate_presigned_download_urls_batch(
+        self,
+        bucket_name: str,
+        object_keys: List[str],
+        expiration_seconds: int = 300,
+        as_attachment: bool = False
+    ) -> List[str]:
+        """
+        Generate presigned GET URLs for multiple objects using a single client session.
+        """
+        try:
+            urls = []
+            async with self.session.client('s3', config=self.s3_config) as s3_client:
+                for object_key in object_keys:
+                    params: Dict[str, Any] = {'Bucket': bucket_name, 'Key': object_key}
+                    if as_attachment:
+                        params['ResponseContentDisposition'] = f'attachment; filename="{object_key.split("/")[-1]}"'
+                    url = await s3_client.generate_presigned_url(
+                        'get_object',
+                        Params=params,
+                        ExpiresIn=expiration_seconds,
+                        HttpMethod='GET'
+                    )
+                    urls.append(url)
+
+            logger.debug(f"Generated {len(urls)} presigned download URLs for bucket {bucket_name}")
+            return urls
+
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            logger.error(f"AWS ClientError generating batch download URLs: {error_code} - {e}")
+            raise ConnectionError(f"S3 error generating presigned URLs: {error_code}")
+
+        except NoCredentialsError as e:
+            logger.error(f"AWS credentials error: {e}")
+            raise ConnectionError("AWS credentials not configured or invalid")
+
+        except EndpointConnectionError as e:
+            logger.error(f"AWS endpoint connection error: {e}")
+            raise ConnectionError("Unable to connect to AWS S3 service")
+
+        except Exception as e:
+            logger.error(f"Unexpected error generating batch download URLs: {e}")
+            raise ConnectionError(f"S3 presigned URL generation error: {str(e)}")
+
     async def generate_presigned_download_url(
         self,
         bucket_name: str,

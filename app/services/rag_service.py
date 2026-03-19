@@ -28,6 +28,9 @@ from app.workflows.rag_workflow import (
     generate_metadata_events,
     stream_llm_response
 )
+from app.workflows.vlm_workflow import get_compiled_vlm_workflow
+from app.workflows.helpers.service_helpers import build_vlm_initial_state, validate_vlm_workflow_state
+from app.workflows.helpers.streaming_helpers import stream_vlm_response
 from app.workflows.llm_only_workflow import (
     get_compiled_llm_only_workflow,
     build_llm_only_initial_state,
@@ -76,7 +79,8 @@ class RagService:
         orchestrator: Optional[QueryAnalysisPort] = None,
         llm_nonstreaming_provider: LLMNonStreamingPort = None,
         llm_only_provider: LLMNonStreamingPort = None,
-        tts_provider = None  # Optional: inject for connection reuse
+        tts_provider = None,  # Optional: inject for connection reuse
+        vlm_provider = None,
     ):
         """
         Initialize RagService with all dependencies injected.
@@ -103,204 +107,7 @@ class RagService:
         self.llm_nonstreaming_provider = llm_nonstreaming_provider
         self.llm_only_provider = llm_only_provider
         self.tts_provider = tts_provider
-
-    # async def agent_orchestrator_stream(self, user_id: int, user: str, message: str, company_id: int, company: str, area_id: int, area: str, id_ia_area: int, db: Session, top_k: int = None, similarity_threshold: float = None, alpha: float = None, temperature: float = None, max_tokens: int = None, external_token: str = None):
-    #     """
-    #     Analyze user query using the agent orchestrator model to determine workflow requirements.
-    #     Enhanced version that accepts all process_rag_query_stream parameters for complete context.
-    #     """
-    #     try:
-    #         # Validate inputs
-    #         if not message or not message.strip():
-    #             raise ValueError("Message cannot be empty")
-    #         if not user_id:
-    #             raise ValueError("User ID is required")
-    #         if not company or not company.strip():
-    #             raise ValueError("Company ID is required and cannot be empty")
-    #         if not area or not area.strip():
-    #             raise ValueError("Area is required and cannot be empty")
-    #         if id_ia_area is None:
-    #             raise ValueError("ID IA Area is required and cannot be empty")
-    #         if not external_token or not external_token.strip():
-    #             raise ValueError("External token is required and cannot be empty")
-    #
-    #         # Use injected orchestrator
-    #         if not self.orchestrator:
-    #             raise ValueError("Orchestrator not configured for this service instance")
-    #
-    #         orchestrator = self.orchestrator
-    #
-    #         # Load IA area role behavior configuration
-    #         role_behavior = await self.ia_config_service.get_ia_area_config(db, id_ia_area)
-    #
-    #         # Clean user query
-    #         user_query = clean_user_query(message)
-    #
-    #         # Define available APIs (this could be loaded from config)
-    #         available_apis = [
-    #             {
-    #                 "method": "GET",
-    #                 "endpoint": "/bdt/talent/list",
-    #                 "description": "Table: talents, Columns: idTalento, nombres, apellidoPaterno, apellidoMaterno, imagen, puesto, pais, ciudad, idModalidadFacturacion, montoInicialPlanilla, montoFinalPlanilla, montoInicialRxH, montoFinalRxH, moneda, estrellas, esFavorito, idMonedaPlan, idMonedaRxh",
-    #                 "params": {
-    #                     "nPag": { "type": "integer", "required": False },
-    #                     "search": { "type": "string", "required": False },
-    #                     "techAbilities": { "type": "string", "required": False },
-    #                     "idEnglishLevel": { "type": "integer", "required": False },
-    #                     "idTalentCollection": { "type": "integer", "required": False }
-    #                 }
-    #             }
-    #         ]
-    #
-    #         # Call orchestrator to analyze the query
-    #         analysis = await orchestrator.analyze_query(user_query, available_apis)
-    #
-    #         # Generate tasks from analysis
-    #         tasks = TaskGenerator.generate_tasks_from_analysis(analysis, available_apis, user_query)
-    #
-    #         # Execute tasks sequentially
-    #         query_embedding = None
-    #         context_text = ""
-    #         execution_failed = False
-    #
-    #         for task in tasks:
-    #             if execution_failed:
-    #                 break
-    #             if task.get("action") == "embedding":
-    #                 try:
-    #                     query_text = task.get("input", user_query)
-    #                     query_embedding = await self.embeddings_provider.embed(query_text)
-    #                 except Exception as e:
-    #                     execution_failed = True
-    #                     break  # Stop execution if embedding fails
-    #
-    #             elif task.get("action") == "retrieval":
-    #                 try:
-    #                     if query_embedding is None:
-    #                         # Generate embedding if not already done
-    #                         query_embedding = await self.embeddings_provider.embed(user_query)
-    #
-    #                     # Use semantic_query from analysis if available, otherwise use user_query
-    #                     semantic_query = analysis.get("semantic_query", "").strip() if analysis.get("semantic_query") else user_query
-    #
-    #                     # Perform hybrid search using vectorstore directly
-    #                     search_results = await self.vectorstore.search_in_collection_hybrid(
-    #                         company_id=company_id,
-    #                         area_id=area_id,
-    #                         query_text=semantic_query,
-    #                         query_vector=query_embedding,
-    #                         top_k=top_k,
-    #                         similarity_threshold=similarity_threshold,
-    #                         alpha=alpha
-    #                     )
-    #
-    #                     # Build context from retrieved documents using utility function
-    #                     context_text = build_context_from_search_results(search_results)
-    #                 except Exception as e:
-    #                     execution_failed = True
-    #                     break  # Stop execution if retrieval fails
-    #
-    #             elif task.get("action") == "api_call":
-    #                 try:
-    #                     method = task.get("method", "GET").upper()
-    #                     if method == "GET":
-    #                         api_result = await httpx_get(task.get("endpoint", ""), external_token, task.get("params", {}))
-    #                     else:
-    #                         api_result = await httpx_post(task.get("endpoint", ""), external_token, task.get("params", {}))
-    #
-    #                     # Add API result to context only if there's actual data
-    #                     if api_result.get("success") and api_result.get("data"):
-    #                         api_data = json.dumps(api_result['data'])
-    #                         if api_data and api_data.strip() not in ["{}", "[]", "null"]:
-    #                             # Format API call result with metadata
-    #                             api_context_parts = []
-    #                             api_context_parts.append(f"API Call:")
-    #                             api_context_parts.append(f"Endpoint: {task.get('endpoint', 'N/A')}")
-    #                             api_context_parts.append(f"Params: {json.dumps(task.get('params', {}))}")
-    #                             api_context_parts.append(f"Response:\n{api_data}")
-    #
-    #                             formatted_api_context = "\n".join(api_context_parts)
-    #
-    #                             # Add separator if context already has content
-    #                             if context_text:
-    #                                 context_text += "\n\n"
-    #                             context_text += formatted_api_context
-    #
-    #                 except Exception as e:
-    #                     execution_failed = True
-    #                     break  # Stop execution if API call fails
-    #
-    #             elif task.get("action") == "llm_response":
-    #                 try:
-    #                     # Check if we have any context at all
-    #                     if not context_text or context_text.strip() == "":
-    #                         # No context available - return predefined message
-    #                         yield {
-    #                             "type": "chunk",
-    #                             "content": NO_CONTEXT_MESSAGE
-    #                         }
-    #                         break
-    #
-    #                     # Prepare the query, checking for format requirements
-    #                     query_to_use = user_query
-    #                     task_format = task.get("format")
-    #                     if task_format:
-    #                         if task_format.lower() == "list":
-    #                             query_to_use = f"{user_query}. IMPORTANT: Format the list items as a compact markdown list in a single line per item, including only the key and necessary information for clear understanding. If there is additional text content after the list, continue with it as plain text below the list."
-    #                         elif task_format.lower() == "table":
-    #                             query_to_use = f"{user_query}. IMPORTANT: Provide your response in the same language as the question. If explanation or summary is needed, include it briefly before the table. Then present the tabular data as a well-structured markdown table, showing ALL rows and ALL columns without adding empty or duplicate rows. Convert headers to natural language in the same language as the question, and ensure the table is properly aligned and easy to read. If there is additional text content after the table, continue with it as plain text below the table."
-    #
-    #                     # Build prompt with context (we know context_text exists here)
-    #                     model_config = self.llm_provider.get_model_config()
-    #                     prompt = model_config.build_rag_prompt(query_to_use, context_text)
-    #
-    #                     # Use provided parameters or fall back to environment defaults
-    #                     llm_temperature = temperature if temperature is not None else settings.llm_temperature
-    #                     llm_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
-    #
-    #                     # Track if assistant metadata has been sent
-    #                     agent_timestamp_sent = False
-    #
-    #                     # Stream response using utility function for consistent stop reason handling
-    #                     async for chunk in generate_text_stream_with_validation(
-    #                         llm_provider=self.llm_provider,
-    #                         prompt=prompt,
-    #                         max_tokens=llm_max_tokens,
-    #                         temperature=llm_temperature,
-    #                         role_behavior=role_behavior
-    #                     ):
-    #                         # Send agent metadata on first chunk
-    #                         if not agent_timestamp_sent:
-    #                             agent_timestamp = str(int(time.time() * 1000))
-    #                             yield {
-    #                                 "type": "assistant_metadata",
-    #                                 "sender": 2,  # 2 = agent
-    #                                 "created_at": agent_timestamp
-    #                             }
-    #                             agent_timestamp_sent = True
-    #
-    #                         # Yield each chunk for streaming (same format as process_rag_query_stream)
-    #                         yield {
-    #                             "type": "chunk",
-    #                             "content": chunk
-    #                         }
-    #
-    #                 except Exception as e:
-    #                     execution_failed = True
-    #                     break  # Stop execution if LLM response fails
-    #
-    #         # Send completion signal
-    #         yield {
-    #             "type": "complete",
-    #             "status": "success"
-    #         }
-    #
-    #     except Exception as e:
-    #         logger.error(f"Error in agent_orchestrator_stream: {e}")
-    #         yield {
-    #             "type": "error",
-    #             "content": f"An error occurred: {str(e)}"
-    #         }
+        self.vlm_provider = vlm_provider
 
 
     async def process_rag_query_stream(
@@ -658,4 +465,72 @@ class RagService:
                     "idTipoMensaje": 1,
                     "mensaje": f"Error al procesar la consulta anónima: {str(e)}"
                 }
+            }
+
+    async def process_vlm_query_stream(
+        self,
+        user_id: int,
+        message: str,
+        company_id: int,
+        area_id: int,
+        db,
+        created_at: str,
+        filenames: list,
+        chat_id: str = None,
+        request_timezone: str = None,
+        vlm_mode: str = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        VLM streaming: build attachment keys → save message → call VLM → stream response
+        Uses pre-compiled VLM LangGraph workflow.
+        """
+        try:
+            app = get_compiled_vlm_workflow()
+
+            initial_state = build_vlm_initial_state(
+                user_id=user_id,
+                message=message,
+                company_id=company_id,
+                area_id=area_id,
+                created_at=created_at,
+                filenames=filenames,
+                chat_id=chat_id,
+                request_timezone=request_timezone,
+                vlm_mode=vlm_mode,
+            )
+
+            yield {"type": "progress", "message": "Analizando imágenes..."}
+
+            result_state = None
+            async for state in app.astream(initial_state, stream_mode="values"):
+                result_state = state
+
+            result_state = validate_vlm_workflow_state(result_state)
+
+            for event in generate_metadata_events(result_state, area_id, company_id):
+                yield event
+
+            async for chunk_event in stream_vlm_response(
+                state=result_state,
+                vlm_provider=self.vlm_provider,
+                message_service=self.message_service,
+                db=db,
+            ):
+                yield chunk_event
+
+            yield {"type": "complete", "status": "success"}
+
+        except ValueError as e:
+            logger.error(f"VLM workflow error: {e}")
+            yield {
+                "type": "error",
+                "message": str(e),
+                "result": {"idTipoMensaje": 1, "mensaje": str(e)}
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error in VLM streaming: {e}", exc_info=True)
+            yield {
+                "type": "error",
+                "message": "Unexpected error",
+                "result": {"idTipoMensaje": 1, "mensaje": f"Error inesperado: {str(e)}"}
             }

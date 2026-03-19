@@ -23,12 +23,13 @@ class MessageResponse(BaseModel):
     created_at: str
     sender: int
     message: str
+    attachment_keys: Optional[List[str]] = None
+    attachment_urls: Optional[List[str]] = None
 
 
 class MessageListResponse(BaseModel):
     """Response for listing messages"""
     messages: List[MessageResponse]
-    total_count: int
     last_evaluated_key: Optional[dict] = None  # For pagination
 
 
@@ -42,3 +43,11 @@ class GetMessagesByChat(BaseModel):
     chat_id: str
     company_id: int
     area_id: int
+
+
+class GenerateAttachmentPresignedUrlsRequest(BaseModel):
+    """Request to generate presigned PUT URLs for chat attachment uploads"""
+    company_id: int
+    area_id: int
+    filenames: List[str]
+    timestamp: str

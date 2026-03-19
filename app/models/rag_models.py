@@ -1,7 +1,7 @@
 """Chat request models for RAG endpoints."""
 
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 class UnifiedRequest(BaseModel):
@@ -71,3 +71,16 @@ class AgentStreamingRequest(BaseModel):
     area_id: int                            # Required, area ID for database operations
     created_at: str                         # Message date
     external_token: str                     # Required, external system authentication token
+
+
+class VLMRequest(BaseModel):
+    """Request Schema for VLM streaming endpoint."""
+    message: str
+    user_id: int
+    company_id: int
+    area_id: int
+    created_at: str
+    filenames: List[str]
+    chat_id: Optional[int] = None
+    request_timezone: Optional[str] = None
+    vlm_mode: Optional[str] = None

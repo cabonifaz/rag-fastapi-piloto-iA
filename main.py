@@ -57,6 +57,7 @@ async def lifespan(app: FastAPI):
         container.initialize_llm_only_workflow()
         container.initialize_rag_anonymous_workflow()
         container.initialize_llm_only_anonymous_workflow()
+        container.initialize_vlm_workflow()
 
         logger.info("Application startup completed successfully")
     except Exception as e:

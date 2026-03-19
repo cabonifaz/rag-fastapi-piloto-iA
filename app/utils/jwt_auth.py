@@ -1,6 +1,7 @@
 from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
+from decimal import Decimal
 import jwt
 from datetime import datetime, timezone, timedelta
 import logging
@@ -19,7 +20,6 @@ class JWTAuth:
         try:
             # Helper function to convert Decimal objects to int/float
             def convert_decimal(obj):
-                from decimal import Decimal
                 if isinstance(obj, Decimal):
                     return float(obj) if obj % 1 else int(obj)
                 elif isinstance(obj, dict):
@@ -299,8 +299,6 @@ async def get_current_user_with_company_area_validation(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
     """Get current user and validate company/area access from request by ID_EMPRESA and ID_AREA"""
-    from fastapi import Request
-
     if not credentials:
         logger.warning("No JWT token found in Authorization header")
         raise HTTPException(
