@@ -289,7 +289,6 @@ class DIContainer:
                     api_key=api_key,
                 ),
                 tool_llm_provider=self.get_tool_llm_provider(),
-                message_service=self.get_message_service(),
             )
         return self._mcp_chat_service
 

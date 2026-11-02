@@ -41,19 +41,13 @@ async def mcp_chat_endpoint(
     request: MCPChatRequest,
     service: MCPChatService = Depends(get_mcp_chat_service),
     db: Session = Depends(get_db),
-    current_user: Dict[str, Any] = Depends(
-        get_current_user_with_company_area_validation
-    ),
 ):
     """Generate a Bedrock response using MCP tools, without RAG."""
     try:
         return await service.process(
-            user_id=current_user["ID_USUARIO"],
             message=request.message,
             company_id=request.company_id,
             area_id=request.area_id,
-            created_at=request.created_at,
-            chat_id=request.chat_id,
             db=db,
         )
     except ValueError as exc:

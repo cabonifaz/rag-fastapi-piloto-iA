@@ -29,17 +29,16 @@ class AreaMCPRepository:
         return result is not None
 
     def get_chat_config(
-        self, user_id: int, area_id: int, chat_id: int
+        self, company_id: int, area_id: int
     ) -> Optional[Dict[str, Any]]:
         raw_connection = self.db.connection().connection
         cursor = raw_connection.cursor()
         try:
             cursor.execute(
                 "EXEC dbo.SP_GET_AREA_MCP_CONFIG "
-                "@ID_USUARIO = ?, @ID_AREA = ?, @ID_CHAT = ?",
-                user_id,
+                "@ID_EMPRESA = ?, @ID_AREA = ?",
+                company_id,
                 area_id,
-                chat_id,
             )
             if not cursor.description:
                 return None
