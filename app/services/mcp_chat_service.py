@@ -31,6 +31,7 @@ class MCPChatService:
         message: str,
         company_id: int,
         area_id: int,
+        history: List[Dict[str, str]],
         db: Session,
     ) -> Dict[str, Any]:
         cleaned_message = clean_user_query(message)
@@ -47,7 +48,7 @@ class MCPChatService:
         if not mcp_config:
             raise ValueError("No se encontro una configuracion MCP valida para el chat")
 
-        messages = [{"role": "user", "content": [{"text": cleaned_message}]}]
+        messages = self._to_bedrock_messages(history, cleaned_message)
 
         mcp_client = self.mcp_client_factory(
             mcp_config["URL"],
@@ -79,6 +80,32 @@ class MCPChatService:
                 "mensaje": "Respuesta generada correctamente",
             },
         }
+
+    @staticmethod
+    def _to_bedrock_messages(
+        history: List[Dict[str, str]], current_message: str
+    ) -> List[Dict[str, Any]]:
+        messages: List[Dict[str, Any]] = []
+        for item in history:
+            content = item["content"].strip()
+            if not content:
+                continue
+
+            role = item["role"]
+            if messages and messages[-1]["role"] == role:
+                messages[-1]["content"].append({"text": content})
+            else:
+                messages.append({"role": role, "content": [{"text": content}]})
+
+        while messages and messages[0]["role"] != "user":
+            messages.pop(0)
+
+        if messages and messages[-1]["role"] == "user":
+            messages[-1]["content"].append({"text": current_message})
+        else:
+            messages.append({"role": "user", "content": [{"text": current_message}]})
+
+        return messages
 
     async def _run_tool_loop(
         self,

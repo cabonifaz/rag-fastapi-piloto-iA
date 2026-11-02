@@ -48,6 +48,7 @@ async def mcp_chat_endpoint(
             message=request.message,
             company_id=request.company_id,
             area_id=request.area_id,
+            history=[item.model_dump() for item in request.history],
             db=db,
         )
     except ValueError as exc:
