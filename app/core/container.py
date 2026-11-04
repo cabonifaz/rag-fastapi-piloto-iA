@@ -14,6 +14,7 @@ from app.services.users_service import UsersService
 from app.services.agents_service import AgentsService
 from app.services.menu_items_service import MenuItemsService
 from app.services.parametros_service import ParametrosService
+from app.services.mcp_chat_service import MCPChatService
 
 from app.domain.ports.embeddings_port import EmbeddingsPort
 from app.domain.ports.vectorstore_port import VectorStorePort
@@ -25,6 +26,7 @@ from app.domain.ports.context_gatekeeper_port import ContextGatekeeperPort
 from app.domain.ports.transcribe_port import TranscribePort
 from app.domain.ports.file_transcribe_port import FileTranscribePort
 from app.domain.ports.blob_storage_port import BlobStoragePort
+from app.domain.ports.tool_calling_llm_port import ToolCallingLLMPort
 
 # Infrastructure imports
 from app.infrastructure.embeddings.aws_embeddings import AWSBedrockEmbeddingsProvider
@@ -39,6 +41,8 @@ from app.infrastructure.transcriber.aws_transcribe_streaming import AWSTranscrib
 from app.infrastructure.transcriber.openai_transcribe import OpenAITranscribe
 from app.infrastructure.blob_storages.s3_storage import S3BlobStorage
 from app.infrastructure.vlm.aws_bedrock_converse_provider import AWSBedrockVLMProvider
+from app.infrastructure.llm.aws_bedrock_tool_provider import AWSBedrockToolProvider
+from app.infrastructure.mcp.streamable_http_client import StreamableHTTPMCPClient
 
 
 class DIContainer:
@@ -70,6 +74,8 @@ class DIContainer:
         self._menu_items_service = None
         self._parametros_service = None
         self._vlm_provider = None
+        self._tool_llm_provider = None
+        self._mcp_chat_service = None
 
     def get_embeddings_provider(self) -> EmbeddingsPort:
         """Get embeddings provider instance (singleton)."""
@@ -267,6 +273,24 @@ class DIContainer:
             self._message_service = MessageService()
 
         return self._message_service
+
+    def get_tool_llm_provider(self) -> ToolCallingLLMPort:
+        """Get the Bedrock tool-calling provider singleton."""
+        if self._tool_llm_provider is None:
+            self._tool_llm_provider = AWSBedrockToolProvider()
+        return self._tool_llm_provider
+
+    def get_mcp_chat_service(self) -> MCPChatService:
+        """Get the MCP chat application service singleton."""
+        if self._mcp_chat_service is None:
+            self._mcp_chat_service = MCPChatService(
+                mcp_client_factory=lambda server_url, api_key: StreamableHTTPMCPClient(
+                    server_url,
+                    api_key=api_key,
+                ),
+                tool_llm_provider=self.get_tool_llm_provider(),
+            )
+        return self._mcp_chat_service
 
     def get_recontextualizer(self) -> RecontextualizerPort:
         """Get query recontextualizer as singleton."""
